@@ -1,6 +1,6 @@
 [project]
 name = "fileshare"
-version = "0.1.0"
+version = "0.2.0"
 description = "tix.severin.io/share — end-to-end encrypted file share between devices"
 requires-python = ">=3.11"
 license = "Apache-2.0"
