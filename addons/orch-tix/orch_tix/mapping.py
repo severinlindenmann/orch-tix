@@ -109,7 +109,7 @@ def _full(doc: dict, sync_log: bool, context_artifacts, widgets=None) -> dict:
 
 _MOVE_KEYS = ("who", "kind", "label", "ref", "why", "epic")
 _ITEM_KEYS = ("source", "kind", "name", "sha256", "task", "ac")
-# schema 1.7: a receipt's facts and its step names; the commands and the output stay on the desktop
+# schema 1.8: a receipt's facts and its step names; the commands and the output stay on the desktop
 _RUN_KEYS = ("exit", "timed_out", "commit", "dirty", "at", "seconds", "check", "repo")
 _STEP_KEYS = ("name", "status", "seconds")
 _BY = re.compile(r"^(human:you|agent:[A-Za-z0-9._-]{1,40})(?::[0-9A-Za-z-]{1,8})?$")
@@ -174,7 +174,7 @@ def _title(doc: dict, context_artifacts) -> dict:
     out["context_artifacts"] = _context(context_artifacts)
     # schema 1.5 artifacts: names, kinds, the pinned sha256 and what they prove; the labels (free text) stay at full
     out["artifact_items"] = [_item(i) for i in doc.get("artifact_items") or [] if isinstance(i, dict)]
-    # schema 1.7: an open or backlog ticket nobody touched for a while; a number, no text
+    # schema 1.8: an open or backlog ticket nobody touched for a while; a number, no text
     rv = doc.get("revalidate")
     if isinstance(rv, dict) and isinstance(rv.get("idle_days"), int) and not isinstance(rv.get("idle_days"), bool):
         out["revalidate"] = {"idle_days": rv["idle_days"]}
