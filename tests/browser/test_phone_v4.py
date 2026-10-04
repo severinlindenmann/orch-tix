@@ -99,7 +99,8 @@ def test_ticket_journey_never_names_who_agreed_without_a_signed_ledger(phone_pag
     expect(j.locator(".journey-words")).to_have_text("Asked ✓ · Agreed ✓ · Doing · Proven · Done")
     assert j.locator(".seg5 i").evaluate_all("els => els.map(e => e.className)") == [
         "seg-done", "seg-done", "seg-doing", "seg-todo", "seg-todo"]
-    expect(j.locator(".journey-who")).to_have_text("Agreed: req + plan, approval not signed here")
+    # schema 1.6 `signed` (now in the vectors): unsigned gates say so, still without naming anyone
+    expect(j.locator(".journey-who")).to_have_text("Agreed: req + plan not signed here")
     assert "you" not in j.inner_text().split()
 
 

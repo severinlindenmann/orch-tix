@@ -147,12 +147,23 @@ def test_move_and_together_reach_the_phone_per_level():
 
 # -- schema 1.7: receipts, who added an artifact, idle tickets ------------------------------------------------------
 
+# A receipt item as orch-core 1.7 sends it (built here, so these tests do not depend on which orch-core is installed)
+RECEIPT = {"source": "file", "kind": "receipt", "label": "T2 verify: test failed with exit 1 at 1a2b3c4",
+           "name": "receipt-T2-20261002T090000Z.log", "sha256": "5" * 64, "task": "T2",
+           "by": "agent:claude-code:7f3c9a21",
+           "run": {"exit": 1, "timed_out": False, "commit": "1a2b3c4" + "0" * 33, "dirty": False,
+                   "at": "2026-10-02T09:00Z", "seconds": 42, "check": "verify",
+                   "steps": [{"name": "build", "status": "pass", "seconds": 30},
+                             {"name": "test", "status": "fail", "seconds": 12}]}}
+DOC17 = {**DOC, "artifact_items": [i for i in DOC.get("artifact_items") or [] if i.get("kind") != "receipt"] + [RECEIPT]}
+
+
 def _receipt(doc):
     return next(i for i in doc["artifact_items"] if i.get("kind") == "receipt")
 
 
 def test_title_keeps_receipt_facts_and_step_names_not_commands():
-    d = redact(DOC, "title", sync_log=False, context_artifacts=[])
+    d = redact(DOC17, "title", sync_log=False, context_artifacts=[])
     item = _receipt(d)
     assert item["run"]["exit"] == 1 and item["run"]["check"] == "verify" and item["run"]["dirty"] is False
     assert [(s["name"], s["status"]) for s in item["run"]["steps"]] == [("build", "pass"), ("test", "fail")]
@@ -160,7 +171,7 @@ def test_title_keeps_receipt_facts_and_step_names_not_commands():
 
 
 def test_title_names_who_added_an_artifact_without_the_session():
-    item = _receipt(redact(DOC, "title", sync_log=False, context_artifacts=[]))
+    item = _receipt(redact(DOC17, "title", sync_log=False, context_artifacts=[]))
     assert item["by"] == "agent:claude-code"
 
 
@@ -175,11 +186,11 @@ def test_title_keeps_idle_days_and_key_only_drops_it():
     doc = {**DOC, "revalidate": {"idle_days": 40, "x": "leak"}}
     assert redact(doc, "title", sync_log=False, context_artifacts=[])["revalidate"] == {"idle_days": 40}
     assert "revalidate" not in redact(doc, "key-only", sync_log=False, context_artifacts=[])
-    assert redact(DOC, "title", sync_log=False, context_artifacts=[]).get("revalidate") is None
+    assert redact(DOC17, "title", sync_log=False, context_artifacts=[]).get("revalidate") is None
 
 
 def test_full_passes_receipts_through():
-    d = redact(DOC, "full", sync_log=False, context_artifacts=[])
+    d = redact(DOC17, "full", sync_log=False, context_artifacts=[])
     assert _receipt(d)["run"]["steps"][1]["status"] == "fail"
 
 
@@ -223,8 +234,8 @@ def test_title_summary_stops_at_every_line_separator():
 
 def test_title_keeps_which_checkout_a_receipt_ran_in():
     items = [{**i, "run": {**i["run"], "repo": "acme-app"}} if i.get("kind") == "receipt" else i
-             for i in DOC["artifact_items"]]
-    d = redact({**DOC, "artifact_items": items}, "title", sync_log=False, context_artifacts=[])
+             for i in DOC17["artifact_items"]]
+    d = redact({**DOC17, "artifact_items": items}, "title", sync_log=False, context_artifacts=[])
     assert _receipt(d)["run"]["repo"] == "acme-app"
 
 
