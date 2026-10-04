@@ -5,7 +5,6 @@ answers. Offline the cached list stays with "Offline — as of HH:MM". A cached 
 phone's high-water mark ("seen") is left out, never shown as a rollback, and never moves the mark."""
 import re
 import time
-from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from playwright.sync_api import expect
@@ -284,10 +283,7 @@ def test_an_expired_session_on_settings_ends_on_login(phone_page, mirror_with_qu
     page.wait_for_function("async () => !!(await caches.match('/settings'))")   # the cached Settings shell
     context.clear_cookies()
     page.goto(base + "/settings")
-    # Which spelling of the same destination the page lands on depends on a race: settings.js sends an
-    # already-cleared browser to "/login?next=/settings", the 401 path through loginHref() encodes it.
-    # Either way the sign-in page's next is /settings, so wait for that, not for one spelling.
-    page.wait_for_url(lambda u: urlsplit(u).path == "/login" and parse_qs(urlsplit(u).query).get("next") == ["/settings"])
+    page.wait_for_url(re.compile(r"/login\?next=%2Fsettings$"))
 
 
 def test_rows_left_out_of_the_cached_list_are_counted_offline(phone_page, mirror_with_question, context):

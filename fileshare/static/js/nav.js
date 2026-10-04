@@ -23,7 +23,8 @@ export function safeNext(raw, origin = globalThis.location?.origin) {
 // The login link for this page: path and query only, never the fragment (review fix round 1).
 export function loginHref(loc = globalThis.location) {
   const path = loc.pathname === "/pair" ? "/" : loc.pathname + (loc.search || "");
-  return `/login?next=${encodeURIComponent(path)}`;
+  // Same-origin relative paths only (one leading "/"), else "/"; the login page's safeNext() checks again.
+  return `/login?next=${encodeURIComponent(path.startsWith("/") && !path.startsWith("//") ? path : "/")}`;
 }
 
 export class UnsafeKdfError extends Error {

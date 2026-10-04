@@ -9,6 +9,7 @@ import { confirmDialog, hydrateIcons, toast } from "./ui.js";
 import { relTime } from "./format.js";
 import { loadKeys } from "./keystore.js";
 import { signInAgain } from "./mirrors-data.js";
+import { loginHref } from "./nav.js";
 import { IntegrityError, openSettings, sealSettings } from "./crypto.js";
 import { mountPushCard } from "./pushsettings.js"; // ---- tickets (spec T7, T10): Web Push on this browser
 import { mountPairCard } from "./pair.js"; // ---- pairing (Task 10): Pair with a desktop
@@ -251,7 +252,7 @@ async function main() {
   hydrateIcons();
   const keys = await loadKeys().catch(() => null);
   if (!keys) {
-    location.replace("/login?next=/settings");
+    location.replace(loginHref(location));
     return;
   }
   state.mk = keys.mk;
