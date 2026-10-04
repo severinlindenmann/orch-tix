@@ -55,7 +55,7 @@ jobs:
       - run: uv run pytest -m e2e
 
   browser-shard:
-    # the browser suite split four ways: shard N runs every 4th file of the sorted tests/browser list
+    # the browser suite split four ways by measured duration: shard N runs the tests tests/browser/shard.py assigns it
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: unit
@@ -70,9 +70,7 @@ jobs:
       - run: uv run playwright install --with-deps chromium
       - name: browser tests (shard ${{ matrix.shard }} of 4)
         run: |
-          files=$(ls tests/browser/test_*.py | sort | awk -v s=${{ matrix.shard }} '(NR - 1) % 4 == s - 1')
-          echo "$files"
-          uv run pytest -m browser $files
+          BROWSER_SHARD=${{ matrix.shard }}/4 uv run pytest -m browser tests/browser
 
   browser:
     # the required check: green only when every shard is green
