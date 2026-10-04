@@ -375,13 +375,29 @@ def test_ci_js_timeout_precedes_the_files_and_jobs_are_bounded():
     jobs = text[text.index("jobs:"):]
     # Windows jobs were removed on purpose; the PowerShell installer keeps its static checks in `client`.
     assert "windows-latest" not in jobs and "e2e-windows" not in jobs
-    want = {"unit": 20, "client": 30, "e2e": 20, "browser": 30, "addon": 20}
+    want = {"unit": 20, "client": 30, "e2e": 20, "browser-shard": 30, "browser": 5, "addon": 20}
     found = set(re.findall(r"^  ([a-z0-9-]+):$", jobs, re.M))
     assert found == set(want), found
     for job, minutes in want.items():
         m = re.search(rf"^  {re.escape(job)}:\n(.*?)(?=^  \S|\Z)", jobs, re.M | re.S)
         assert m, job
         assert re.search(rf"^    timeout-minutes: {minutes}$", m.group(1), re.M), job
+
+
+def test_ci_browser_shards_cover_every_browser_file_once_and_browser_aggregates():
+    text = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+    m = re.search(r"^  browser-shard:\n(.*?)(?=^  \S|\Z)", text, re.M | re.S)
+    assert m and "shard: [1, 2, 3, 4]" in m.group(1)
+    shards = [1, 2, 3, 4]
+    # the selection the workflow runs: sorted file list, every 4th starting at the shard index
+    assert "ls tests/browser/test_*.py | sort | awk" in m.group(1)
+    assert "(NR - 1) % 4 == s - 1" in m.group(1) and "-v s=${{ matrix.shard }}" in m.group(1)
+    files = sorted(p.as_posix() for p in (ROOT / "tests" / "browser").glob("test_*.py"))
+    parts = [[f for i, f in enumerate(files) if i % 4 == s - 1] for s in shards]
+    assert sorted(sum(parts, [])) == files and all(parts)
+    agg = re.search(r"^  browser:\n(.*?)(?=^  \S|\Z)", text, re.M | re.S).group(1)
+    assert "if: always()" in agg and "needs: browser-shard" in agg
+    assert 'needs.browser-shard.result }}" = success' in agg
 
 
 def test_ci_runs_on_prs_and_main_only_and_needs_no_secrets():
