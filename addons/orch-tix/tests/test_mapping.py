@@ -134,3 +134,41 @@ def test_move_and_together_reach_the_phone_per_level():
     k = redact(doc, "key-only", sync_log=False, context_artifacts=[])
     assert k["move"] == {"who": "you", "kind": "approve-requirements"}
     assert redact(doc, "full", sync_log=False, context_artifacts=[])["move"]["why"] == "The plan is drafted too."
+
+
+# -- schema 1.7: receipts, who added an artifact, idle tickets ------------------------------------------------------
+
+def _receipt(doc):
+    return next(i for i in doc["artifact_items"] if i.get("kind") == "receipt")
+
+
+def test_title_keeps_receipt_facts_and_step_names_not_commands():
+    d = redact(DOC, "title", sync_log=False, context_artifacts=[])
+    item = _receipt(d)
+    assert item["run"]["exit"] == 1 and item["run"]["check"] == "verify" and item["run"]["dirty"] is False
+    assert [(s["name"], s["status"]) for s in item["run"]["steps"]] == [("build", "pass"), ("test", "fail")]
+    assert "pytest" not in repr(d) and "npm run build" not in repr(d) and "label" not in item
+
+
+def test_title_names_who_added_an_artifact_without_the_session():
+    item = _receipt(redact(DOC, "title", sync_log=False, context_artifacts=[]))
+    assert item["by"] == "agent:claude-code"
+
+
+def test_a_human_stays_human_and_junk_is_dropped():
+    from orch_tix.mapping import _by
+    assert _by("human:you") == "human:you"
+    assert _by("agent:codex:1234abcd") == "agent:codex"
+    assert _by("<img src=x>") is None and _by(None) is None
+
+
+def test_title_keeps_idle_days_and_key_only_drops_it():
+    doc = {**DOC, "revalidate": {"idle_days": 40, "x": "leak"}}
+    assert redact(doc, "title", sync_log=False, context_artifacts=[])["revalidate"] == {"idle_days": 40}
+    assert "revalidate" not in redact(doc, "key-only", sync_log=False, context_artifacts=[])
+    assert redact(DOC, "title", sync_log=False, context_artifacts=[]).get("revalidate") is None
+
+
+def test_full_passes_receipts_through():
+    d = redact(DOC, "full", sync_log=False, context_artifacts=[])
+    assert _receipt(d)["run"]["steps"][1]["status"] == "fail"

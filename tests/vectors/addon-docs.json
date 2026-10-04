@@ -46,7 +46,38 @@
  ],
  "levels": {
   "full": {
-   "artifact_items": [],
+   "artifact_items": [
+    {
+     "by": "agent:claude-code:7f3c9a21",
+     "kind": "receipt",
+     "label": "T2 verify: test failed with exit 1 at 1a2b3c4",
+     "name": "receipt-T2-20261002T090000Z.log",
+     "run": {
+      "at": "2026-10-02T09:00Z",
+      "check": "verify",
+      "commit": "1a2b3c4000000000000000000000000000000000",
+      "dirty": false,
+      "exit": 1,
+      "seconds": 42,
+      "steps": [
+       {
+        "name": "build",
+        "seconds": 30,
+        "status": "pass"
+       },
+       {
+        "name": "test",
+        "seconds": 12,
+        "status": "fail"
+       }
+      ],
+      "timed_out": false
+     },
+     "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+     "source": "file",
+     "task": "T2"
+    }
+   ],
    "artifacts": [
     "report.md"
    ],
@@ -191,7 +222,8 @@
    ],
    "redaction": "full",
    "repos": [],
-   "schema_version": "1.5.0",
+   "revalidate": null,
+   "schema_version": "1.7.0",
    "sections": {
     "Acceptance criteria": "- [ ] Opens in Excel",
     "Ask": "The client needs the readings as CSV.",
@@ -204,6 +236,16 @@
     "Summary": "",
     "Tasks": "- [x] T1 Inventory the meter export jobs\n  - ref: ac:1\n  - note: 14 jobs listed\n- [/] T2 Write the CSV exporter\n  - needs: T1\n  - verify: pytest tests/test_export.py\n- [ ] T3 Ask the client for the delimiter\n  - owner: human",
     "Verification": "All 14 jobs export; Excel opens every file.\nDetails in the report."
+   },
+   "signed": {
+    "plan": {
+     "by": null,
+     "signed": false
+    },
+    "requirements": {
+     "by": null,
+     "signed": false
+    }
    },
    "size": "m",
    "sprint": null,
@@ -301,7 +343,38 @@
    "verdict": null
   },
   "full+log": {
-   "artifact_items": [],
+   "artifact_items": [
+    {
+     "by": "agent:claude-code:7f3c9a21",
+     "kind": "receipt",
+     "label": "T2 verify: test failed with exit 1 at 1a2b3c4",
+     "name": "receipt-T2-20261002T090000Z.log",
+     "run": {
+      "at": "2026-10-02T09:00Z",
+      "check": "verify",
+      "commit": "1a2b3c4000000000000000000000000000000000",
+      "dirty": false,
+      "exit": 1,
+      "seconds": 42,
+      "steps": [
+       {
+        "name": "build",
+        "seconds": 30,
+        "status": "pass"
+       },
+       {
+        "name": "test",
+        "seconds": 12,
+        "status": "fail"
+       }
+      ],
+      "timed_out": false
+     },
+     "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+     "source": "file",
+     "task": "T2"
+    }
+   ],
    "artifacts": [
     "report.md"
    ],
@@ -446,7 +519,8 @@
    ],
    "redaction": "full",
    "repos": [],
-   "schema_version": "1.5.0",
+   "revalidate": null,
+   "schema_version": "1.7.0",
    "sections": {
     "Acceptance criteria": "- [ ] Opens in Excel",
     "Ask": "The client needs the readings as CSV.",
@@ -460,6 +534,16 @@
     "Summary": "",
     "Tasks": "- [x] T1 Inventory the meter export jobs\n  - ref: ac:1\n  - note: 14 jobs listed\n- [/] T2 Write the CSV exporter\n  - needs: T1\n  - verify: pytest tests/test_export.py\n- [ ] T3 Ask the client for the delimiter\n  - owner: human",
     "Verification": "All 14 jobs export; Excel opens every file.\nDetails in the report."
+   },
+   "signed": {
+    "plan": {
+     "by": null,
+     "signed": false
+    },
+    "requirements": {
+     "by": null,
+     "signed": false
+    }
    },
    "size": "m",
    "sprint": null,
@@ -585,12 +669,42 @@
    ],
    "open_questions": 1,
    "redaction": "key-only",
-   "schema_version": "1.5.0",
+   "schema_version": "1.7.0",
    "status": "waiting",
    "updated": "2026-10-02T09:00Z"
   },
   "title": {
-   "artifact_items": [],
+   "artifact_items": [
+    {
+     "by": "agent:claude-code",
+     "kind": "receipt",
+     "name": "receipt-T2-20261002T090000Z.log",
+     "run": {
+      "at": "2026-10-02T09:00Z",
+      "check": "verify",
+      "commit": "1a2b3c4000000000000000000000000000000000",
+      "dirty": false,
+      "exit": 1,
+      "seconds": 42,
+      "steps": [
+       {
+        "name": "build",
+        "seconds": 30,
+        "status": "pass"
+       },
+       {
+        "name": "test",
+        "seconds": 12,
+        "status": "fail"
+       }
+      ],
+      "timed_out": false
+     },
+     "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+     "source": "file",
+     "task": "T2"
+    }
+   ],
    "artifacts": [
     "report.md"
    ],
@@ -714,7 +828,7 @@
     }
    ],
    "redaction": "title",
-   "schema_version": "1.5.0",
+   "schema_version": "1.7.0",
    "size": "m",
    "status": "waiting",
    "tasks": {
@@ -730,7 +844,38 @@
   }
  },
  "source": {
-  "artifact_items": [],
+  "artifact_items": [
+   {
+    "by": "agent:claude-code:7f3c9a21",
+    "kind": "receipt",
+    "label": "T2 verify: test failed with exit 1 at 1a2b3c4",
+    "name": "receipt-T2-20261002T090000Z.log",
+    "run": {
+     "at": "2026-10-02T09:00Z",
+     "check": "verify",
+     "commit": "1a2b3c4000000000000000000000000000000000",
+     "dirty": false,
+     "exit": 1,
+     "seconds": 42,
+     "steps": [
+      {
+       "name": "build",
+       "seconds": 30,
+       "status": "pass"
+      },
+      {
+       "name": "test",
+       "seconds": 12,
+       "status": "fail"
+      }
+     ],
+     "timed_out": false
+    },
+    "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+    "source": "file",
+    "task": "T2"
+   }
+  ],
   "artifacts": [
    "report.md"
   ],
@@ -828,7 +973,8 @@
    }
   ],
   "repos": [],
-  "schema_version": "1.5.0",
+  "revalidate": null,
+  "schema_version": "1.7.0",
   "sections": {
    "Acceptance criteria": "- [ ] Opens in Excel",
    "Ask": "The client needs the readings as CSV.",
@@ -842,6 +988,16 @@
    "Summary": "",
    "Tasks": "- [x] T1 Inventory the meter export jobs\n  - ref: ac:1\n  - note: 14 jobs listed\n- [/] T2 Write the CSV exporter\n  - needs: T1\n  - verify: pytest tests/test_export.py\n- [ ] T3 Ask the client for the delimiter\n  - owner: human",
    "Verification": "All 14 jobs export; Excel opens every file.\nDetails in the report."
+  },
+  "signed": {
+   "plan": {
+    "by": null,
+    "signed": false
+   },
+   "requirements": {
+    "by": null,
+    "signed": false
+   }
   },
   "size": "m",
   "sprint": null,

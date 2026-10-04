@@ -85,6 +85,28 @@ def _full(doc: dict, sync_log: bool, context_artifacts) -> dict:
 
 _MOVE_KEYS = ("who", "kind", "label", "ref", "why", "epic")
 _ITEM_KEYS = ("source", "kind", "name", "sha256", "task", "ac")
+# schema 1.7: a receipt's facts and its step names; the commands and the output stay on the desktop
+_RUN_KEYS = ("exit", "timed_out", "commit", "dirty", "at", "seconds", "check")
+_STEP_KEYS = ("name", "status", "seconds")
+_BY = re.compile(r"^(human:you|agent:[A-Za-z0-9._-]{1,40})(?::[0-9A-Za-z-]{1,8})?$")
+
+
+def _by(value) -> str | None:
+    """Who added an artifact, without the agent's session id: `human:you` or `agent:<harness>`."""
+    m = _BY.match(value) if isinstance(value, str) else None
+    return m.group(1) if m else None
+
+
+def _item(i: dict) -> dict:
+    out = _keep(i, _ITEM_KEYS)
+    by = _by(i.get("by"))
+    if by:
+        out["by"] = by
+    run = i.get("run")
+    if isinstance(run, dict):
+        out["run"] = _keep(run, _RUN_KEYS)
+        out["run"]["steps"] = [_keep(s, _STEP_KEYS) for s in run.get("steps") or [] if isinstance(s, dict)]
+    return out
 
 
 def _move(doc: dict, keys=_MOVE_KEYS) -> dict | None:
@@ -115,7 +137,11 @@ def _title(doc: dict, context_artifacts) -> dict:
     out["artifacts"] = [str(a) for a in doc.get("artifacts") or []]
     out["context_artifacts"] = _context(context_artifacts)
     # schema 1.5 artifacts: names, kinds, the pinned sha256 and what they prove; the labels (free text) stay at full
-    out["artifact_items"] = [_keep(i, _ITEM_KEYS) for i in doc.get("artifact_items") or [] if isinstance(i, dict)]
+    out["artifact_items"] = [_item(i) for i in doc.get("artifact_items") or [] if isinstance(i, dict)]
+    # schema 1.7: an open or backlog ticket nobody touched for a while; a number, no text
+    rv = doc.get("revalidate")
+    if isinstance(rv, dict) and isinstance(rv.get("idle_days"), int) and not isinstance(rv.get("idle_days"), bool):
+        out["revalidate"] = {"idle_days": rv["idle_days"]}
     return out
 
 
