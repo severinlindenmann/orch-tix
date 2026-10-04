@@ -162,8 +162,6 @@ def _key_only(doc: dict) -> dict:
     out["needs"] = _needs(doc)
     out["open_questions"] = open_questions(doc)
     out["gates"] = {name: _keep(g, ("state",)) for name, g in (doc.get("gates") or {}).items() if isinstance(g, dict)}
-    if _signed(doc) is not None:
-        out["signed"] = _signed(doc)
     return out
 
 
