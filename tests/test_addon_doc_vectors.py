@@ -9,12 +9,20 @@ VECTORS = json.loads((Path(__file__).parent / "vectors" / "addon-docs.json").rea
 
 
 def test_the_fixture_is_what_the_addon_makes_of_its_source():
-    assert levels(VECTORS["source"], VECTORS["context_artifacts"], VECTORS["history"]) == VECTORS["levels"]
+    assert levels(VECTORS["source"], VECTORS["context_artifacts"], VECTORS["widgets"], VECTORS["history"]) == VECTORS["levels"]
 
 
 def test_the_fixture_covers_every_level_with_its_redaction():
     assert {k: v["redaction"] for k, v in VECTORS["levels"].items()} == {
-        "full": "full", "full+log": "full", "title": "title", "key-only": "key-only"}
+        "full": "full", "full+widgets": "full", "full+log": "full", "title": "title", "key-only": "key-only"}
+
+
+def test_widgets_ride_along_at_full_only():
+    lv = VECTORS["levels"]
+    assert lv["full+widgets"]["widgets"] == VECTORS["widgets"] and lv["full+widgets"]["widgets_format"] == "orch.widgets.v1"
+    assert all("widgets" not in lv[k] for k in ("full", "full+log", "title", "key-only"))
+    core, template = VECTORS["widgets"]
+    assert core["doc"].startswith("<!doctype html>") and template["file"] == "FILE8" and "doc" not in template
 
 
 def test_the_fixture_source_is_the_current_orch_schema_example():

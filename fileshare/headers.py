@@ -33,6 +33,19 @@ SANDBOX_CSP = (
 
 SANDBOX_PATH = "/sandbox/html"
 
+# The frame a ticket widget is drawn in (orch.widgets.v1, orch-core docs/widgets.md "The frame"): orch's frame
+# policy. The frame's own script is inline in sandbox-widget.html (it writes the posted document), so script-src has
+# no 'self': no file of this origin runs there. Nothing loads from anywhere else and nothing leaves; `sandbox`
+# without allow-same-origin gives it an opaque origin.
+WIDGET_CSP = (
+    "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+    "img-src data: blob:; media-src data: blob:; font-src data:; connect-src 'none'; form-action 'none'; "
+    "base-uri 'none'; frame-ancestors 'self'"
+)
+
+WIDGET_PATH = "/sandbox/widget"
+FRAME_CSP = {SANDBOX_PATH: SANDBOX_CSP, WIDGET_PATH: WIDGET_CSP}
+
 
 class SecurityHeadersMiddleware:
     """Pure ASGI so streamed FileResponses pass through untouched."""
@@ -46,7 +59,7 @@ class SecurityHeadersMiddleware:
             await self.app(scope, receive, send)
             return
         is_api = scope["path"].startswith("/api/")
-        csp_value = SANDBOX_CSP if scope["path"] == SANDBOX_PATH else self._csp
+        csp_value = FRAME_CSP.get(scope["path"], self._csp)
 
         async def send_with_headers(message):
             if message["type"] == "http.response.start":

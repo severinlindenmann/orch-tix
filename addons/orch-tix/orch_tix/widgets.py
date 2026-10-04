@@ -85,11 +85,14 @@ def ticket_panel(addon, view) -> list:
                 ("Shows", LEVEL_LABEL.get(level, level)),
                 ("Last push", f"rev {int(link.get('rev') or 0)}"))),
             Action("push_now", "Sync now", key)]
-    if override == "full":
+    if override:
         body.append(Action("redaction", "Use the workspace setting", key, confirm="Show this ticket as the workspace "
                                                                                  "setting says?"))
+    elif level == "full":
+        body.append(Action("redaction", "Show only the title on the phone", key))
     else:
-        body.append(Action("redaction", "Show in full on the phone", key))
+        body.append(Action("redaction", "Show in full on the phone", key,
+                           confirm="Send all sections of this ticket to the phone?"))
     body.append(Action("unlink", "Stop syncing", key))
     sent = {a.get("name") for a in link.get("context_artifacts") or []}
     try:

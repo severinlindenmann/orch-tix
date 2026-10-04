@@ -159,6 +159,18 @@ class State:
             return not old or old.get("sha256") != failure.get("sha256") or old.get("code") != failure.get("code")
         return self._update("links.json", fn)
 
+    def set_widget_file(self, key: str, wkey: str, rec: dict) -> None:
+        """The FILE a widget document of `key` was shared as (orch_tix.ticket_widgets): {sha, pin, file, at}."""
+        def fn(links):
+            entry = links.setdefault(key, {"gen": 1, "rev": 0})
+            entry.setdefault("widget_files", {})[str(wkey)] = dict(rec)
+        self._update("links.json", fn)
+
+    def drop_widget_file(self, key: str, wkey: str) -> None:
+        def fn(links):
+            (links.get(key) or {}).get("widget_files", {}).pop(str(wkey), None)
+        self._update("links.json", fn)
+
     # -- the "Sent to TIX" log (feedback round E): what left this machine and what came back ------------
     def log(self, entry: dict) -> None:
         """Append one entry (a push, a shared file, a phone decision). Names and counts only, never sealed text."""

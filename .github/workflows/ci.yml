@@ -54,16 +54,34 @@ jobs:
       - run: uv sync --frozen
       - run: uv run pytest -m e2e
 
-  browser:
+  browser-shard:
+    # the browser suite split four ways: shard N runs every 4th file of the sorted tests/browser list
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: unit
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uv sync --frozen
       - run: uv run playwright install --with-deps chromium
-      - run: uv run pytest -m browser
+      - name: browser tests (shard ${{ matrix.shard }} of 4)
+        run: |
+          files=$(ls tests/browser/test_*.py | sort | awk -v s=${{ matrix.shard }} '(NR - 1) % 4 == s - 1')
+          echo "$files"
+          uv run pytest -m browser $files
+
+  browser:
+    # the required check: green only when every shard is green
+    if: always()
+    needs: browser-shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: test "${{ needs.browser-shard.result }}" = success
 
   addon:
     # the orch-tix addon and the CLI round trip, against orch-core main (a public repo: no token, no secrets)

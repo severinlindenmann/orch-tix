@@ -35,6 +35,15 @@ def test_title_carries_the_first_verification_line_only():
     assert "secret path" not in repr(d)
 
 
+def test_title_summary_skips_fenced_blocks():
+    text = '```orch\n{"type": "checks", "title": "secret"}\n```\n\n````md\n```\ninner\n````\nAll green on CI.\nmore'
+    doc = {**DOC, "sections": {**DOC["sections"], "Verification": text}}
+    d = redact(doc, "title", sync_log=False, context_artifacts=[])
+    assert d["verification_summary"] == "All green on CI."
+    only_fence = {**DOC, "sections": {**DOC["sections"], "Verification": "```orch\n{}\n```\n"}}
+    assert "verification_summary" not in redact(only_fence, "title", sync_log=False, context_artifacts=[])
+
+
 def test_title_drops_unknown_keys():
     doc = {**DOC, "x-new-field": "leak me"}
     assert "leak me" not in repr(redact(doc, "title", sync_log=False, context_artifacts=[]))
@@ -181,3 +190,32 @@ def test_the_verification_summary_skips_widget_blocks():
     assert d["verification_summary"] == "- AC1 opens in Excel, checked by hand"
     only = {**DOC, "sections": {**DOC["sections"], "Verification": fence}}
     assert "verification_summary" not in redact(only, "title", sync_log=False, context_artifacts=[])
+
+
+def _summary(text):
+    doc = {**DOC, "sections": {**DOC["sections"], "Verification": text}}
+    return redact(doc, "title", sync_log=False, context_artifacts=[]).get("verification_summary", "")
+
+
+def test_title_summary_follows_commonmark_fences_and_never_leaks_a_fence_body():
+    # a 4-space-indented backtick line is code inside the fence, not its close
+    assert _summary('```orch\n{"x": 1}\n    ```\nSECRET fence body\n```\nprose') == "prose"
+    assert _summary("```orch\n{}\n    ```\nSECRET fence body") == ""          # unclosed: the body never goes
+    assert _summary("```\nSECRET\n``` trailing\nSECRET2\n```\nok") == "ok"      # text after the run: not a close
+    assert _summary("~~~\nSECRET\n```\nSECRET2\n~~~\nok") == "ok"             # tildes close on tildes only
+    assert _summary("````\nSECRET\n```\nSECRET2\n````\nok") == "ok"           # nested shorter run stays inside
+    assert _summary("```\nSECRET\n~~~\nSECRET2\n```\nok") == "ok"
+    assert _summary("``` a`b\nStill prose") == "``` a`b"                         # backtick in the info: no fence
+    assert _summary("   ```\nSECRET\n   ```\nok") == "ok"                        # up to 3 spaces opens and closes
+    assert _summary("    ```\nindented code is prose to this rule") == "```"      # 4 spaces: no fence
+    assert _summary("\n\n  All green.  \nmore") == "All green."
+
+
+def test_title_summary_stops_at_every_line_separator():
+    for sep in ("\u2028", "\u2029", "\x85", "\x0b", "\x0c", "\r", "\r\n", "\n"):
+        assert _summary(f"prose{sep}SECRET") == "prose", repr(sep)
+    assert _summary("prose \u2028SECRET") == "prose"
+    out = _summary("prose\r```orch\rSECRET\r```")
+    assert out == "prose" and "SECRET" not in out
+    assert _summary("```orch\rSECRET\r```\rok") == "ok"
+    assert _summary("```orch\r\nSECRET\r\n```\r\nok") == "ok"

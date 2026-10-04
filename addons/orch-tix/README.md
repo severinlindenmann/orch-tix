@@ -46,11 +46,24 @@ Then, in this workspace:
 |---|---|---|
 | `sharing_path` | `""` | Absolute path of the `sharing` CLI. It is the only binary this addon runs. |
 | `link_mode` | `auto-on-question` | `off`, `manual`, `auto-on-question` or `all-active` |
-| `redaction` | `title` | `full` (everything but the log), `title` (title, questions and options, gate states and what each gate hash covers, task progress) or `key-only` |
+| `redaction` | `title` | `full` (everything but the log, with the ticket widgets: their text, core documents inline, agent HTML as a context file), `title` (title, questions and options, gate states and what each gate hash covers, task progress) or `key-only` |
+| `sync_widget_docs` | `never` | `always` sends agent-HTML widgets as a 7-day context file (their HTML and data); `never` sends their text alternative only |
 | `sync_log` | `false` | With `full`, also send the last 20 log lines |
 
 The phone's history comes from orch events, not the Log: the last 20 entries of who did what ("you approved the plan", "claude-code started T2"). `title` sends only what happened; `full` adds the free text an event carries (a change request's message, a close reason, a log line); `key-only` sends none. The addon keeps the last 30 entries per linked ticket in `history.json`, with the text only for tickets shown in full. The event log is writable by agents, so a human event reads "human (desktop log)", never "you"; decisions applied through the addon (phone answers) are recorded too.
 | `sync_artifacts` | `on-request` | `never`, `on-request` (artifacts marked for context, plus "Send to phone") or `always` |
+
+**Turning widgets on.** The defaults stay private: `redaction: title` and `sync_widget_docs: never`. A workspace opts
+in with `redaction: full` (the ticket's sections and each widget's text and core document) and, for agent-HTML
+widgets as files, `sync_widget_docs: always` (not with `sync_artifacts: never`). Per ticket, the panel offers "Show
+only the title on the phone" (workspace level full) or "Show in full on the phone" (below full), and "Use the
+workspace setting" to clear it.
+
+**How a widget is checked.** Desktop: orch-core pins each template and file in the fence and refuses a drifted one
+before the addon sees it. Phone: every entry carries `raw_sha256`, the digest of its fence text (which contains
+those pins), and every document `sha256`, the digest of its exact bytes, inline or as the FILE. The phone hashes
+the fence it displays and the document it decrypted; a mismatch, a missing pin or a document over the size cap
+keeps the text and never creates the frame. Widgets are matched to fences by section and `raw_sha256`.
 
 **Background sync.** "Keep syncing while Mission Control runs" (Workspace & addons) is off by default. Turn it on
 to receive phone answers while no Mission Control tab is open.

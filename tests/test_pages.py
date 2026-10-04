@@ -55,7 +55,7 @@ def test_pages_say_their_build_for_the_service_worker(client, settings, monkeypa
     """X-Build: the worker caches a page only for its own build (sw.js cacheablePage)."""
     monkeypatch.setenv("FS_BUILD", "b77")
     _mark_initialized(settings)
-    for path in ("/setup", "/login", "/files", "/pair", "/sandbox/html"):
+    for path in ("/setup", "/login", "/files", "/pair", "/sandbox/html", "/sandbox/widget"):
         r = client.get(path)
         assert r.status_code == 200, path
         assert r.headers["x-build"] == "b77", path
@@ -90,9 +90,10 @@ def test_static_js_revalidates(client):
 
 
 class _InlineAudit(html.parser.HTMLParser):
-    def __init__(self, stamp_suffix="?v={{BUILD}}"):
+    def __init__(self, stamp_suffix="?v={{BUILD}}", inline_ok=False):
         super().__init__()
         self.stamp_suffix = stamp_suffix
+        self.inline_ok = inline_ok     # /sandbox/widget alone: its CSP has no 'self', so its one script is inline
         self.problems = []
 
     def handle_starttag(self, tag, attrs):
@@ -104,15 +105,16 @@ class _InlineAudit(html.parser.HTMLParser):
         self.problems += [f"{k}= on <{tag}>" for k in a if k.startswith("on")]
         if tag == "script":
             if "src" not in a:
-                self.problems.append("inline <script>")
+                if not self.inline_ok:
+                    self.problems.append("inline <script>")
             elif not a["src"].endswith(self.stamp_suffix):
                 self.problems.append(f"unstamped script {a['src']}")
             # Classic scripts only for the vendored libraries (Task 19), which expose globals, and
-            # sandbox-frame.js (spec T15): from the sandbox's opaque origin, a `type="module"` fetch
-            # is cross-origin and gets blocked, so that one script must stay classic.
+            # the two sandbox frames' scripts (spec T15, ticket widgets): from a sandbox's opaque origin, a
+            # `type="module"` fetch is cross-origin and gets blocked, so those scripts must stay classic.
             src = a.get("src", "")
-            classic_ok = src.startswith("/static/vendor/") or src.startswith("/static/js/sandbox-frame.js")
-            if a.get("type") != "module" and not classic_ok:
+            classic_ok = src.startswith(("/static/vendor/", "/static/js/sandbox-frame.js"))
+            if a.get("type") != "module" and not classic_ok and not ("src" not in a and self.inline_ok):
                 self.problems.append("classic <script> (must be type=module)")
         if tag == "link" and a.get("rel") == "stylesheet" and not a.get("href", "").endswith(self.stamp_suffix):
             self.problems.append(f"unstamped stylesheet {a.get('href')}")
@@ -120,7 +122,7 @@ class _InlineAudit(html.parser.HTMLParser):
 
 @pytest.mark.parametrize("page", HTML_FILES, ids=lambda p: p.name)
 def test_html_has_no_inline_script_or_style(page):
-    audit = _InlineAudit()
+    audit = _InlineAudit(inline_ok=page.name == "sandbox-widget.html")
     audit.feed(page.read_text(encoding="utf-8"))
     assert audit.problems == []
 
@@ -171,7 +173,7 @@ ICON_LINKS = (
 
 # The sandbox frame (spec T15) is never navigated to directly or bookmarked: it's loaded invisibly
 # inside a sandboxed iframe to render an attachment, so it carries no icons, manifest or PWA tags.
-ICON_HTML_FILES = [p for p in HTML_FILES if p.name != "sandbox.html"]
+ICON_HTML_FILES = [p for p in HTML_FILES if p.name not in ("sandbox.html", "sandbox-widget.html")]
 
 
 @pytest.mark.parametrize("page", ICON_HTML_FILES, ids=lambda p: p.name)
@@ -265,7 +267,7 @@ def test_manifest_file_is_the_served_body(client):
 # The public-link viewer (§17) and the upload-link drop page (upload-links spec) are not the app:
 # someone without an account can't install them. The sandbox frame (spec T15) is likewise never
 # installed (see ICON_HTML_FILES above).
-APP_HTML_FILES = [p for p in HTML_FILES if p.name not in ("public.html", "drop.html", "sandbox.html")]
+APP_HTML_FILES = [p for p in HTML_FILES if p.name not in ("public.html", "drop.html", "sandbox.html", "sandbox-widget.html")]
 
 
 @pytest.mark.parametrize("page", APP_HTML_FILES, ids=lambda p: p.name)
@@ -314,7 +316,7 @@ def test_precache_list_is_served(client):
     r = client.get("/static/precache.json")
     assert r.status_code == 200
     body = r.json()
-    assert body["pages"] == ["/", "/t", "/files", "/settings", "/login", "/sandbox/html", "/pair"]
+    assert body["pages"] == ["/", "/t", "/files", "/settings", "/login", "/sandbox/html", "/sandbox/widget", "/pair"]
     for path in body["assets"]:
         if path.startswith("/static/"):
             assert (pages.STATIC_DIR / path.removeprefix("/static/")).is_file(), path

@@ -196,6 +196,13 @@ def sandbox_html(request: Request):
     return render_page("sandbox", request.app.state.settings, "no-cache")
 
 
+@router.get("/sandbox/widget")
+def sandbox_widget(request: Request):
+    """The frame a ticket widget is drawn in (js/widgets.js): like /sandbox/html, its own CSP (WIDGET_CSP), no
+    session; the ticket page posts the widget's document over postMessage."""
+    return render_page("sandbox-widget", request.app.state.settings, "no-cache")
+
+
 @router.get("/sw.js")
 def service_worker():
     """Served from the root so its scope can be / (§16)."""
