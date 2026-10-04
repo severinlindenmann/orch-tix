@@ -143,3 +143,22 @@ def test_move_and_together_reach_the_phone_per_level():
     k = redact(doc, "key-only", sync_log=False, context_artifacts=[])
     assert k["move"] == {"who": "you", "kind": "approve-requirements"}
     assert redact(doc, "full", sync_log=False, context_artifacts=[])["move"]["why"] == "The plan is drafted too."
+
+
+def _summary(text):
+    doc = {**DOC, "sections": {**DOC["sections"], "Verification": text}}
+    return redact(doc, "title", sync_log=False, context_artifacts=[]).get("verification_summary", "")
+
+
+def test_title_summary_follows_commonmark_fences_and_never_leaks_a_fence_body():
+    # a 4-space-indented backtick line is code inside the fence, not its close
+    assert _summary('```orch\n{"x": 1}\n    ```\nSECRET fence body\n```\nprose') == "prose"
+    assert _summary("```orch\n{}\n    ```\nSECRET fence body") == ""          # unclosed: the body never goes
+    assert _summary("```\nSECRET\n``` trailing\nSECRET2\n```\nok") == "ok"      # text after the run: not a close
+    assert _summary("~~~\nSECRET\n```\nSECRET2\n~~~\nok") == "ok"             # tildes close on tildes only
+    assert _summary("````\nSECRET\n```\nSECRET2\n````\nok") == "ok"           # nested shorter run stays inside
+    assert _summary("```\nSECRET\n~~~\nSECRET2\n```\nok") == "ok"
+    assert _summary("``` a`b\nStill prose") == "``` a`b"                         # backtick in the info: no fence
+    assert _summary("   ```\nSECRET\n   ```\nok") == "ok"                        # up to 3 spaces opens and closes
+    assert _summary("    ```\nindented code is prose to this rule") == "```"      # 4 spaces: no fence
+    assert _summary("\n\n  All green.  \nmore") == "All green."

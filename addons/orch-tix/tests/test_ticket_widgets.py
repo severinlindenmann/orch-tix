@@ -11,6 +11,7 @@ from orch.core.ops import Ops
 pytest.importorskip("orch.widgets", reason="needs orch-core with ticket widgets")
 
 AGENT = Actor("agent", "claude-code", "cli", "s1")
+HUMAN = Actor("human", "you", "tty")
 BARS = {"type": "stats", "title": "Bundle size", "source": "size.txt", "items": [{"label": "main.js", "value": "412 kB"}]}
 MATRIX = {"widget": "decision-matrix@1", "title": "Storage", "data": {
     "scale": {"min": 0, "max": 10}, "pick": "sqlite",
@@ -31,7 +32,15 @@ def pinned(ws, block: dict) -> dict:
     return {**block, "sha256": current}
 
 
-def _ticket(tix_ws, tix, settings: dict) -> str:
+def html_on(ws) -> None:
+    """Agent HTML turned on the human's way (a signed ledger entry plus the config), as orch-core's own tests do;
+    the ledger is the isolated one of the orch_user_dir fixture."""
+    Ops(ws, HUMAN).set_widgets_html(True)
+
+
+def _ticket(tix_ws, tix, settings: dict, *, html: bool = True) -> str:
+    if html:
+        html_on(tix_ws.ws)
     tix_ws.enable("orch-tix", {"sharing_path": SHARING, **settings})
     ops = Ops(tix_ws.ws, AGENT)
     tid = ops.new("Export").id
@@ -112,6 +121,7 @@ def test_end_to_end_documents_are_real_frames_with_kit_and_data(tix_ws, tix, run
         shared[argv[argv.index("--name") + 1]] = Path(argv[2]).read_text(encoding="utf-8")
         return ok(argv, {"id": f"FILE{100 + len(shared)}"})
     runner.handlers["share"] = share
+    html_on(tix_ws.ws)
     tix_ws.enable("orch-tix", {"sharing_path": SHARING, "redaction": "full", "sync_widget_docs": "always"})
     ops = Ops(tix_ws.ws, AGENT)
     tid = ops.new("Export").id
@@ -276,3 +286,11 @@ def test_full_without_sharing_when_artifacts_are_never_sent(tix_ws, tix, runner)
     _ticket(tix_ws, tix, {"redaction": "full", "sync_widget_docs": "always", "sync_artifacts": "never"})
     matrix = runner.files[-1]["doc"]["widgets"][1]
     assert "file" not in matrix and "sha256" not in matrix and not _shares(runner)
+
+
+def test_with_agent_html_off_on_the_desktop_no_note_page_is_ever_shared(tix_ws, tix, runner):
+    tid = _ticket(tix_ws, tix, {"redaction": "full", "sync_widget_docs": "always"}, html=False)
+    bars, matrix = runner.files[-1]["doc"]["widgets"]
+    assert "doc" in bars and set(matrix) == {"section", "index", "key", "layer", "name", "title", "text", "raw_sha256"}
+    assert "off" in matrix["text"].lower() or matrix["text"]       # the text alternative still goes
+    assert not _shares(runner) and _files_of(tix, tid) == {}

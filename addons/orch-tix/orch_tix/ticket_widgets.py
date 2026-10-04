@@ -45,7 +45,7 @@ def entries(addon, ctx, key: str, *, share: bool) -> list[dict]:
                 e["doc"] = doc
                 e["sha256"] = exact_sha(doc)
                 inline_total += size
-            elif share:
+            elif share and _FRAME_META in doc:        # agent HTML only: never the "turn agent HTML on" note page
                 fid, pin = _shared(addon, ctx, key, b, doc)
                 if fid:
                     e["file"], e["sha256"] = fid, pin
@@ -53,6 +53,7 @@ def entries(addon, ctx, key: str, *, share: bool) -> list[dict]:
     return out
 
 
+_FRAME_META = '<meta name="orch-frame" content="'   # what orch-core's frame assembler puts in an agent-HTML document
 _NONCE = re.compile(r'<meta name="orch-frame" content="([A-Za-z0-9_-]{8,64})">')
 
 

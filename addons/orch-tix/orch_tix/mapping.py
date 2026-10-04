@@ -58,20 +58,24 @@ def _keep(doc: dict, keys) -> dict:
     return {k: copy.deepcopy(doc[k]) for k in keys if k in doc}
 
 
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")     # CommonMark, the same rule as js/widget-model.js OPEN
+
+
 def _first_line(text) -> str:
-    """The first prose line: fenced blocks (a ```orch widget, code) are skipped, fence lines included."""
+    """The first prose line, fenced blocks skipped (fence lines included). A fence opens on up to 3 spaces and a run of
+    3+ backticks or tildes (a backtick run with a backtick in its info string is no fence) and closes only on a run of
+    the same character, at least as long, with nothing after it. An unclosed fence runs to the end: nothing."""
     fence = None
-    for line in str(text or "").splitlines():
-        s = line.strip()
-        if s[:3] in ("```", "~~~"):
-            mark = s[: len(s) - len(s.lstrip(s[0]))]
-            if fence is None:
-                fence = mark
-            elif mark[0] == fence[0] and len(mark) >= len(fence) and s == mark:
-                fence = None
-            continue
-        if fence is None and s:
-            return s
+    for line in str(text or "").split("\n"):
+        m = _FENCE.match(line)
+        if fence is None:
+            if m and not (m[1][0] == "`" and "`" in m[2]):
+                fence = m[1]
+                continue
+            if line.strip():
+                return line.strip()
+        elif m and m[1][0] == fence[0] and len(m[1]) >= len(fence) and not m[2].strip():
+            fence = None
     return ""
 
 
