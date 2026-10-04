@@ -39,14 +39,14 @@ async function loadDoc(src) {
   return new TextDecoder().decode(bytes);
 }
 
-function card(w) {
+function card(ticket, w) {
   const src = docSource(w);
   const text = el("pre", { class: "wcard-text" }, w.text || "No text alternative given");
   const box = el("div", { class: "wcard-frame", hidden: true });
   const status = el("span", { class: "wcard-status", role: "status", "aria-live": "polite" });
   const btn = src ? el("button", { type: "button", class: "btn wcard-btn" }, "Show") : null;
   let live = null;
-  const key = openKey(w);
+  const key = openKey(ticket, w);
 
   const stop = (why = "") => {
     if (box.isConnected) openFrames.delete(key);   // a card already replaced by a re-render must not close its successor
@@ -137,7 +137,7 @@ export function sectionBody(doc, name, text) {
     box.className = "section-body";
     box.replaceChildren(...parts.map((p) => {
       if (p.kind === "text") return p.text.trim() ? el("div", { class: "section-text" }, shown(p.text.replace(/^\n+|\n+$/g, ""))) : null;
-      return p.widget ? card(p.widget) : el("div", { class: "section-text" }, shown("```orch\n" + p.raw + "\n```"));
+      return p.widget ? card(doc?.id, p.widget) : el("div", { class: "section-text" }, shown("```orch\n" + p.raw + "\n```"));
     }).filter(Boolean));
   }).catch(() => {});
   return box;
