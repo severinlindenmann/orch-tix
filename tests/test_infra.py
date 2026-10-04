@@ -474,3 +474,11 @@ def test_readme_describes_the_shared_key_line_and_the_switch_over_details():
     for phrase in ("`project`", "`created_by_name`", "`type`"):
         assert phrase in model, phrase
     assert "sharing whoami" in ops
+
+
+@pytest.mark.parametrize("spec", ["0/4", "5/4", "1/0", "x", "2/4/1", "-1/4"])
+def test_a_malformed_or_out_of_range_browser_shard_fails_loudly(spec):
+    env = {**os.environ, "PYTEST_ADDOPTS": "", "BROWSER_SHARD": spec}
+    r = subprocess.run([sys.executable, "-m", "pytest", "-m", "browser", "tests/browser", "--collect-only", "-q"],
+                       cwd=ROOT, env=env, capture_output=True, text=True)
+    assert r.returncode != 0 and "BROWSER_SHARD must look like" in r.stderr + r.stdout

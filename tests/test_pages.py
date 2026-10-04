@@ -394,7 +394,7 @@ def test_settings_without_session_redirects_to_login(client, settings):
     _mark_initialized(settings)
     r = client.get("/settings", follow_redirects=False)
     assert r.status_code == 307
-    assert r.headers["location"] == "/login?next=/settings"
+    assert r.headers["location"] == "/login?next=%2Fsettings"
 
 
 def test_settings_page_served_with_session(owner, monkeypatch):
@@ -462,7 +462,7 @@ def test_needs_and_ticket_without_session_redirect_to_login(client, settings, ro
     _mark_initialized(settings)
     r = client.get(route, follow_redirects=False)
     assert r.status_code == 307
-    assert r.headers["location"] == f"/login?next={nxt}"
+    assert r.headers["location"] == "/login?next=" + nxt.replace("/", "%2F")
 
 
 def test_needs_and_ticket_redirect_to_setup_when_not_initialized(client):
@@ -541,3 +541,10 @@ def test_settings_carries_the_pair_card():
 def test_the_archive_card_says_when_it_is_empty():
     text = (pages.STATIC_DIR / "settings.html").read_text(encoding="utf-8")
     assert '<div id="archive-list" class="archive-list"><p class="muted">No archived tickets.</p></div>' in text
+
+
+def test_login_url_encodes_and_only_allows_a_single_slash_path():
+    assert pages.login_url("/settings") == "/login?next=%2Fsettings"
+    assert pages.login_url("/t/42") == "/login?next=%2Ft%2F42"
+    for bad in ("//evil.com", "https://evil.com", "evil", ""):
+        assert pages.login_url(bad) == "/login?next=%2F"

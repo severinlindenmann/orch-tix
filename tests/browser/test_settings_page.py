@@ -174,7 +174,7 @@ def test_nav_links_settings_on_every_page(ui_page, live_server):
 
 def test_settings_needs_login(page, live_server, sim):
     page.goto(live_server.url + "/settings")
-    page.wait_for_url(re.compile(r"/login\?next=/settings$"))
+    page.wait_for_url(re.compile(r"/login\?next=%2Fsettings$"))
     page.locator("#passphrase").fill(sim.passphrase)
     page.get_by_role("button", name="Log in").click()
     page.wait_for_url(live_server.url + "/settings", timeout=30_000)

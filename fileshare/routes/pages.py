@@ -4,6 +4,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -63,6 +64,14 @@ def render_page(name: str, settings, cache: str = "no-store") -> HTMLResponse:
     return HTMLResponse(html, headers={"Cache-Control": cache, "X-Build": build_stamp()})
 
 
+def login_url(next_path: str) -> str:
+    """The one spelling of the login redirect (same as loginHref() in nav.js): next is percent-encoded and
+    only ever a same-origin path starting with a single "/"; anything else falls back to "/"."""
+    if not next_path.startswith("/") or next_path.startswith("//"):
+        next_path = "/"
+    return f"/login?next={quote(next_path, safe='')}"
+
+
 def _to_setup() -> RedirectResponse:
     return RedirectResponse("/setup", status_code=307)
 
@@ -79,7 +88,7 @@ def _gated(request: Request, conn, name: str, next_path: str):
     token = request.cookies.get(cookie_name(request.app.state.settings))
     h, renewed = renew_session(conn, token)
     if h is None:
-        return RedirectResponse(f"/login?next={next_path}", status_code=307)
+        return RedirectResponse(login_url(next_path), status_code=307)
     if renewed:
         request.state.renew_cookie = token     # CookieRefreshMiddleware re-sends the cookie
     return render_page(name, request.app.state.settings, SHELL_CACHE)

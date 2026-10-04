@@ -2,6 +2,7 @@ import asyncio
 import copy
 import json
 import os
+import re
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -213,7 +214,10 @@ def pytest_collection_modifyitems(config, items):
     if not spec:
         return
     from .shard import assign
-    index, count = (int(x) for x in spec.split("/"))
+    m = re.fullmatch(r"(\d+)/(\d+)", spec)
+    index, count = (int(x) for x in m.groups()) if m else (0, 0)
+    if not 1 <= index <= count:
+        raise pytest.UsageError(f"BROWSER_SHARD must look like 2/4 with 1 <= shard <= total, got {spec!r}")
     here = Path(__file__).parent
     mine = [i for i in items if here in Path(str(i.path)).parents]
     chosen = set(assign([(i.nodeid, Path(str(i.path)).name) for i in mine], count)[index - 1])
