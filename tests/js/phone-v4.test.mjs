@@ -116,6 +116,9 @@ test("who signed: wording per value, only for an approved gate, nothing assumed 
   assert.equal(agreedNote(d({ ...s, plan: s.requirements }, { requirements: ok, plan: ok })), "req + plan by you");
   // an invalidated gate shows no signer, even with a matching ledger entry for its old hash
   assert.equal(agreedNote(d(s, { requirements: ok, plan: inv })), "req by you");
+  // a signed block with no entry for an approved gate never reads as signed
+  assert.equal(agreedNote(d({}, { requirements: ok, plan: ok })), "req + plan not signed here");
+  assert.equal(agreedNote(d({ requirements: s.requirements }, { requirements: ok, plan: ok })), "req by you, plan not signed here");
   assert.equal(doneNote({ status: "done", signed: { verdict: { signed: true, by: "accepted" } } }), "accepted");
   assert.equal(doneNote({ status: "done", signed: { verdict: { signed: false, by: null } } }), "not signed here");
   assert.equal(doneNote({ status: "testing", signed: { verdict: { signed: true, by: "accepted" } } }), "your verdict");

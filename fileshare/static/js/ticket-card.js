@@ -306,7 +306,7 @@ export function agreedNote(doc) {
   if (!approved.length) return "waits for your approval";
   const name = (g) => (g === "requirements" ? "req" : "plan");
   if (!hasSigned(doc)) return `${approved.map(name).join(" + ")}, approval not signed here`;
-  const who = approved.map((g) => signerText(doc.signed[g]));
+  const who = approved.map((g) => signerText(doc.signed[g]) || "not signed here");
   if (who.every((w) => w === who[0])) return `${approved.map(name).join(" + ")} ${who[0]}`.trim();
   return approved.map((g, i) => `${name(g)} ${who[i]}`.trim()).join(", ");
 }
