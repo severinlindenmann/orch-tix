@@ -98,6 +98,9 @@ def _full(doc: dict, sync_log: bool, context_artifacts, widgets=None) -> dict:
     out["sections"] = sections
     out["context_artifacts"] = _context(context_artifacts)
     out["open_questions"] = open_questions(doc)
+    out.pop("signed", None)
+    if _signed(doc) is not None:
+        out["signed"] = _signed(doc)
     if widgets:
         out["widgets"] = copy.deepcopy(widgets)
         out["widgets_format"] = WIDGETS_FORMAT
@@ -114,6 +117,16 @@ def _move(doc: dict, keys=_MOVE_KEYS) -> dict | None:
     return {k: m[k] for k in keys if k in m and isinstance(m[k], (str, type(None)))} if isinstance(m, dict) else None
 
 
+def _signed(doc: dict) -> dict | None:
+    """Schema 1.6 `signed`: per approved gate and for a done verdict, {signed: bool, by: str | None}. Not secret, part
+    of the document. A missing or malformed block (orch-core before 1.6) sends nothing; the phone then shows nothing."""
+    s = doc.get("signed")
+    if not isinstance(s, dict):
+        return None
+    return {k: {"signed": e["signed"], "by": e["by"] if isinstance(e.get("by"), str) else None}
+            for k in ("requirements", "plan", "verdict") if isinstance(e := s.get(k), dict) and isinstance(e.get("signed"), bool)}
+
+
 def _title(doc: dict, context_artifacts) -> dict:
     out = _keep(doc, _ALWAYS + _TITLE_META)
     if _move(doc) is not None:
@@ -128,6 +141,8 @@ def _title(doc: dict, context_artifacts) -> dict:
     summary = _first_line((doc.get("sections") or {}).get("Verification"))
     if summary:
         out["verification_summary"] = summary
+    if _signed(doc) is not None:
+        out["signed"] = _signed(doc)
     out["tasks"] = {"progress": _progress(doc)}
     # schema 1.3: what a verdict must echo, {hash, round}; a hash and a number, no text
     if isinstance(doc.get("verdict"), dict):

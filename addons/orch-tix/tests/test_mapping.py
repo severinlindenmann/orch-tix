@@ -172,3 +172,23 @@ def test_title_summary_stops_at_every_line_separator():
     assert out == "prose" and "SECRET" not in out
     assert _summary("```orch\rSECRET\r```\rok") == "ok"
     assert _summary("```orch\r\nSECRET\r\n```\r\nok") == "ok"
+
+
+def test_signed_block_rides_at_every_level_a_gate_is_shown():
+    signed = {"requirements": {"signed": True, "by": "you"}, "plan": {"signed": False, "by": "by delegation", "mac": "x"},
+              "junk": {"signed": True, "by": "you"}}
+    doc = {**DOC, "signed": signed}
+    want = {"requirements": {"signed": True, "by": "you"}, "plan": {"signed": False, "by": "by delegation"}}
+    for level in ("full", "title"):
+        assert redact(doc, level, sync_log=False, context_artifacts=[])["signed"] == want, level
+    assert "signed" not in redact(doc, "key-only", sync_log=False, context_artifacts=[])
+
+
+def test_a_missing_or_malformed_signed_block_sends_nothing():
+    for bad in (None, "you", [], {"plan": "you"}):
+        doc = {k: v for k, v in DOC.items() if k != "signed"}
+        if bad is not None:
+            doc["signed"] = bad
+        for level in ("title",):
+            out = redact(doc, level, sync_log=False, context_artifacts=[])
+            assert out.get("signed", {}) == {}, (bad, level)
