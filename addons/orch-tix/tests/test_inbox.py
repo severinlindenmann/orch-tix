@@ -353,7 +353,7 @@ def test_done_ticket_unlinks_after_7_days(tix_ws, tix, runner):
     next(p for p in tix.obj.providers if p.id == "health").fetch(tix.ctx.provider_context(), "default", None)
     assert [c for c in runner.calls if c[1:3] == ("mirror", "unlink")]
     link = tix.obj.state.links()[tid]
-    assert link["retired"] is True and link["unlinked_by_hand"] is False
+    assert link["retired"] is True and link["unlinked_by_hand"] is False and link["retired_why"] == "done"
 
 
 def test_full_redaction_with_foreign_devices_warns(tix_ws, tix):

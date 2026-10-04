@@ -209,16 +209,68 @@ def test_gone_after_a_manual_unlink_keeps_it_unlinked_by_hand(tix_ws):
     assert len(_pushes(runner)) == 1
 
 
-def test_a_link_retired_by_gone_is_never_auto_linked(tix_ws):
-    runner = CapturingRunner(strict=True).add(PUSH, stdout_json={"status": "gone", "gen": 1})
+def test_a_link_retired_by_gone_is_relinked_next_cycle(tix_ws):
+    """The server lost the ticket: the next sync cycle links it again as a new generation (--relink)."""
+    runner = CapturingRunner(strict=True)
+    answer = {"r": {"status": "gone", "gen": 1}}
+    runner.handlers["mirror"] = lambda argv, timeout: ok(argv, answer["r"])
     tix = tix_ws.load(ADDON, runner=runner)
     _registry(tix_ws, tix)
     tid = _ask(tix_ws)
     pump_all(tix_ws.ws, tix_ws.ws.addons)
-    assert tix.obj.state.links()[tid]["retired"] is True
+    link = tix.obj.state.links()[tid]
+    assert link["retired"] is True and link["retired_why"] == "gone"
+    answer["r"] = {"status": "pushed", "id": "TIX-9", "gen": 2, "rev": 1}
     Ops(tix_ws.ws, AGENT).ask(tid, [{"text": "And the delimiter?", "options": [";", ","]}])
     pump_all(tix_ws.ws, tix_ws.ws.addons)
-    assert len(_pushes(runner)) == 1 and _pending(tix_ws) == []
+    assert len(_pushes(runner)) == 2 and "--relink" in _pushes(runner)[1] and runner.files[1]["gen"] == 2
+    link = tix.obj.state.links()[tid]
+    assert not link["retired"] and link["n"] == "TIX-9" and _pending(tix_ws) == []
+    assert [e["reason"] for e in tix.obj.state.sent_log()].count("re-linked after the server lost it") == 1
+
+
+def test_a_ticket_that_keeps_coming_back_gone_is_pushed_once_per_cycle(tix_ws):
+    runner = CapturingRunner(strict=True)
+    runner.handlers["mirror"] = lambda argv, timeout: ok(argv, {"status": "gone", "gen": 1})
+    tix = tix_ws.load(ADDON, runner=runner)
+    _registry(tix_ws, tix)
+    tid = _ask(tix_ws)
+    pump_all(tix_ws.ws, tix_ws.ws.addons)
+    Ops(tix_ws.ws, AGENT).ask(tid, [{"text": "And the delimiter?", "options": [";", ","]}])
+    Ops(tix_ws.ws, AGENT).ask(tid, [{"text": "And the quote?", "options": ["'", '"']}])
+    pump_all(tix_ws.ws, tix_ws.ws.addons)
+    assert len(_pushes(runner)) == 2                    # one relink push for the whole cycle, not one per event
+    assert tix.obj.state.links()[tid]["retired"] is True and _pending(tix_ws) == []
+
+
+def test_a_by_hand_unlink_stays_retired_even_when_gone_follows(tix_ws):
+    runner = CapturingRunner(strict=True)
+    tix = tix_ws.load(ADDON, runner=runner)
+    _registry(tix_ws, tix)
+    tid = _ask(tix_ws)
+    pump_all(tix_ws.ws, tix_ws.ws.addons)
+    tix.obj.state.unlink(tid, by_hand=True)
+    assert tix.obj.state.links()[tid]["retired_why"] == "by_hand"
+    Ops(tix_ws.ws, AGENT).ask(tid, [{"text": "And the delimiter?", "options": [";", ","]}])
+    pump_all(tix_ws.ws, tix_ws.ws.addons)
+    assert len(_pushes(runner)) == 1
+
+
+def test_old_retired_entries_without_a_reason(tix_ws):
+    from orch_tix.state import GONE_REASON
+    lost_on_server = lambda st, key, link: st.is_lost(key, link)
+    runner = CapturingRunner(strict=True)
+    tix = tix_ws.load(ADDON, runner=runner)
+    st = tix.obj.state
+    old = {"gen": 1, "rev": 1, "retired": True, "unlinked_by_hand": False}
+    assert not lost_on_server(st, "T-1", old)                                   # no log: stays retired
+    st.log({"kind": "push", "key": "T-1", "result": "refused", "reason": GONE_REASON})
+    assert lost_on_server(st, "T-1", old)                                       # the log says gone
+    assert not lost_on_server(st, "T-1", {**old, "done_at": "2026-01-01T00:00:00+00:00"})   # a done ticket
+    assert not lost_on_server(st, "T-1", {**old, "unlinked_by_hand": True})
+    st.log({"kind": "push", "key": "T-2", "result": "ok", "reason": ""})
+    assert not lost_on_server(st, "T-2", old)
+    assert not lost_on_server(st, "T-1", {**old, "retired_why": "done"})
 
 
 def test_a_done_unlinked_ticket_is_never_auto_linked(tix_ws, tix, runner):
@@ -443,7 +495,79 @@ def test_at_most_four_pinned_images_per_push(tix_ws, tix, runner, tmp_path):
     shared_before = len(_shared(runner))
     from orch_tix.sync import share_pinned
     n = share_pinned(tix.obj, tix.ctx.provider_context(), tid, tix.ctx.document(tid))
-    assert n <= 4 and len(_shared(runner)) - shared_before <= 4
+    assert n == 4 and len(_shared(runner)) - shared_before == 4
+
+
+def test_a_linked_artifact_folder_is_refused(tix_ws, tix, runner, tmp_path):
+    ops = Ops(tix_ws.ws, AGENT)
+    tid = _full_ticket(tix_ws, tix, ops)
+    f = _proof(ops, tid, tmp_path, "a.png")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "a.png").write_bytes(f.read_bytes())
+    folder = f.parent
+    f.unlink()
+    folder.rmdir()
+    folder.symlink_to(elsewhere, target_is_directory=True)           # the ticket's folder becomes a link
+    from orch_tix.cli import SharingError
+    from orch_tix.sync import checked_artifact
+    with pytest.raises(SharingError) as e:
+        checked_artifact(tix.ctx.provider_context(), tid, "a.png")
+    assert e.value.code == "refused"
+    pump_all(tix_ws.ws, tix_ws.ws.addons)
+    assert "a.png" not in _shared(runner)
+
+
+def test_pinned_cap_is_8_mb_and_on_request_keeps_50(tix_ws, tix, runner, tmp_path):
+    ops = Ops(tix_ws.ws, AGENT)
+    tid = _full_ticket(tix_ws, tix, ops)
+    _proof(ops, tid, tmp_path, "big.png", b"\x89PNG" + b"0" * (8 * 1024 * 1024))     # a few bytes past 8 MB
+    from orch_tix.cli import SharingError
+    from orch_tix.sync import MAX_PINNED_BYTES, checked_artifact, share_pinned
+    pctx = tix.ctx.provider_context()
+    n = share_pinned(tix.obj, pctx, tid, tix.ctx.document(tid))
+    assert n == 0 and "big.png" not in _shared(runner)               # refused, never sent
+    with pytest.raises(SharingError, match="larger than"):
+        checked_artifact(pctx, tid, "big.png", max_bytes=MAX_PINNED_BYTES)
+    assert len(checked_artifact(pctx, tid, "big.png")[0]) == 8 * 1024 * 1024 + 4      # on-request: under 50 MB
+
+
+def test_an_os_error_while_copying_is_a_sharing_error_and_the_copy_is_gone(tix_ws, tix, runner, tmp_path, monkeypatch):
+    ops = Ops(tix_ws.ws, AGENT)
+    tid = _full_ticket(tix_ws, tix, ops)
+    _proof(ops, tid, tmp_path, "a.png")
+    from orch_tix import sync
+    from orch_tix.cli import SharingError
+    real = sync.os.fdopen
+
+    def failing(fd, *a, **k):
+        f = real(fd, *a, **k)
+        if a and a[0] == "wb":                                       # only the private copy, not the state files
+            f.write = lambda data: (_ for _ in ()).throw(OSError(28, "No space left on device"))
+        return f
+    monkeypatch.setattr(sync.os, "fdopen", failing)
+    pctx = tix.ctx.provider_context()
+    with pytest.raises(SharingError) as e:
+        sync.share_artifact(tix.obj, pctx, tid, "a.png")
+    assert e.value.code == "retry"
+    assert list(sync.out_dir(pctx).glob("share-*")) == []            # the private copy never stays
+    # through the pinned path nothing escapes: it is noted, not raised
+    assert sync.share_pinned(tix.obj, pctx, tid, tix.ctx.document(tid)) == 0
+    assert list(sync.out_dir(pctx).glob("share-*")) == []
+
+
+def test_the_mirror_push_comes_before_a_failing_share_and_is_kept(tix_ws, tmp_path):
+    runner = CapturingRunner.from_dir(REC, strict=True)
+    runner.recordings = [r for r in runner.recordings if r.argv[1:2] != ("share",)]
+    runner.add(SHARE, returncode=7, stdout_json={"error": "network", "detail": "cannot reach the server"})
+    tix = tix_ws.load(ADDON, runner=runner)
+    ops = Ops(tix_ws.ws, AGENT)
+    tid = _full_ticket(tix_ws, tix, ops)
+    _proof(ops, tid, tmp_path, "proof.png")
+    pump_all(tix_ws.ws, tix_ws.ws.addons)                            # must not raise
+    kinds = [c[1] for c in runner.calls]
+    assert "share" in kinds and kinds.index("mirror") < kinds.index("share")
+    assert tix.obj.state.links()[tid]["rev"] >= 1                    # the committed push is not undone
 
 
 def test_a_symlinked_or_hard_linked_or_swapped_artifact_is_never_shared(tix_ws, tix, runner, tmp_path):
@@ -502,3 +626,30 @@ def test_a_failed_pinned_share_backs_off_and_is_noted_once(tix_ws, tmp_path):
     assert _shared(runner).count("proof.png") == 1                  # not retried within the hour
     assert sum("proof.png" in e for e in tix.obj.errors) == 1        # noted once
     assert len([e for e in tix.obj.state.sent_log() if e["kind"] == "file" and e["result"] == "retry"]) == 1
+
+
+def test_a_by_hand_unlink_between_the_snapshot_and_the_relink_stays_retired(tix_ws):
+    runner = CapturingRunner(strict=True)
+    answer = {"r": {"status": "gone", "gen": 1}}
+    runner.handlers["mirror"] = lambda argv, timeout: ok(argv, answer["r"])
+    tix = tix_ws.load(ADDON, runner=runner)
+    _registry(tix_ws, tix)
+    tid = _ask(tix_ws)
+    pump_all(tix_ws.ws, tix_ws.ws.addons)
+    st = tix.obj.state
+    assert st.links()[tid]["retired_why"] == "gone"
+    real = st.relink_if_lost
+    st.relink_if_lost = lambda key: (st.unlink(key, by_hand=True), real(key))[1]   # the click lands just before
+    Ops(tix_ws.ws, AGENT).ask(tid, [{"text": "And the delimiter?", "options": [";", ","]}])
+    pump_all(tix_ws.ws, tix_ws.ws.addons)
+    link = st.links()[tid]
+    assert link["retired"] is True and link["unlinked_by_hand"] is True and len(_pushes(runner)) == 1
+
+
+def test_gone_keeps_a_done_reason(tix_ws):
+    tix = tix_ws.load(ADDON, runner=CapturingRunner(strict=True))
+    st = tix.obj.state
+    st.link("T-1", by="you", auto=False)
+    st.unlink("T-1", by_hand=False)
+    st.retire("T-1", 1)
+    assert st.links()["T-1"]["retired_why"] == "done" and not st.relink_if_lost("T-1")
