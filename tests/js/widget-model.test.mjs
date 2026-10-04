@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import {
   MAX_INLINE_BYTES, chipText, clampHeight, docSource, docWidgets, frameMessage, readCapped, sectionParts, sha256Hex,
-  splitText, textOnly, verifyDoc, withNonce, withTheme,
+  openFrames, openKey, splitText, textOnly, verifyDoc, withNonce, withTheme,
 } from "../../fileshare/static/js/widget-model.js";
 import { verificationSummary } from "../../fileshare/static/js/mirror-model.js";
 
@@ -193,4 +193,16 @@ test("in a frame nothing of the frame script lands on window", () => {
   vm.runInContext(FRAME, context);
   assert.equal("__tixWidgetFrame" in context, false);
   assert.deepEqual(listeners, ["message"]);
+});
+
+test("an open frame is kept by section, fence digest and document pin; any change is another key", () => {
+  const w = { section: "Findings", raw_sha256: "a".repeat(64), sha256: "b".repeat(64) };
+  const key = openKey("T-1", w);
+  openFrames.add(key);
+  assert.ok(openFrames.has(openKey("T-1", { ...w })), "same widget after a re-render");
+  assert.ok(!openFrames.has(openKey("T-1", { ...w, sha256: "c".repeat(64) })), "changed document pin");
+  assert.ok(!openFrames.has(openKey("T-1", { ...w, raw_sha256: "d".repeat(64) })), "changed fence");
+  assert.ok(!openFrames.has(openKey("T-1", { ...w, section: "Other" })), "another section");
+  assert.ok(!openFrames.has(openKey("T-2", w)), "another ticket");
+  openFrames.delete(key);
 });
