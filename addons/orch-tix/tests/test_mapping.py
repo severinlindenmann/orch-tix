@@ -53,7 +53,7 @@ def test_title_drops_unknown_keys():
 def test_key_only_has_no_text():
     d = redact(DOC, "key-only", sync_log=False, context_artifacts=[{"name": "plot.png", "file": "FILE91"}])
     assert set(d) <= {"schema_version", "id", "status", "needs", "created", "updated", "open_questions", "gates",
-                      "redaction", "move"}
+                      "redaction", "move", "signed"}
     assert set(d.get("move", {})) <= {"who", "kind"}                  # whose move and which kind, no label
     assert d["gates"]["plan"] == {"state": "approved"} and d["open_questions"] == 1
     assert "Export the meter" not in repr(d) and "timestamp" not in repr(d) and "plot.png" not in repr(d)
@@ -172,3 +172,22 @@ def test_title_summary_stops_at_every_line_separator():
     assert out == "prose" and "SECRET" not in out
     assert _summary("```orch\rSECRET\r```\rok") == "ok"
     assert _summary("```orch\r\nSECRET\r\n```\r\nok") == "ok"
+
+
+def test_signed_block_rides_at_every_level_a_gate_is_shown():
+    signed = {"requirements": {"signed": True, "by": "you"}, "plan": {"signed": False, "by": "by delegation", "mac": "x"},
+              "junk": {"signed": True, "by": "you"}}
+    doc = {**DOC, "signed": signed}
+    want = {"requirements": {"signed": True, "by": "you"}, "plan": {"signed": False, "by": "by delegation"}}
+    for level in ("full", "title", "key-only"):
+        assert redact(doc, level, sync_log=False, context_artifacts=[])["signed"] == want, level
+
+
+def test_a_missing_or_malformed_signed_block_sends_nothing():
+    for bad in (None, "you", [], {"plan": "you"}):
+        doc = {k: v for k, v in DOC.items() if k != "signed"}
+        if bad is not None:
+            doc["signed"] = bad
+        for level in ("title", "key-only"):
+            out = redact(doc, level, sync_log=False, context_artifacts=[])
+            assert out.get("signed", {}) == {}, (bad, level)

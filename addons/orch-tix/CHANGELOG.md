@@ -2,6 +2,8 @@
 
 ## 0.2.0
 
+- The mirrored document carries orch-core's `signed` block (schema 1.6) at full, title and key-only, cleaned to `{signed, by}` per gate and verdict; the phone names who signed each approved gate and the verdict. An older orch-core sends none and the phone keeps its "not signed here" wording.
+- A held decision's reason on the phone comes from `RemoteResult.code` (orch-core API 2.4); unknown codes fall back by status, and message matching stays only for an orch-core that sends no code.
 - Phone v4: at `full`, pinned images the gated text shows or that prove a criterion are shared (once, at most 4 per push) so the phone can show them after verifying their sha256; `title` keeps artifact items without labels.
 - Ticket widgets (orch.widgets.v1) reach the phone at redaction full: each block's text alternative, a core
   type's document inline (up to 128 KiB each, 512 KiB per ticket), agent HTML as text only unless `sync_widget_docs = always` (default `never`; `redaction` stays `title` until a workspace sets `full`) (then a 7-day context FILE, not with

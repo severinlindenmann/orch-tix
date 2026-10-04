@@ -502,3 +502,33 @@ def test_a_held_decision_is_acked_waiting_with_its_reason(tix_ws, asked, message
     assert [c[1:5] for c in runner.calls if c[1:3] == ("inbox", "ack")] == [("inbox", "ack", "dec_" + "a" * 32, code)]
     rec = tix.obj.state.decisions()["dec_" + "a" * 32]
     assert rec["outcome"] is None and rec["waiting_acked"] is True      # still on the desktop for an Apply
+
+
+# ---- orch-core API 2.4: the reason is RemoteResult.code, never the message text ----
+
+def _held(tix_ws, asked, result, did="a" * 32):
+    tix = tix_ws.load(ADDON, runner=CapturingRunner(strict=False))
+    tix.obj.state.link(asked, by="auto", auto=True)
+    tix.ctx.remote_hook = FakeRemote(result)
+    tix.obj.inbox_receive(tix.ctx.provider_context(), [_decision(asked, _q(tix_ws, asked), did=did)], now=NOW)
+    return tix.obj.state.decisions()["dec_" + did]
+
+
+@pytest.mark.parametrize("code,waiting", [
+    ("not-paired", "waiting-unpaired"), ("bad-signature", "waiting-signature"),
+    ("kind-switched-off", "waiting-switched-off"), ("implausible-time", "waiting-time"),
+    ("malformed", "waiting-check"), ("kind-not-allowed", "waiting-check"), ("question-not-found", "waiting-check"),
+    ("refused-retry", "waiting-check"), ("a-code-from-the-future", "waiting-check")])
+def test_a_pending_code_picks_the_waiting_reason_whatever_the_message_says(tix_ws, asked, code, waiting):
+    rec = _held(tix_ws, asked, RemoteResult("pending", "the signature is not paired and switched off", code=code))
+    assert rec["outcome"] is None and rec["waiting"] == waiting
+
+
+def test_refused_final_is_final_and_refused_retry_keeps_waiting(tix_ws, asked):
+    assert _held(tix_ws, asked, RemoteResult("stale", "validation refused", code="refused-final"))["outcome"] == "stale"
+    retry = _held(tix_ws, asked, RemoteResult("pending", "try later", code="refused-retry"), did="c" * 32)
+    assert retry["outcome"] is None and retry["waiting"] == "waiting-check"
+
+
+def test_an_unknown_code_falls_back_by_status(tix_ws, asked):
+    assert _held(tix_ws, asked, RemoteResult("superseded", "x", code="new-code"))["outcome"] == "superseded"
