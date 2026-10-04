@@ -7,6 +7,7 @@ import { anyHidden } from "./textsafe.js";
 // decrypted orch schema doc. A decision is the v1 body of spec §4.2, sealed later by mirror-crypto.js:
 //   {v: 1, decision_id, space, ticket: <local key>, kind, target, value, note, device, at, voice?}
 // There is no `mac` here: a paired phone adds `pair` and `mac` afterwards (pairing.js signDecision).
+import { textOnly } from "./widget-model.js";
 
 export const NEEDS_LABEL = Object.freeze({
   question: "Agent needs input",
@@ -420,7 +421,7 @@ const firstLine = (text) => String(text ?? "").split("\n").map((l) => l.trim()).
 // The verification summary: one line.
 export function verificationSummary(doc) {
   if (typeof doc?.verification_summary === "string" && doc.verification_summary.trim()) return firstLine(doc.verification_summary);
-  return firstLine(doc?.sections?.Verification);
+  return firstLine(textOnly(doc?.sections?.Verification));
 }
 
 // The ticket's history from orch events, as the orch-tix addon sends it (doc.history: {seq, at, who, what, text?};

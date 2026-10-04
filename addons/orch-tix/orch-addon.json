@@ -1,5 +1,5 @@
 {
-  "name": "orch-tix", "title": "TIX", "version": "0.1.0", "requires_api": "2", "kind": "in-process",
+  "name": "orch-tix", "title": "TIX", "version": "0.2.0", "requires_api": "2", "kind": "in-process",
   "description": "Mirror tickets that need you to the TIX phone app, bring phone decisions back, and share files.",
   "capabilities": ["provider", "page", "panel", "decisions", "settings", "events"],
   "slots": ["today.summary", "today.from_addons", "ticket.sync", "workspace.settings"],
@@ -12,14 +12,15 @@
     {"key": "link_mode", "label": "Link tickets", "type": "select", "options": ["off", "manual", "auto-on-question", "all-active"], "default": "auto-on-question"},
     {"key": "redaction", "label": "Show on the phone", "type": "select", "options": ["full", "title", "key-only"], "default": "title"},
     {"key": "sync_log", "label": "Send agent log lines", "type": "bool", "default": false},
-    {"key": "sync_artifacts", "label": "Send artifacts", "type": "select", "options": ["never", "on-request", "always"], "default": "on-request"}
+    {"key": "sync_artifacts", "label": "Send artifacts", "type": "select", "options": ["never", "on-request", "always"], "default": "on-request"},
+    {"key": "sync_widget_docs", "label": "Send agent-HTML widgets (their HTML and data, as files)", "type": "select", "options": ["never", "always"], "default": "never"}
   ],
   "actions": [
     {"id": "link", "label": "Sync to TIX"},
     {"id": "unlink", "label": "Stop syncing", "confirm": "Remove this ticket from the phone?"},
     {"id": "push_now", "label": "Sync now"},
     {"id": "send_artifact", "label": "Send to phone"},
-    {"id": "redaction", "label": "Show in full on the phone", "confirm": "Send all sections of this ticket to the phone?"},
+    {"id": "redaction", "label": "Change what the phone shows", "confirm": "Change what this ticket shows on the phone?"},
     {"id": "download", "label": "Download"},
     {"id": "save_to_ticket", "label": "Attach to ticket"},
     {"id": "upload", "label": "Upload", "accepts_file": {"max_bytes": 209715200}},

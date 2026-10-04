@@ -87,6 +87,24 @@ def test_ticket_panel_linked(tix_ws, tix, tmp_path):
     assert {("push_now", tid), ("redaction", tid), ("unlink", tid), ("send_artifact", f"{tid}|plot.png")} <= actions
 
 
+def _labels(tix_ws, tix, override=None):
+    tid = Ops(tix_ws.ws, AGENT).new("Export").id
+    tix.obj.state.link(tid, by="you", auto=False)
+    if override:
+        tix.obj.state.set_redaction(tid, override)
+    t = store.load(tix_ws.ws, tid)[1]
+    ws = tix.obj.widgets("ticket.sync", _view(tix_ws, tix, "ticket.sync", t))
+    return [w.label for w in _walk(ws) if isinstance(w, Action) and w.action == "redaction"]
+
+
+def test_ticket_redaction_action_flips_against_the_workspace_level(tix_ws, tix):
+    assert _labels(tix_ws, tix) == ["Show in full on the phone"]
+    assert _labels(tix_ws, tix, "full") == ["Use the workspace setting"]
+    tix_ws.enable("orch-tix", {"sharing_path": SHARING, "redaction": "full"})
+    assert _labels(tix_ws, tix) == ["Show only the title on the phone"]
+    assert _labels(tix_ws, tix, "title") == ["Use the workspace setting"]
+
+
 def test_summary_tile_only_with_pending_phone_answers(tix_ws, tix):
     assert tix.obj.widgets("today.summary", _view(tix_ws, tix, "today.summary")) == []
     tix.obj.state.put_decision("dec_" + "a" * 32, {"kind": "answer", "ticket": "DEMO-0001", "tix": "TIX-1",

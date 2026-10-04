@@ -6,6 +6,7 @@
     "/settings",
     "/login",
     "/sandbox/html",
+    "/sandbox/widget",
     "/pair"
   ],
   "assets": [
@@ -83,6 +84,8 @@
     "/static/js/ui.js",
     "/static/js/upload.js",
     "/static/js/wakelock.js",
+    "/static/js/widget-model.js",
+    "/static/js/widgets.js",
     "/static/js/zip.js",
     "/static/vendor/markdown-it.min.js",
     "/static/vendor/purify.min.js"

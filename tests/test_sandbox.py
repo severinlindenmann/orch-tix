@@ -2,7 +2,7 @@
 import html.parser
 
 from fileshare import db
-from fileshare.headers import SANDBOX_CSP, csp
+from fileshare.headers import SANDBOX_CSP, WIDGET_CSP, csp
 from fileshare.routes import pages
 
 # Copied verbatim from spec T15 / the plan's "Global Constraints", not imported from
@@ -131,3 +131,43 @@ def test_sandbox_html_markup_on_disk_has_no_inline_script():
     text = (pages.STATIC_DIR / "sandbox.html").read_text(encoding="utf-8")
     assert 'src="/static/js/sandbox-frame.js?v={{BUILD}}"' in text
     _assert_every_script_is_a_src_only_tag(text)
+
+
+# /sandbox/widget: the ticket-widget frame (js/widgets.js, js/widget-frame.js). orch-core's frame policy
+# (docs/widgets.md "The frame"); no 'self' in script-src, the frame's one script is inline. Written out here.
+SPEC_WIDGET_CSP = (
+    "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+    "img-src data: blob:; media-src data: blob:; font-src data:; connect-src 'none'; form-action 'none'; "
+    "base-uri 'none'; frame-ancestors 'self'"
+)
+
+
+def test_sandbox_widget_has_exact_csp_and_needs_no_session(client, settings):
+    for _ in range(2):
+        r = client.get("/sandbox/widget")
+        assert r.status_code == 200
+        assert r.headers.get_list("content-security-policy") == [SPEC_WIDGET_CSP]
+        assert r.headers["cache-control"] == "no-cache"
+        _mark_initialized(settings)
+    assert WIDGET_CSP == SPEC_WIDGET_CSP
+
+
+def test_sandbox_widget_policy_reaches_nothing_outside():
+    for directive in ("connect-src 'none'", "form-action 'none'", "base-uri 'none'", "frame-ancestors 'self'",
+                      "default-src 'none'"):
+        assert directive in WIDGET_CSP
+    assert "http" not in WIDGET_CSP and "unsafe-eval" not in WIDGET_CSP and "allow-same-origin" not in WIDGET_CSP
+
+
+def test_sandbox_widget_variants_keep_the_global_csp(client):
+    for path in ("/sandbox/widget/", "/sandbox/widgets", "/sandbox//widget"):
+        r = client.get(path, follow_redirects=False)
+        assert r.headers["content-security-policy"] == csp(), path
+
+
+def test_sandbox_widget_has_one_inline_script_and_no_self_in_script_src(client):
+    """script-src has no 'self': a file of this origin cannot run in the frame, so the frame's one script is inline."""
+    r = client.get("/sandbox/widget")
+    assert r.text.count("<script") == 1 and "<script src" not in r.text and "{{BUILD}}" not in r.text
+    assert "'self'" not in WIDGET_CSP.split("script-src")[1].split(";")[0]
+    assert "tix-widget" in r.text and "makeAcceptor" in r.text

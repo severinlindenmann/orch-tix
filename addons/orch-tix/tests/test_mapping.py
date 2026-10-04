@@ -35,6 +35,15 @@ def test_title_carries_the_first_verification_line_only():
     assert "secret path" not in repr(d)
 
 
+def test_title_summary_skips_fenced_blocks():
+    text = '```orch\n{"type": "checks", "title": "secret"}\n```\n\n````md\n```\ninner\n````\nAll green on CI.\nmore'
+    doc = {**DOC, "sections": {**DOC["sections"], "Verification": text}}
+    d = redact(doc, "title", sync_log=False, context_artifacts=[])
+    assert d["verification_summary"] == "All green on CI."
+    only_fence = {**DOC, "sections": {**DOC["sections"], "Verification": "```orch\n{}\n```\n"}}
+    assert "verification_summary" not in redact(only_fence, "title", sync_log=False, context_artifacts=[])
+
+
 def test_title_drops_unknown_keys():
     doc = {**DOC, "x-new-field": "leak me"}
     assert "leak me" not in repr(redact(doc, "title", sync_log=False, context_artifacts=[]))

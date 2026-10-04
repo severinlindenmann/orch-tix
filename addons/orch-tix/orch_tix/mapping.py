@@ -19,6 +19,7 @@ _QUESTION_KEYS = ("id", "text", "why", "type", "options", "recommended", "blocki
                   "via")
 _FULL_DROP_SECTIONS = ("Log",)
 LOG_LINES = 20
+WIDGETS_FORMAT = "orch.widgets.v1"
 
 
 def needs_of(doc: dict) -> str | None:
@@ -58,7 +59,20 @@ def _keep(doc: dict, keys) -> dict:
 
 
 def _first_line(text) -> str:
-    return next((line.strip() for line in str(text or "").splitlines() if line.strip()), "")
+    """The first prose line: fenced blocks (a ```orch widget, code) are skipped, fence lines included."""
+    fence = None
+    for line in str(text or "").splitlines():
+        s = line.strip()
+        if s[:3] in ("```", "~~~"):
+            mark = s[: len(s) - len(s.lstrip(s[0]))]
+            if fence is None:
+                fence = mark
+            elif mark[0] == fence[0] and len(mark) >= len(fence) and s == mark:
+                fence = None
+            continue
+        if fence is None and s:
+            return s
+    return ""
 
 
 def _progress(doc: dict) -> dict:
@@ -70,7 +84,7 @@ def _context(context_artifacts) -> list:
     return [{"name": str(a.get("name")), "file": a.get("file")} for a in context_artifacts or [] if isinstance(a, dict)]
 
 
-def _full(doc: dict, sync_log: bool, context_artifacts) -> dict:
+def _full(doc: dict, sync_log: bool, context_artifacts, widgets=None) -> dict:
     out = copy.deepcopy(doc)
     sections = {k: v for k, v in (doc.get("sections") or {}).items() if k not in _FULL_DROP_SECTIONS}
     if sync_log:
@@ -80,6 +94,9 @@ def _full(doc: dict, sync_log: bool, context_artifacts) -> dict:
     out["sections"] = sections
     out["context_artifacts"] = _context(context_artifacts)
     out["open_questions"] = open_questions(doc)
+    if widgets:
+        out["widgets"] = copy.deepcopy(widgets)
+        out["widgets_format"] = WIDGETS_FORMAT
     return out
 
 
@@ -129,11 +146,12 @@ def _key_only(doc: dict) -> dict:
     return out
 
 
-def redact(doc: dict, level: str, *, sync_log: bool, context_artifacts, history=None) -> dict:
-    """`history`: the ticket's entries from orch events (history.py); full sends their text, title only what
+def redact(doc: dict, level: str, *, sync_log: bool, context_artifacts, widgets=None, history=None) -> dict:
+    """`widgets` (orch_tix.ticket_widgets.entries) ride along at full only: below it the sections stay home.
+    `history`: the ticket's entries from orch events (history.py); full sends their text, title only what
     happened, key-only none."""
     if level == "full":
-        out = _full(doc, sync_log, context_artifacts)
+        out = _full(doc, sync_log, context_artifacts, widgets)
     elif level == "key-only":
         out = _key_only(doc)
     else:
@@ -146,9 +164,10 @@ def redact(doc: dict, level: str, *, sync_log: bool, context_artifacts, history=
 
 
 def payload(doc: dict, *, key: str, gen: int, rev: int, level: str, sync_log: bool, context_artifacts,
-            history=None) -> dict:
+            widgets=None, history=None) -> dict:
     """The `sharing mirror push --file` body: cleartext routing fields plus the doc the CLI seals."""
     return {"key": key, "gen": int(gen), "rev": int(rev), "status": str(doc.get("status") or "backlog"),
             "priority": str(doc.get("priority") or "normal"), "needs": needs_of(doc),
             "open_questions": open_questions(doc), "schema_version": str(doc.get("schema_version") or "1.0.0"),
-            "doc": redact(doc, level, sync_log=sync_log, context_artifacts=context_artifacts, history=history)}
+            "doc": redact(doc, level, sync_log=sync_log, context_artifacts=context_artifacts, widgets=widgets,
+                          history=history)}

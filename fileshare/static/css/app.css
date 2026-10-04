@@ -976,6 +976,21 @@ dialog.sheet-confirm[open] { display: flex; flex-direction: column; gap: 12px; }
 .archive-when { flex-basis: 100%; font-size: 12.5px; }
 .archive-body { margin-top: 8px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-2); }
 .section-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }
+/* Ticket widgets (js/widgets.js): the card is the page's own chrome; only the frame holds widget HTML. */
+.section-body { display: flex; flex-direction: column; gap: 10px; }
+.wcard { margin: 0; display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.wcard-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.wcard-title { font-weight: 700; font-size: 14px; }
+.wcard-chip { padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--neu-bg); color: var(--neu-fg); }
+.wcard-chip.is-agent { background: var(--info-bg); color: var(--info-fg); }
+.wcard-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.45 "IBM Plex Mono", ui-monospace, monospace; color: var(--text); }
+.wcard-source { margin: 0; font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+.wcard-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.wcard-btn { min-height: 36px; }
+.wcard-status { font-size: 12.5px; color: var(--muted); }
+.wcard-frame { border-radius: 8px; overflow: hidden; border: 1px solid var(--line); }
+.wcard-frame.is-loading { height: 0; border: 0; visibility: hidden; }
+.wcard-iframe { display: block; width: 100%; border: 0; background: var(--surface); }
 .gate-text { display: flex; flex-direction: column; gap: 4px; }
 .section-row { padding: 10px 0; border-top: 1px solid var(--line); }
 .section-row summary { min-height: var(--tap); display: flex; align-items: center; font-weight: 600; cursor: pointer; }
