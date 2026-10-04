@@ -107,7 +107,7 @@ def _full(doc: dict, sync_log: bool, context_artifacts, widgets=None) -> dict:
 _MOVE_KEYS = ("who", "kind", "label", "ref", "why", "epic")
 _ITEM_KEYS = ("source", "kind", "name", "sha256", "task", "ac")
 # schema 1.7: a receipt's facts and its step names; the commands and the output stay on the desktop
-_RUN_KEYS = ("exit", "timed_out", "commit", "dirty", "at", "seconds", "check")
+_RUN_KEYS = ("exit", "timed_out", "commit", "dirty", "at", "seconds", "check", "repo")
 _STEP_KEYS = ("name", "status", "seconds")
 _BY = re.compile(r"^(human:you|agent:[A-Za-z0-9._-]{1,40})(?::[0-9A-Za-z-]{1,8})?$")
 

@@ -219,3 +219,10 @@ def test_title_summary_stops_at_every_line_separator():
     assert out == "prose" and "SECRET" not in out
     assert _summary("```orch\rSECRET\r```\rok") == "ok"
     assert _summary("```orch\r\nSECRET\r\n```\r\nok") == "ok"
+
+
+def test_title_keeps_which_checkout_a_receipt_ran_in():
+    items = [{**i, "run": {**i["run"], "repo": "acme-app"}} if i.get("kind") == "receipt" else i
+             for i in DOC["artifact_items"]]
+    d = redact({**DOC, "artifact_items": items}, "title", sync_log=False, context_artifacts=[])
+    assert _receipt(d)["run"]["repo"] == "acme-app"
