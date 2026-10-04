@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>tix widget</title>
+<!-- The /sandbox/widget frame a ticket widget is drawn in (js/widgets.js; orch.widgets.v1). The ticket page posts
+{type: "tix-widget", html, nonce} once, after this frame's load event; the script below checks the message came from
+the parent and writes the document over this one, exactly once. It is inline on purpose: the frame's CSP has no
+'self' in script-src, so no file on this origin can run here. A CLASSIC script in an IIFE, nothing lands on
+window. tests/js/widget-model.test.mjs runs it under node (no window) through globalThis.__tixWidgetFrame. -->
+<script>
+(function tixWidgetFrame() {
+  "use strict";
+  var NONCE = /^[A-Za-z0-9_-]{8,64}$/;
+
+  function makeAcceptor() {
+    var done = false;
+    return function accept(event, parentWin) {
+      if (done || !event || event.source !== parentWin) return null;
+      var d = event.data;
+      if (!d || typeof d !== "object" || d.type !== "tix-widget") return null;
+      if (typeof d.html !== "string" || typeof d.nonce !== "string" || !NONCE.test(d.nonce)) return null;
+      done = true;
+      return { html: d.html, nonce: d.nonce };
+    };
+  }
+
+  // After document.write the page's listeners are gone (document.open erases them); these are added after it.
+  function watchCore(win, nonce) {
+    var doc = win.document;
+    var post = function (kind, extra) {
+      var m = { orch: 1, kind: kind, frame: nonce };
+      for (var k in extra || {}) m[k] = extra[k];
+      win.parent.postMessage(m, "*");
+    };
+    var last = -1;
+    var size = function () {
+      var h = Math.ceil(doc.documentElement.getBoundingClientRect().height);
+      if (h !== last) { last = h; post("resize", { height: h }); }
+    };
+    win.addEventListener("message", function (e) {
+      var m = e.data;
+      if (e.source !== win.parent || !m || m.orch !== 1 || m.frame !== nonce) return;
+      if (m.kind === "theme" && typeof m.dark === "boolean") doc.documentElement.setAttribute("data-theme", m.dark ? "dark" : "light");
+    });
+    if (win.ResizeObserver) new win.ResizeObserver(size).observe(doc.documentElement);
+    size();
+    post("ready");
+  }
+
+  if (typeof window === "undefined") {
+    globalThis.__tixWidgetFrame = { makeAcceptor: makeAcceptor };
+    return;
+  }
+  var accept = makeAcceptor();
+  window.addEventListener("message", function (event) {
+    var got = accept(event, window.parent);
+    if (!got) return;
+    document.open();
+    document.write(got.html);
+    document.close();
+    if (!document.querySelector('meta[name="orch-frame"]')) watchCore(window, got.nonce);
+  });
+})();
+</script>
+</head>
+<body></body>
+</html>

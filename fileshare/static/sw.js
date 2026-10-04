@@ -6,8 +6,8 @@
 // - navigations: stale-while-revalidate. The cached page for that path (/t/<n>: the "/t" ticket shell)
 //   answers at once and the network refreshes that entry in the background (event.waitUntil); a
 //   redirect (signed out) never replaces it. No cached page (or a legacy /?f= / /?tag= link): network
-//   first (4 s), else the cached page, else the cached "/" (never for /sandbox/html: that is the
-//   network's answer or its own cached copy only). /pair stays network first: its own shell only.
+//   first (4 s), else the cached page, else the cached "/" (never for /sandbox/html or
+//   /sandbox/widget: those are the network's answer or their own cached copy only). /pair stays network first: its own shell only.
 //   A page is cached only when its X-Build is this worker's build; a newer build's page is not, and the
 //   open pages get "new-build" so they register that build's worker at once (swreg.js).
 // - static assets: cache first; a ?v= of another build goes to the network and is not cached.
@@ -149,7 +149,7 @@ async function navigate(event) {
   }
   // The sandbox frame (spec T15) is its own document: the network's answer or its own precached
   // copy, never the Files shell inside an attachment preview.
-  if (url.pathname === "/sandbox/html") return (await fromCache(url.pathname)) || network;
+  if (url.pathname === "/sandbox/html" || url.pathname === "/sandbox/widget") return (await fromCache(url.pathname)) || network;
   // /t/42 is served by the ticket page, so offline it gets that shell (precached as /t), not Needs you.
   const cached = (await fromCache(url.pathname)) || (key !== url.pathname ? await fromCache(key) : null) || (await fromCache("/"));
   if (cached) return cached;

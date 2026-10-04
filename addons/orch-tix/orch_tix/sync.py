@@ -13,6 +13,7 @@ from pathlib import Path
 
 from . import history
 from .cli import SharingError
+from . import ticket_widgets
 from .mapping import needs_of, payload
 
 MAX_TICKETS_PER_DRAIN = 10
@@ -61,6 +62,17 @@ def out_dir(ctx) -> Path:
 def level_of(link: dict | None, settings) -> str:
     """The redaction level of one ticket: its own override, else the workspace setting."""
     return (link or {}).get("redaction") or settings.get("redaction") or "title"
+
+
+def _widgets(addon, ctx, key: str) -> list[dict]:
+    """The ticket's widgets (full only); a widget that cannot be built never holds back the push."""
+    share = (ctx.settings.get("sync_widget_docs") == "always"
+             and (ctx.settings.get("sync_artifacts") or "on-request") != "never")
+    try:
+        return ticket_widgets.entries(addon, ctx, key, share=share)
+    except Exception as e:  # noqa: BLE001 — a renderer bug must not stop the ticket reaching the phone
+        addon.note_error(f"widgets {key}: {e}")
+        return []
 
 
 def sent_fields(doc: dict) -> list[str]:
@@ -144,9 +156,12 @@ def push(addon, ctx, key: str, doc: dict, *, pinned: bool = True) -> str:
     link = st.links()[key]
     rev = int(link.get("rev") or 0) + 1
     level = level_of(link, settings)
+    widgets = _widgets(addon, ctx, key) if level == "full" else None
     body = payload(doc, key=key, gen=int(link.get("gen") or 1), rev=rev, level=level,
                    sync_log=bool(settings.get("sync_log")), context_artifacts=link.get("context_artifacts") or [],
-                   history=st.history(key))
+                   widgets=widgets, history=st.history(key))
+    body = ticket_widgets.fit(addon, key, body)
+    ticket_widgets.prune(addon, addon.sharing(ctx), key, body["doc"].get("widgets"))
     path = out_dir(ctx) / f"mirror-{secrets.token_hex(8)}.json"
     raw = json.dumps(body, ensure_ascii=False)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)

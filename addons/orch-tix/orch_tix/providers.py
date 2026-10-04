@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from orch.addons.api import Snapshot
 from orch.errors import OrchError
 
+from . import ticket_widgets
 from .cli import NOT_CONFIGURED, SharingError
 from .files import FILE_REF, attach, sweep_downloads
 
@@ -76,6 +77,7 @@ class HealthProvider:
             except SharingError as e:
                 self.addon.note_error(f"unlink {key}: {e.detail}")
                 continue
+            ticket_widgets.prune(self.addon, sharing, key, None)
             self.addon.state.unlink(key, by_hand=False)
 
 

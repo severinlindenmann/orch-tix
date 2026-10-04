@@ -698,6 +698,19 @@ test("an offline /sandbox/html navigation never gets the / shell (spec T15)", as
   assert.equal((await hit.responded).body, "cached sandbox");
 });
 
+test("an offline /sandbox/widget navigation gets its own cached copy, never the / shell", async () => {
+  const w = load({ net: async () => { throw new TypeError("Failed to fetch"); } });
+  const c = await w.caches.api.open("shell-abc");
+  await c.put("/", res("cached root"));
+  const miss = fetchEvent("/sandbox/widget", { mode: "navigate" });
+  w.listeners.fetch(miss);
+  await assert.rejects(miss.responded, TypeError);
+  await c.put("/sandbox/widget", res("cached widget frame"));
+  const hit = fetchEvent("/sandbox/widget", { mode: "navigate" });
+  w.listeners.fetch(hit);
+  assert.equal((await hit.responded).body, "cached widget frame");
+});
+
 test("a cached /sandbox/html answers with its own copy at once, never another page's", async () => {
   const w = load({ net: () => new Promise(() => {}) });
   const c = await w.caches.api.open("shell-abc");

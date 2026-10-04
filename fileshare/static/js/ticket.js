@@ -27,6 +27,7 @@ import {
 } from "./ticket-card.js";
 import { pinnedFigure } from "./images.js";
 import { moveChipEl, needsPill, pill, stripEl } from "./needs.js";
+import { sectionBody } from "./widgets.js";
 
 const VOICE_TAG = "voice";
 const KIND_TEXT = { answer: "Answer", approve: "Approved", request_changes: "Changes requested", verdict: "Verdict",
@@ -539,11 +540,12 @@ function artifactsCard(doc) {
     pr ? el("p", { class: "art-pr" }, pr.text) : null);
 }
 
-function sectionRow(sec) {
-  return el("section", { class: "section-row" }, el("h3", { class: "section-name" }, shown(sec.name)), el("div", { class: "section-text" }, shown(sec.text)));
+// A section's text, its widget blocks as cards (widgets.js).
+function sectionRow(doc, sec) {
+  return el("section", { class: "section-row" }, el("h3", { class: "section-name" }, shown(sec.name)), sectionBody(doc, sec.name, sec.text));
 }
 
-function chapterEl(c) {
+function chapterEl(doc, c) {
   const chip = chipFor(c.state);
   return el("details", { class: "chap", open: c.open ? "" : null, dataset: { chapter: String(c.n) } },
     el("summary", {},
@@ -558,7 +560,7 @@ function chapterEl(c) {
         return el("li", { class: `task is-${t.state}` }, el("span", { class: `task-mark t-${role}`, "aria-hidden": "true" }, glyph),
           el("span", {}, `${t.id} `, shown(t.text)), el("span", { class: "sr-only" }, ` (${t.state})`));
       })) : null,
-      c.sections.map(sectionRow)));
+      c.sections.map((sec) => sectionRow(doc, sec))));
 }
 
 function extras() {
@@ -572,12 +574,12 @@ function extras() {
   const cs = chapters(row, doc, { skip, summaryShown: state.mode === "verdict" });
   if (cs.length) {
     out.push(el("section", { class: "tsection chapters", "aria-labelledby": "chapters-title" },
-      el("h2", { class: "sect", id: "chapters-title" }, "Ticket"), cs.map(chapterEl)));
+      el("h2", { class: "sect", id: "chapters-title" }, "Ticket"), cs.map((c) => chapterEl(doc, c))));
   }
   const more = moreSections(doc, { skip });
   if (more.length) {
     out.push(el("details", { class: "chap chap-quiet" }, el("summary", {}, el("span", { class: "chap-name" }, `More · ${more.length} section${more.length === 1 ? "" : "s"}`)),
-      el("div", { class: "chap-body" }, more.map(sectionRow))));
+      el("div", { class: "chap-body" }, more.map((sec) => sectionRow(doc, sec)))));
   }
   const proof = proofCard(doc);
   if (proof) out.unshift(proof);

@@ -4,7 +4,7 @@ from __future__ import annotations
 from orch.addons.api import PairingTarget
 from orch.errors import ValidationError
 
-from . import files, inbox, sync, widgets
+from . import files, inbox, sync, ticket_widgets, widgets
 from .cli import Sharing, SharingError
 from .providers import DevicesProvider, FilesProvider, HealthProvider, MessagesProvider
 from .state import State
@@ -153,10 +153,15 @@ class TixAddon:
         link = self._require_link(key)
         if action_id == "unlink":
             self.sharing(ctx).run_json("mirror", "unlink", "--key", key, "--gen", str(int(link.get("gen") or 1)))
+            ticket_widgets.prune(self, self.sharing(ctx), key, None)
             self.state.unlink(key, by_hand=True)
             return f"Stopped syncing {key}"
         if action_id == "redaction":
-            self.state.set_redaction(key, None if link.get("redaction") == "full" else "full")
+            if link.get("redaction"):
+                new = None                      # back to the workspace setting
+            else:
+                new = "title" if sync.level_of(None, ctx.settings) == "full" else "full"
+            self.state.set_redaction(key, new)
             return self._push(ctx, key)
         return self._push(ctx, key)            # push_now for one ticket
 
