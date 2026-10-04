@@ -391,7 +391,7 @@ const RECEIPT_VERB = { approve: "Approved", answer: "Answered", verdict: "Verdic
 function receiptsEl(state) {
   const items = state.receipts || [];
   if (!items.length) return "";
-  return el("section", { class: "receipts", "aria-label": "Applied from your phone" }, items.map((r) =>
+  return el("section", { class: "receipts", "aria-label": "Applied decisions" }, items.map((r) =>
     el("div", { class: "card receipt" }, el("span", { class: "pill r-ok" }, icon("check")),
       el("span", { class: "receipt-text" }, `${RECEIPT_VERB[r.kind] || "Decided"} ${r.mine ? "from this phone" : "from TIX"} · applied ${asOf(Date.parse(r.ack_at))}`,
         r.key ? el("span", { class: "muted" }, ` · ${r.key}`) : null))));

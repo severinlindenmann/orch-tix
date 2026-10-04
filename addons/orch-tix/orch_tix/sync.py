@@ -115,7 +115,8 @@ def pinned_to_share(doc: dict, sent: set) -> list[tuple[str, str]]:
 
 SHARE_RETRY = timedelta(hours=1)        # a pinned image that failed to share is tried again at most hourly
 PINNED_TIMEOUT_S = 10                   # each pinned share; they run after the mirror push, at most this long in all
-MAX_SHARE_BYTES = 50 * 1024 * 1024
+MAX_SHARE_BYTES = 50 * 1024 * 1024      # on-request shares
+MAX_PINNED_BYTES = 8 * 1024 * 1024      # pinned auto-shares: the phone refuses a larger image
 
 
 def share_pinned(addon, ctx, key: str, doc: dict) -> int:
@@ -140,7 +141,7 @@ def share_pinned(addon, ctx, key: str, doc: dict) -> int:
         if left <= 1:
             break
         try:
-            share_artifact(addon, ctx, key, name, expect_sha=sha, timeout=left, quiet=True)
+            share_artifact(addon, ctx, key, name, expect_sha=sha, timeout=left, quiet=True, max_bytes=MAX_PINNED_BYTES)
             st.share_failure(key, name, None)
             shared += 1
         except SharingError as e:
@@ -199,41 +200,44 @@ def push(addon, ctx, key: str, doc: dict, *, pinned: bool = True) -> str:
     return status
 
 
-def checked_artifact(ctx, key: str, name: str, expect_sha: str | None = None) -> tuple[bytes, str]:
-    """The bytes of artifact `name` of `key`, read once, as orch-core reads them: opened without following a link
-    (O_NOFOLLOW), a plain file with one link (no hard link), inside artifacts/<key> after resolving, and, when the
-    item is pinned, hashing to its sha256. Returns (bytes, sha256 hex); SharingError otherwise."""
+def checked_artifact(ctx, key: str, name: str, expect_sha: str | None = None, max_bytes: int = MAX_SHARE_BYTES) -> tuple[bytes, str]:
+    """The bytes of artifact `name` of `key`, read once, as orch-core reads them: the ticket's folder opened once
+    without following a link (O_DIRECTORY | O_NOFOLLOW) and the file opened relative to that handle (O_NOFOLLOW), a
+    plain file with one link (no hard link), at most `max_bytes`, and, when the item is pinned, hashing to its
+    sha256. Returns (bytes, sha256 hex); SharingError otherwise (an OS error while reading is a retryable one)."""
     name = Path(str(name)).name
     if not name or name in (".", ".."):
         raise SharingError("not_found", f"{key} has no artifact {name!r}")
-    root = Path(os.path.realpath(ctx.addon.ws.artifacts_dir))
-    base = ctx.addon.ws.artifacts_dir / key
-    if Path(os.path.realpath(base)) != root / key:
-        raise SharingError("refused", f"the artifact folder of {key} is a link")
-    path = base / name
     try:
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        dfd = os.open(ctx.addon.ws.artifacts_dir / key, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0))
     except OSError:
-        raise SharingError("not_found", f"{key} has no artifact {name!r} (or it is a link)") from None
+        raise SharingError("refused", f"the artifact folder of {key} is missing or a link") from None
     try:
-        info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
-            raise SharingError("refused", f"{key}/{name} is not a plain file (a link)")
-        if Path(os.path.realpath(path)).parent != root / key:
-            raise SharingError("refused", f"{key}/{name} is outside the ticket's artifacts")
-        if info.st_size > MAX_SHARE_BYTES:
-            raise SharingError("refused", f"{key}/{name} is larger than {MAX_SHARE_BYTES} bytes")
-        chunks, total = [], 0
-        while True:
-            chunk = os.read(fd, 1 << 20)
-            if not chunk:
-                break
-            total += len(chunk)
-            if total > MAX_SHARE_BYTES:
-                raise SharingError("refused", f"{key}/{name} is larger than {MAX_SHARE_BYTES} bytes")
-            chunks.append(chunk)
+        try:
+            fd = os.open(name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=dfd)
+        except OSError:
+            raise SharingError("not_found", f"{key} has no artifact {name!r} (or it is a link)") from None
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                raise SharingError("refused", f"{key}/{name} is not a plain file (a link)")
+            if info.st_size > max_bytes:
+                raise SharingError("refused", f"{key}/{name} is larger than {max_bytes} bytes")
+            chunks, total = [], 0
+            while True:
+                chunk = os.read(fd, 1 << 20)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    raise SharingError("refused", f"{key}/{name} is larger than {max_bytes} bytes")
+                chunks.append(chunk)
+        except OSError as e:
+            raise SharingError("retry", f"cannot read {key}/{name}: {e.strerror or type(e).__name__}") from None
+        finally:
+            os.close(fd)
     finally:
-        os.close(fd)
+        os.close(dfd)
     data = b"".join(chunks)
     digest = hashlib.sha256(data).hexdigest()
     if expect_sha is not None and digest != expect_sha:
@@ -242,16 +246,20 @@ def checked_artifact(ctx, key: str, name: str, expect_sha: str | None = None) ->
 
 
 def share_artifact(addon, ctx, key: str, name: str, *, expect_sha: str | None = None, timeout: float = 120,
-                   quiet: bool = False) -> str:
+                   quiet: bool = False, max_bytes: int = MAX_SHARE_BYTES) -> str:
     """Share one artifact of `key` as a context FILE (7 days) and remember it on the link (with its sha256); returns
-    the FILE id. The CLI gets a private copy of exactly the checked bytes (checked_artifact), never the path."""
+    the FILE id. The CLI gets a private copy of exactly the checked bytes (checked_artifact), never the path. The
+    private copy is removed whatever happens, an OS error while writing it included."""
     name = Path(str(name)).name
-    data, digest = checked_artifact(ctx, key, name, expect_sha)
+    data, digest = checked_artifact(ctx, key, name, expect_sha, max_bytes)
     copy = out_dir(ctx) / f"share-{secrets.token_hex(8)}"
-    fd = os.open(copy, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "wb") as f:
-        f.write(data)
     try:
+        try:
+            fd = os.open(copy, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+        except OSError as e:
+            raise SharingError("retry", f"cannot copy {key}/{name}: {e.strerror or type(e).__name__}") from None
         r = addon.sharing(ctx).run_json("share", str(copy), "--name", name, "--ttl", "7d", "--tag", "context",
                                         timeout=timeout)
     except SharingError as e:
