@@ -53,6 +53,12 @@ export function splitText(text) {
   return parts;
 }
 
+// Frames the person opened with Show, by widget address: ticket + section + the fence's digest + the document's pin. A
+// re-render of the ticket view rebuilds the cards and shows again the ones in this set; the show goes through the
+// full pin check like any other, and a widget whose fence or document changed has another key, so it stays closed.
+export const openFrames = new Set();
+export const openKey = (ticket, w) => `${ticket}\n${w.section}\n${w.raw_sha256}\n${w.sha256 ?? w.file ?? ""}`;
+
 // The widgets the addon sent (an older addon or a title/key-only doc sends none: the text stays as it is).
 export function docWidgets(doc) {
   return doc?.widgets_format === WIDGETS_FORMAT && Array.isArray(doc.widgets) ? doc.widgets.filter((w) => w && typeof w === "object") : [];

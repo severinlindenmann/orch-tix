@@ -287,17 +287,34 @@ export function journey(doc) {
     name, state: s === "done" || i < stage ? "done" : i === stage ? "now" : "todo" }));
 }
 
-// Who agreed: the mirror never says what the desktop's signed ledger holds, so no human is named; the wording is
-// core's own (dashboard story: "approval not signed here", "closed, not signed here").
+// Who signed, from the document's `signed` block (orch-core schema 1.6): `{signed, by}` per approved gate and for a done
+// verdict. A plain string for the phone to draw with textContent. Empty when there is nothing to say (no entry).
+export function signerText(entry) {
+  if (!isObj(entry) || typeof entry.signed !== "boolean") return "";
+  const by = typeof entry.by === "string" ? entry.by : "";
+  if (!entry.signed) return by === "by delegation" ? "by delegation, not signed here" : "not signed here";
+  return by === "you" ? "by you" : by || "signed";
+}
+
+const hasSigned = (doc) => isObj(doc?.signed);
+
+// Who agreed. With a `signed` block the wording is per gate, only for a gate that is approved (an invalidated gate
+// shows no signer). Without one (orch-core before 1.6) the mirror cannot say, so core's own "not signed here" wording.
 export function agreedNote(doc) {
   const approved = ["requirements", "plan"].filter((g) => approvedGate(doc, g));
   // the plan skipped by size: only the requirements were agreed
   if (!approved.length) return "waits for your approval";
-  return `${approved.map((g) => (g === "requirements" ? "req" : "plan")).join(" + ")}, approval not signed here`;
+  const name = (g) => (g === "requirements" ? "req" : "plan");
+  if (!hasSigned(doc)) return `${approved.map(name).join(" + ")}, approval not signed here`;
+  const who = approved.map((g) => signerText(doc.signed[g]) || "not signed here");
+  if (who.every((w) => w === who[0])) return `${approved.map(name).join(" + ")} ${who[0]}`.trim();
+  return approved.map((g, i) => `${name(g)} ${who[i]}`.trim()).join(", ");
 }
 
 export function doneNote(doc) {
-  return doc?.status === "done" ? "closed, not signed here" : "your verdict";
+  if (doc?.status !== "done") return "your verdict";
+  if (!hasSigned(doc)) return "closed, not signed here";
+  return signerText(doc.signed.verdict) || "closed, not signed here";
 }
 
 // A decision that blocks an agent: an approval, a verdict, or an open blocking question (the headline's count).

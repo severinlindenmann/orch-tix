@@ -1154,6 +1154,16 @@
    ],
    "redaction": "title",
    "schema_version": "1.7.0",
+   "signed": {
+    "plan": {
+     "by": null,
+     "signed": false
+    },
+    "requirements": {
+     "by": null,
+     "signed": false
+    }
+   },
    "size": "m",
    "status": "waiting",
    "tasks": {

@@ -226,3 +226,23 @@ def test_title_keeps_which_checkout_a_receipt_ran_in():
              for i in DOC["artifact_items"]]
     d = redact({**DOC, "artifact_items": items}, "title", sync_log=False, context_artifacts=[])
     assert _receipt(d)["run"]["repo"] == "acme-app"
+
+
+def test_signed_block_rides_at_every_level_a_gate_is_shown():
+    signed = {"requirements": {"signed": True, "by": "you"}, "plan": {"signed": False, "by": "by delegation", "mac": "x"},
+              "junk": {"signed": True, "by": "you"}}
+    doc = {**DOC, "signed": signed}
+    want = {"requirements": {"signed": True, "by": "you"}, "plan": {"signed": False, "by": "by delegation"}}
+    for level in ("full", "title"):
+        assert redact(doc, level, sync_log=False, context_artifacts=[])["signed"] == want, level
+    assert "signed" not in redact(doc, "key-only", sync_log=False, context_artifacts=[])
+
+
+def test_a_missing_or_malformed_signed_block_sends_nothing():
+    for bad in (None, "you", [], {"plan": "you"}):
+        doc = {k: v for k, v in DOC.items() if k != "signed"}
+        if bad is not None:
+            doc["signed"] = bad
+        for level in ("title",):
+            out = redact(doc, level, sync_log=False, context_artifacts=[])
+            assert out.get("signed", {}) == {}, (bad, level)

@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  acItems, agreedNote, blockingCount, doneNote, gateImage, isBlocking, journey, pinnedImages, proofImage, taskBar, taskChip,
+  acItems, agreedNote, blockingCount, doneNote, signerText, gateImage, isBlocking, journey, pinnedImages, proofImage, taskBar, taskChip,
 } from "../../fileshare/static/js/ticket-card.js";
 
 const H = (c) => c.repeat(64);
@@ -99,4 +99,27 @@ test("the board's model work for 300 tickets stays well under a frame budget", (
   const t0 = performance.now();
   for (const d of docs) { journey(d); taskBar(d); taskChip(d); acItems(d); pinnedImages(d); }
   assert.ok(performance.now() - t0 < 100, `${performance.now() - t0} ms`);
+});
+
+test("who signed: wording per value, only for an approved gate, nothing assumed without a signed block", () => {
+  const ok = { state: "approved" }, inv = { state: "invalidated" };
+  const d = (signed, gates) => ({ gates, signed });
+  assert.equal(signerText({ signed: true, by: "you" }), "by you");
+  assert.equal(signerText({ signed: true, by: "from your phone" }), "from your phone");
+  assert.equal(signerText({ signed: true, by: "by your epic charter" }), "by your epic charter");
+  assert.equal(signerText({ signed: false, by: "by delegation" }), "by delegation, not signed here");
+  assert.equal(signerText({ signed: false, by: null }), "not signed here");
+  assert.equal(signerText({ by: "you" }), "");
+  assert.equal(signerText(null), "");
+  const s = { requirements: { signed: true, by: "you" }, plan: { signed: true, by: "from your phone" } };
+  assert.equal(agreedNote(d(s, { requirements: ok, plan: ok })), "req by you, plan from your phone");
+  assert.equal(agreedNote(d({ ...s, plan: s.requirements }, { requirements: ok, plan: ok })), "req + plan by you");
+  // an invalidated gate shows no signer, even with a matching ledger entry for its old hash
+  assert.equal(agreedNote(d(s, { requirements: ok, plan: inv })), "req by you");
+  // a signed block with no entry for an approved gate never reads as signed
+  assert.equal(agreedNote(d({}, { requirements: ok, plan: ok })), "req + plan not signed here");
+  assert.equal(agreedNote(d({ requirements: s.requirements }, { requirements: ok, plan: ok })), "req by you, plan not signed here");
+  assert.equal(doneNote({ status: "done", signed: { verdict: { signed: true, by: "accepted" } } }), "accepted");
+  assert.equal(doneNote({ status: "done", signed: { verdict: { signed: false, by: null } } }), "not signed here");
+  assert.equal(doneNote({ status: "testing", signed: { verdict: { signed: true, by: "accepted" } } }), "your verdict");
 });

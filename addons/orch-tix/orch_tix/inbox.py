@@ -17,15 +17,21 @@ FINAL = ("applied", "ignored", "stale", "superseded", "answered-locally", "unlin
 DIRECT = ("answer", "approve", "request_changes", "verdict")
 KINDS = DIRECT + ("comment", "ticket_request")
 GATES = ("requirements", "plan")
-# Why core held a decision (RemoteResult pending), as the fixed code the phone shows (server WAITING). Matched on
-# core's own messages; anything else reads "waiting-check".
+# Why core held a decision (RemoteResult pending), as the fixed code the phone shows (server WAITING), looked up on
+# RemoteResult.code (orch-core API 2.4). Any other pending code, and an unknown one, reads "waiting-check".
+_CODES = {"not-paired": "waiting-unpaired", "bad-signature": "waiting-signature",
+          "kind-switched-off": "waiting-switched-off", "implausible-time": "waiting-time"}
+# Older orch-core sends no code: matched on its own messages.
 _WAITING = (("not paired", "waiting-unpaired"), ("signature", "waiting-signature"), ("switched off", "waiting-switched-off"),
             ("not plausible", "waiting-time"))
 
 
-def waiting_code(message: str) -> str:
-    m = str(message or "").lower()
-    return next((code for needle, code in _WAITING if needle in m), "waiting-check")
+def waiting_code(result) -> str:
+    code = str(getattr(result, "code", "") or "")
+    if code:
+        return _CODES.get(code, "waiting-check")
+    m = str(getattr(result, "message", "") or "").lower()
+    return next((c for needle, c in _WAITING if needle in m), "waiting-check")
 
 
 _REMOTE_MAP = {"applied": "applied", "stale": "stale", "superseded": "superseded", "duplicate": "superseded",
@@ -165,7 +171,7 @@ def receive(addon, pctx, items, *, now) -> None:
                     rec["ticket"] = str(result.ticket)
             else:
                 rec["message"] = str(result.message or "")
-                rec["waiting"] = waiting_code(result.message)
+                rec["waiting"] = waiting_code(result)
         else:
             outcome, msg = overtaken(addon, rec, doc, now) if doc is None else _link_check(addon, rec, doc)
             if outcome:
@@ -181,7 +187,7 @@ def receive(addon, pctx, items, *, now) -> None:
                     rec.update(outcome=_REMOTE_MAP[result.status], message=str(result.message or ""))
                 else:
                     rec["message"] = str(result.message or "")          # pending: wait for a desktop Apply
-                    rec["waiting"] = waiting_code(result.message)
+                    rec["waiting"] = waiting_code(result)
         st.put_decision(did, rec)
         known[did] = rec
         log_decision(addon, rec, rec["outcome"], rec["message"])
