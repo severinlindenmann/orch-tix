@@ -14,6 +14,7 @@ from pathlib import Path
 from . import history
 from .cli import SharingError
 from . import ticket_widgets
+from .state import GONE_REASON
 from .mapping import needs_of, payload
 
 MAX_TICKETS_PER_DRAIN = 10
@@ -49,24 +50,6 @@ def should_link(link_mode: str, doc: dict, link: dict | None) -> bool:
     if link_mode == "all-active":
         return doc.get("status") not in ("backlog", "done")
     return False
-
-
-GONE_REASON = "the ticket is gone on the server"
-
-
-def lost_on_server(st, key: str, link: dict | None) -> bool:
-    """Was this retired link retired because the server said gone (not by hand, not a done cleanup)? An old entry
-    without a recorded reason counts only when it was no hand unlink, no done ticket and its newest log entry says
-    gone; anything unclear stays retired."""
-    if not link or not link.get("retired") or link.get("unlinked_by_hand"):
-        return False
-    why = link.get("retired_why")
-    if why is not None:
-        return why == "gone"
-    if link.get("done_at"):
-        return False
-    last = next((e for e in st.sent_log() if e.get("key") == key), None)
-    return bool(last) and last.get("reason") == GONE_REASON
 
 
 def out_dir(ctx) -> Path:
@@ -337,10 +320,9 @@ def drain(addon, ctx, items) -> list[str]:
                 addon.state.add_history(key, history.stored([e for e in evs if e], level_of(link, ctx.settings)))
             acked += ids
             continue
-        if (key not in relinked and lost_on_server(addon.state, key, link) and should_link(mode, doc, None)):
+        if key not in relinked and should_link(mode, doc, None) and addon.state.relink_if_lost(key):
             relinked.add(key)
             addon.state.log({"kind": "relink", "key": key, "result": "ok", "reason": "re-linked after the server lost it"})
-            addon.state.link(key, by="auto", auto=True)
             link = addon.state.links().get(key)
         if not should_link(mode, doc, link):
             acked += ids

@@ -18,6 +18,9 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+GONE_REASON = "the ticket is gone on the server"
+
+
 class State:
     def __init__(self, state_dir):
         self.dir = Path(state_dir)
@@ -92,6 +95,33 @@ class State:
             return dict(entry)
         return self._update("links.json", fn)
 
+    def is_lost(self, key: str, link: dict | None) -> bool:
+        """Was this retired link retired because the server said gone (not by hand, not a done cleanup)? An old
+        entry without a recorded reason counts only when it was no hand unlink, no done ticket and its newest log
+        entry says gone; anything unclear stays retired."""
+        if not link or not link.get("retired") or link.get("unlinked_by_hand"):
+            return False
+        why = link.get("retired_why")
+        if why is not None:
+            return why == "gone"
+        if link.get("done_at"):
+            return False
+        last = next((e for e in self.sent_log() if e.get("key") == key), None)
+        return bool(last) and last.get("reason") == GONE_REASON
+
+    def relink_if_lost(self, key: str) -> bool:
+        """Link a ticket the server lost again (gen + 1, relink), deciding under the lock so a Stop syncing that
+        lands meanwhile is never overwritten. True when it relinked."""
+        def fn(links):
+            if not self.is_lost(key, links.get(key)):
+                return False
+            entry = links[key]
+            entry.update(gen=int(entry.get("gen") or 1) + 1, relink=True, n=None, done_at=None, context_artifacts=[],
+                         linked_at=_now(), by="auto", auto=True, unlinked_by_hand=False, retired=False,
+                         retired_why=None)
+            return True
+        return self._update("links.json", fn)
+
     def unlink(self, key: str, by_hand: bool = True) -> None:
         def fn(links):
             if key in links:
@@ -128,8 +158,9 @@ class State:
             if key in links:
                 # a human's Stop syncing that raced this push stays a human's: never auto-link it again
                 by_hand = bool(links[key].get("unlinked_by_hand"))
+                was = links[key].get("retired_why") if links[key].get("retired") else None
                 links[key].update(retired=True, relink=False, unlinked_at=_now(), unlinked_by_hand=by_hand,
-                                  retired_why="by_hand" if by_hand else "gone")
+                                  retired_why="by_hand" if by_hand else (was if was in ("by_hand", "done") else "gone"))
                 if gen:
                     links[key]["gen"] = int(gen)
         self._update("links.json", fn)
