@@ -14,6 +14,7 @@ from pathlib import Path
 from . import history
 from .cli import SharingError
 from . import ticket_widgets
+from .state import GONE_REASON
 from .mapping import needs_of, payload
 
 MAX_TICKETS_PER_DRAIN = 10
@@ -182,7 +183,7 @@ def push(addon, ctx, key: str, doc: dict, *, pinned: bool = True) -> str:
     result = {"pushed": "ok", "duplicate": "ok"}.get(status, "refused")
     st.log({**entry, "tix": r.get("id") or link.get("n"), "result": result,
             "reason": "" if result == "ok" else {"stale": "the server holds a newer copy",
-                                                  "gone": "the ticket is gone on the server"}.get(status, status)})
+                                                  "gone": GONE_REASON}.get(status, status)})
     gen = r.get("gen") if isinstance(r.get("gen"), int) else None
     if status == "gone":
         st.retire(key, gen)
@@ -301,6 +302,7 @@ def drain(addon, ctx, items) -> list[str]:
             by_ticket.setdefault(t, []).append(i)
         else:
             acked.append(i["id"])
+    relinked: set[str] = set()                 # a lost ticket is linked again at most once per cycle
     for ref in list(by_ticket)[:MAX_TICKETS_PER_DRAIN]:
         group = by_ticket[ref]
         ids = [i["id"] for i in group]
@@ -318,6 +320,10 @@ def drain(addon, ctx, items) -> list[str]:
                 addon.state.add_history(key, history.stored([e for e in evs if e], level_of(link, ctx.settings)))
             acked += ids
             continue
+        if key not in relinked and should_link(mode, doc, None) and addon.state.relink_if_lost(key):
+            relinked.add(key)
+            addon.state.log({"kind": "relink", "key": key, "result": "ok", "reason": "re-linked after the server lost it"})
+            link = addon.state.links().get(key)
         if not should_link(mode, doc, link):
             acked += ids
             continue

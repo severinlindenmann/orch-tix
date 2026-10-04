@@ -209,16 +209,68 @@ def test_gone_after_a_manual_unlink_keeps_it_unlinked_by_hand(tix_ws):
     assert len(_pushes(runner)) == 1
 
 
-def test_a_link_retired_by_gone_is_never_auto_linked(tix_ws):
-    runner = CapturingRunner(strict=True).add(PUSH, stdout_json={"status": "gone", "gen": 1})
+def test_a_link_retired_by_gone_is_relinked_next_cycle(tix_ws):
+    """The server lost the ticket: the next sync cycle links it again as a new generation (--relink)."""
+    runner = CapturingRunner(strict=True)
+    answer = {"r": {"status": "gone", "gen": 1}}
+    runner.handlers["mirror"] = lambda argv, timeout: ok(argv, answer["r"])
     tix = tix_ws.load(ADDON, runner=runner)
     _registry(tix_ws, tix)
     tid = _ask(tix_ws)
     pump_all(tix_ws.ws, tix_ws.ws.addons)
-    assert tix.obj.state.links()[tid]["retired"] is True
+    link = tix.obj.state.links()[tid]
+    assert link["retired"] is True and link["retired_why"] == "gone"
+    answer["r"] = {"status": "pushed", "id": "TIX-9", "gen": 2, "rev": 1}
     Ops(tix_ws.ws, AGENT).ask(tid, [{"text": "And the delimiter?", "options": [";", ","]}])
     pump_all(tix_ws.ws, tix_ws.ws.addons)
-    assert len(_pushes(runner)) == 1 and _pending(tix_ws) == []
+    assert len(_pushes(runner)) == 2 and "--relink" in _pushes(runner)[1] and runner.files[1]["gen"] == 2
+    link = tix.obj.state.links()[tid]
+    assert not link["retired"] and link["n"] == "TIX-9" and _pending(tix_ws) == []
+    assert [e["reason"] for e in tix.obj.state.sent_log()].count("re-linked after the server lost it") == 1
+
+
+def test_a_ticket_that_keeps_coming_back_gone_is_pushed_once_per_cycle(tix_ws):
+    runner = CapturingRunner(strict=True)
+    runner.handlers["mirror"] = lambda argv, timeout: ok(argv, {"status": "gone", "gen": 1})
+    tix = tix_ws.load(ADDON, runner=runner)
+    _registry(tix_ws, tix)
+    tid = _ask(tix_ws)
+    pump_all(tix_ws.ws, tix_ws.ws.addons)
+    Ops(tix_ws.ws, AGENT).ask(tid, [{"text": "And the delimiter?", "options": [";", ","]}])
+    Ops(tix_ws.ws, AGENT).ask(tid, [{"text": "And the quote?", "options": ["'", '"']}])
+    pump_all(tix_ws.ws, tix_ws.ws.addons)
+    assert len(_pushes(runner)) == 2                    # one relink push for the whole cycle, not one per event
+    assert tix.obj.state.links()[tid]["retired"] is True and _pending(tix_ws) == []
+
+
+def test_a_by_hand_unlink_stays_retired_even_when_gone_follows(tix_ws):
+    runner = CapturingRunner(strict=True)
+    tix = tix_ws.load(ADDON, runner=runner)
+    _registry(tix_ws, tix)
+    tid = _ask(tix_ws)
+    pump_all(tix_ws.ws, tix_ws.ws.addons)
+    tix.obj.state.unlink(tid, by_hand=True)
+    assert tix.obj.state.links()[tid]["retired_why"] == "by_hand"
+    Ops(tix_ws.ws, AGENT).ask(tid, [{"text": "And the delimiter?", "options": [";", ","]}])
+    pump_all(tix_ws.ws, tix_ws.ws.addons)
+    assert len(_pushes(runner)) == 1
+
+
+def test_old_retired_entries_without_a_reason(tix_ws):
+    from orch_tix.state import GONE_REASON
+    lost_on_server = lambda st, key, link: st.is_lost(key, link)
+    runner = CapturingRunner(strict=True)
+    tix = tix_ws.load(ADDON, runner=runner)
+    st = tix.obj.state
+    old = {"gen": 1, "rev": 1, "retired": True, "unlinked_by_hand": False}
+    assert not lost_on_server(st, "T-1", old)                                   # no log: stays retired
+    st.log({"kind": "push", "key": "T-1", "result": "refused", "reason": GONE_REASON})
+    assert lost_on_server(st, "T-1", old)                                       # the log says gone
+    assert not lost_on_server(st, "T-1", {**old, "done_at": "2026-01-01T00:00:00+00:00"})   # a done ticket
+    assert not lost_on_server(st, "T-1", {**old, "unlinked_by_hand": True})
+    st.log({"kind": "push", "key": "T-2", "result": "ok", "reason": ""})
+    assert not lost_on_server(st, "T-2", old)
+    assert not lost_on_server(st, "T-1", {**old, "retired_why": "done"})
 
 
 def test_a_done_unlinked_ticket_is_never_auto_linked(tix_ws, tix, runner):
@@ -502,3 +554,30 @@ def test_a_failed_pinned_share_backs_off_and_is_noted_once(tix_ws, tmp_path):
     assert _shared(runner).count("proof.png") == 1                  # not retried within the hour
     assert sum("proof.png" in e for e in tix.obj.errors) == 1        # noted once
     assert len([e for e in tix.obj.state.sent_log() if e["kind"] == "file" and e["result"] == "retry"]) == 1
+
+
+def test_a_by_hand_unlink_between_the_snapshot_and_the_relink_stays_retired(tix_ws):
+    runner = CapturingRunner(strict=True)
+    answer = {"r": {"status": "gone", "gen": 1}}
+    runner.handlers["mirror"] = lambda argv, timeout: ok(argv, answer["r"])
+    tix = tix_ws.load(ADDON, runner=runner)
+    _registry(tix_ws, tix)
+    tid = _ask(tix_ws)
+    pump_all(tix_ws.ws, tix_ws.ws.addons)
+    st = tix.obj.state
+    assert st.links()[tid]["retired_why"] == "gone"
+    real = st.relink_if_lost
+    st.relink_if_lost = lambda key: (st.unlink(key, by_hand=True), real(key))[1]   # the click lands just before
+    Ops(tix_ws.ws, AGENT).ask(tid, [{"text": "And the delimiter?", "options": [";", ","]}])
+    pump_all(tix_ws.ws, tix_ws.ws.addons)
+    link = st.links()[tid]
+    assert link["retired"] is True and link["unlinked_by_hand"] is True and len(_pushes(runner)) == 1
+
+
+def test_gone_keeps_a_done_reason(tix_ws):
+    tix = tix_ws.load(ADDON, runner=CapturingRunner(strict=True))
+    st = tix.obj.state
+    st.link("T-1", by="you", auto=False)
+    st.unlink("T-1", by_hand=False)
+    st.retire("T-1", 1)
+    assert st.links()["T-1"]["retired_why"] == "done" and not st.relink_if_lost("T-1")

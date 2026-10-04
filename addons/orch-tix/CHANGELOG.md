@@ -2,6 +2,8 @@
 
 ## 0.2.0
 
+- A ticket the server answered `gone` for is linked again on the next sync cycle as a new generation (once per cycle, when the sync policy would mirror it); by-hand unlinks and done cleanups stay retired. The link records why it was retired (`retired_why`).
+
 - The mirrored document carries orch-core's `signed` block (schema 1.6) at full and title (never key-only), cleaned to `{signed, by}` per gate and verdict; the phone names who signed each approved gate and the verdict. An older orch-core sends none and the phone keeps its "not signed here" wording.
 - A held decision's reason on the phone comes from `RemoteResult.code` (orch-core API 2.4); unknown codes fall back by status, and message matching stays only for an orch-core that sends no code.
 - Phone v4: at `full`, pinned images the gated text shows or that prove a criterion are shared (once, at most 4 per push) so the phone can show them after verifying their sha256; `title` keeps artifact items without labels.
