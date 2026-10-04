@@ -162,3 +162,13 @@ def test_title_summary_follows_commonmark_fences_and_never_leaks_a_fence_body():
     assert _summary("   ```\nSECRET\n   ```\nok") == "ok"                        # up to 3 spaces opens and closes
     assert _summary("    ```\nindented code is prose to this rule") == "```"      # 4 spaces: no fence
     assert _summary("\n\n  All green.  \nmore") == "All green."
+
+
+def test_title_summary_stops_at_every_line_separator():
+    for sep in ("\u2028", "\u2029", "\x85", "\x0b", "\x0c", "\r", "\r\n", "\n"):
+        assert _summary(f"prose{sep}SECRET") == "prose", repr(sep)
+    assert _summary("prose \u2028SECRET") == "prose"
+    out = _summary("prose\r```orch\rSECRET\r```")
+    assert out == "prose" and "SECRET" not in out
+    assert _summary("```orch\rSECRET\r```\rok") == "ok"
+    assert _summary("```orch\r\nSECRET\r\n```\r\nok") == "ok"

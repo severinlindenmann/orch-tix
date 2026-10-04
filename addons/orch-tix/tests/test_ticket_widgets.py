@@ -292,5 +292,5 @@ def test_with_agent_html_off_on_the_desktop_no_note_page_is_ever_shared(tix_ws, 
     tid = _ticket(tix_ws, tix, {"redaction": "full", "sync_widget_docs": "always"}, html=False)
     bars, matrix = runner.files[-1]["doc"]["widgets"]
     assert "doc" in bars and set(matrix) == {"section", "index", "key", "layer", "name", "title", "text", "raw_sha256"}
-    assert "off" in matrix["text"].lower() or matrix["text"]       # the text alternative still goes
+    assert matrix["text"] and "Storage" in matrix["text"] + matrix["title"]   # the text alternative still goes
     assert not _shares(runner) and _files_of(tix, tid) == {}

@@ -66,14 +66,14 @@ def _first_line(text) -> str:
     3+ backticks or tildes (a backtick run with a backtick in its info string is no fence) and closes only on a run of
     the same character, at least as long, with nothing after it. An unclosed fence runs to the end: nothing."""
     fence = None
-    for line in str(text or "").split("\n"):
+    for line in str(text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
         m = _FENCE.match(line)
         if fence is None:
             if m and not (m[1][0] == "`" and "`" in m[2]):
                 fence = m[1]
                 continue
             if line.strip():
-                return line.strip()
+                return line.strip().splitlines()[0].strip()      # cut at any other Unicode line separator
         elif m and m[1][0] == fence[0] and len(m[1]) >= len(fence) and not m[2].strip():
             fence = None
     return ""
