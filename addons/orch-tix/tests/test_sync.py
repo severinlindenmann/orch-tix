@@ -1,6 +1,9 @@
+import hashlib
 from pathlib import Path
 
-from helpers import ADDON, PUSH, SHARING, CapturingRunner, ok
+import pytest
+
+from helpers import ADDON, PUSH, REC, SHARING, CapturingRunner, ok
 from orch.addons.loader import AddonRegistry
 from orch.addons.outbox import Outbox, outbox_path, pump_all
 from orch.core.events import Actor
@@ -144,9 +147,10 @@ def test_context_artifact_is_shared_and_rides_along(tix_ws, tix, runner, tmp_pat
     pump_all(tix_ws.ws, tix_ws.ws.addons)
     shares = [c for c in runner.calls if c[1] == "share"]
     assert len(shares) == 1 and shares[0][shares[0].index("--name") + 1] == "plot.png"
-    assert shares[0][2].endswith(f"{tid}/plot.png")
+    assert "/out/share-" in shares[0][2]                 # a private copy of the checked bytes, never the path itself
     assert runner.files[-1]["doc"]["context_artifacts"] == [{"name": "plot.png", "file": "FILE91"}]
-    assert tix.obj.state.links()[tid]["context_artifacts"] == [{"name": "plot.png", "file": "FILE91"}]
+    (kept,) = tix.obj.state.links()[tid]["context_artifacts"]
+    assert {k: kept[k] for k in ("name", "file")} == {"name": "plot.png", "file": "FILE91"} and len(kept["sha256"]) == 64
 
 
 def test_sync_artifacts_never_shares_nothing(tix_ws, tix, runner, tmp_path):
@@ -360,3 +364,141 @@ def test_a_decision_applied_through_the_addon_reaches_the_history_and_text_stays
     pump_all(tix_ws.ws, tix_ws.ws.addons)
     sent = [h["what"] for h in runner.files[-1]["doc"]["history"]]
     assert "answered Q1" in sent and "asked Q2" in sent
+
+
+# ---- phone v4: pinned images the phone shows travel as FILEs (it verifies their sha256 before showing them) ----
+
+def test_at_full_a_pinned_proof_image_is_shared_once_and_title_keeps_items_without_labels(tix_ws, tix, runner, tmp_path):
+    tix_ws.enable("orch-tix", {"sharing_path": SHARING, "redaction": "full"})
+    _registry(tix_ws, tix)
+    ops = Ops(tix_ws.ws, AGENT)
+    tid = _ask(tix_ws, ops)
+    ops.set_section(tid, "Acceptance criteria", "- [ ] Opens in Excel")
+    pump_all(tix_ws.ws, tix_ws.ws.addons)
+    f = tmp_path / "proof.png"
+    f.write_bytes(b"\x89PNG fake")
+    ops.artifact_add(tid, f, "proof.png", kind="screenshot", ac=1, label="client secret label")
+    ops.artifact_add(tid, f, "other.png", kind="screenshot")          # neither in the gated text nor proof: stays
+    pump_all(tix_ws.ws, tix_ws.ws.addons)
+    pump_all(tix_ws.ws, tix_ws.ws.addons)
+    shares = [c[c.index("--name") + 1] for c in runner.calls if c[1] == "share"]
+    assert shares == ["proof.png"]                                    # once, not on every push
+    doc = runner.files[-1]["doc"]
+    assert {"name": "proof.png", "file": "FILE91"} in doc["context_artifacts"]
+    item = next(i for i in doc["artifact_items"] if i.get("name") == "proof.png")
+    assert len(item["sha256"]) == 64 and item["ac"] == 1
+
+
+def test_title_artifact_items_carry_no_label():
+    from orch_tix.mapping import redact
+    doc = {"id": "DEMO-1", "artifact_items": [{"source": "file", "kind": "screenshot", "label": "client secret", "name": "a.png",
+                                               "sha256": "a" * 64, "ac": 1}, {"source": "link", "kind": "link", "label": "PR"}]}
+    t = redact(doc, "title", sync_log=False, context_artifacts=[])
+    assert t["artifact_items"] == [{"source": "file", "kind": "screenshot", "name": "a.png", "sha256": "a" * 64, "ac": 1},
+                                   {"source": "link", "kind": "link"}]
+    assert "artifact_items" not in redact(doc, "key-only", sync_log=False, context_artifacts=[])
+
+
+
+# ---- review T7: the checked share (no links, inside the ticket's folder, the pinned bytes), re-pins, back-off, caps ----
+
+def _full_ticket(tix_ws, tix, ops, level="full"):
+    tix_ws.enable("orch-tix", {"sharing_path": SHARING, "redaction": level})
+    _registry(tix_ws, tix)
+    tid = _ask(tix_ws, ops)
+    ops.set_section(tid, "Acceptance criteria", "- [ ] one\n- [ ] two\n- [ ] three\n- [ ] four\n- [ ] five")
+    pump_all(tix_ws.ws, tix_ws.ws.addons)
+    return tid
+
+
+def _proof(ops, tid, tmp_path, name, data=b"\x89PNG proof", ac=1):
+    f = tmp_path / name
+    f.write_bytes(data)
+    ops.artifact_add(tid, f, name, kind="screenshot", ac=ac)
+    return tix_ws_artifact(ops, tid, name)
+
+
+def tix_ws_artifact(ops, tid, name):
+    return ops.ws.artifacts_dir / tid / name
+
+
+def _shared(runner):
+    return [c[c.index("--name") + 1] for c in runner.calls if c[1] == "share"]
+
+
+@pytest.mark.parametrize("level", ["title", "key-only"])
+def test_no_pinned_image_is_shared_below_full(tix_ws, tix, runner, tmp_path, level):
+    ops = Ops(tix_ws.ws, AGENT)
+    tid = _full_ticket(tix_ws, tix, ops, level)
+    _proof(ops, tid, tmp_path, "proof.png")
+    pump_all(tix_ws.ws, tix_ws.ws.addons)
+    assert _shared(runner) == []
+
+
+def test_at_most_four_pinned_images_per_push(tix_ws, tix, runner, tmp_path):
+    ops = Ops(tix_ws.ws, AGENT)
+    tid = _full_ticket(tix_ws, tix, ops)
+    for i in range(1, 6):
+        _proof(ops, tid, tmp_path, f"p{i}.png", f"\x89PNG {i}".encode(), ac=i)
+    shared_before = len(_shared(runner))
+    from orch_tix.sync import share_pinned
+    n = share_pinned(tix.obj, tix.ctx.provider_context(), tid, tix.ctx.document(tid))
+    assert n <= 4 and len(_shared(runner)) - shared_before <= 4
+
+
+def test_a_symlinked_or_hard_linked_or_swapped_artifact_is_never_shared(tix_ws, tix, runner, tmp_path):
+    import os
+    ops = Ops(tix_ws.ws, AGENT)
+    tid = _full_ticket(tix_ws, tix, ops)
+    secret = tmp_path / "secret.txt"
+    secret.write_bytes(b"ssh key")
+    from orch_tix.cli import SharingError
+    from orch_tix.sync import checked_artifact
+    pctx = tix.ctx.provider_context()
+    a = _proof(ops, tid, tmp_path, "a.png")
+    a.unlink()
+    a.symlink_to(secret)                                            # an agent swaps the pinned file for a link
+    with pytest.raises(SharingError):
+        checked_artifact(pctx, tid, "a.png")
+    b = _proof(ops, tid, tmp_path, "b.png")
+    b.unlink()
+    os.link(secret, b)                                              # or for a hard link
+    with pytest.raises(SharingError):
+        checked_artifact(pctx, tid, "b.png")
+    c = _proof(ops, tid, tmp_path, "c.png", b"\x89PNG pinned")
+    c.write_bytes(b"\x89PNG other bytes")                            # or rewrites it after it was pinned
+    with pytest.raises(SharingError, match="pinned sha256"):
+        checked_artifact(pctx, tid, "c.png", expect_sha=hashlib.sha256(b"\x89PNG pinned").hexdigest())
+    with pytest.raises(SharingError):
+        checked_artifact(pctx, tid, "../../secret.txt")             # `..` never leaves the folder (base name only)
+    pump_all(tix_ws.ws, tix_ws.ws.addons)
+    assert "a.png" not in _shared(runner) and "b.png" not in _shared(runner) and "c.png" not in _shared(runner)
+
+
+def test_a_re_pinned_image_is_shared_again(tix_ws, tix, runner, tmp_path):
+    ops = Ops(tix_ws.ws, AGENT)
+    tid = _full_ticket(tix_ws, tix, ops)
+    _proof(ops, tid, tmp_path, "proof.png", b"\x89PNG v1")
+    pump_all(tix_ws.ws, tix_ws.ws.addons)
+    assert _shared(runner).count("proof.png") == 1
+    f = tmp_path / "proof.png"
+    f.write_bytes(b"\x89PNG v2")
+    ops.artifact_add(tid, f, "proof.png", kind="screenshot", ac=1, replace=True)
+    pump_all(tix_ws.ws, tix_ws.ws.addons)
+    assert _shared(runner).count("proof.png") == 2
+
+
+def test_a_failed_pinned_share_backs_off_and_is_noted_once(tix_ws, tmp_path):
+    runner = CapturingRunner.from_dir(REC, strict=True)
+    runner.recordings = [r for r in runner.recordings if r.argv[1:2] != ("share",)]
+    runner.add(SHARE, returncode=7, stdout_json={"error": "network", "detail": "cannot reach the server"})
+    tix = tix_ws.load(ADDON, runner=runner)
+    ops = Ops(tix_ws.ws, AGENT)
+    tid = _full_ticket(tix_ws, tix, ops)
+    _proof(ops, tid, tmp_path, "proof.png")
+    for _ in range(3):
+        Ops(tix_ws.ws, AGENT).log(tid, "more work")
+        pump_all(tix_ws.ws, tix_ws.ws.addons)
+    assert _shared(runner).count("proof.png") == 1                  # not retried within the hour
+    assert sum("proof.png" in e for e in tix.obj.errors) == 1        # noted once
+    assert len([e for e in tix.obj.state.sent_log() if e["kind"] == "file" and e["result"] == "retry"]) == 1

@@ -1,12 +1,12 @@
 # Ticket format example
 
-Generated with `orch schema example` (orch-core schema 1.4.0). Do not edit by hand.
+Generated with `orch schema example` (orch-core schema 1.5.0). Do not edit by hand.
 
 This is the document the orch-tix addon builds a mirror from (`ctx.document`). What reaches the phone is a redacted view of it; see the `redaction` setting in `addons/orch-tix/README.md`.
 
 ```json
 {
-  "schema_version": "1.4.0",
+  "schema_version": "1.5.0",
   "id": "DEMO-0038",
   "title": "Export the meter readings as CSV",
   "type": "feature",
@@ -202,6 +202,7 @@ This is the document the orch-tix addon builds a mirror from (`ctx.document`). W
     }
   ],
   "artifacts": [],
+  "artifact_items": [],
   "verdict": null,
   "move": {
     "who": "you",

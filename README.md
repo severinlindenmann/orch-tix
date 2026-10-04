@@ -104,6 +104,15 @@ The phone writes decisions, never tickets. An answer or approval is sealed, sent
 and applied there. An approval binds a hash of exactly the text the phone showed, so if the plan
 changed in the meantime, nothing is approved.
 
+- **Images on the phone are pinned.** A ticket shows only images that orch-core pinned by sha256 in the
+  ticket (`artifact_items`) and that the desktop shared as a FILE. The phone downloads and decrypts the
+  FILE like any file and shows it only when its bytes hash to the pinned sha256 (a mismatch shows the
+  label). It never loads a URL from ticket text. At `full` the orch-tix addon shares the images the
+  gated text shows or that prove a criterion.
+- **Who agreed is named only from a signed ledger.** The mirror does not carry the desktop's signed
+  ledger, so the phone uses orch-core's own wording ("approval not signed here", "closed, not signed
+  here").
+
 <p>
   <img src="docs/images/needs-you-phone.png" alt="Needs you: a ticket waiting for an answer" width="30%">
   <img src="docs/images/ticket-phone.png" alt="Answering an agent's question on the phone" width="30%">

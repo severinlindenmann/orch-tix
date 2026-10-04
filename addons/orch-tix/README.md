@@ -63,6 +63,18 @@ confidential clients.
 `setting:sharing_path` only: the `sharing` CLI, run with an argv list through `ctx.run`. Payload files are
 written to `orchestrator/.state/addons/orch-tix/out/` and removed right after each call.
 
+## Pinned images
+
+At `full` (and unless `sync_artifacts` is `never`), each push also shares, once, the image artifacts that orch-core
+pinned by sha256 and that the gated text shows (`![…](artifact:<name>)`) or that prove a criterion, at most 4 per push.
+Every share (pinned or on request) reads the artifact once the way orch-core does: opened without following a link,
+a plain file with one link, inside `artifacts/<KEY>/`, and for a pinned image only when its bytes still hash to the
+pinned sha256; the sharing CLI gets a private copy of exactly those bytes. Pinned images go out after the mirror push
+(each push waits at most 10 s for them); one that was re-pinned (`--replace`) is shared again; a failed one is tried
+again at most hourly and noted once. The phone shows such an image only after hashing its bytes against the pinned
+sha256. `title` sends the artifact
+items without their labels; `key-only` none.
+
 ## Sent to TIX log
 
 The Shared files page's **Sent to TIX** tab lists, newest first, what this machine sent and what came back:

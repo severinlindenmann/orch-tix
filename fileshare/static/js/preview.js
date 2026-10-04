@@ -103,5 +103,7 @@ export async function resolveRow(row) {
 export async function fetchPlaintext(row) {
   const res = await api("GET", `/api/files/${encodeURIComponent(row.id)}/blob`, { raw: true });
   const blob = new Uint8Array(await res.arrayBuffer());
+  // the ciphertext must be the size the file says it is (pinned images use images.js fetchCapped, which also caps it)
+  if (Number.isInteger(row.size) && blob.byteLength !== row.size) throw new IntegrityError("size mismatch");
   return decryptBlob(row.dek, hexToBytes(row.uuid), blob);
 }

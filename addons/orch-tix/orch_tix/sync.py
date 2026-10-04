@@ -1,9 +1,14 @@
 """Up-sync (spec §4.1): on_event only enqueues; drain builds one snapshot per ticket and pushes it."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import secrets
+import stat
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import history
@@ -67,7 +72,73 @@ def sent_fields(doc: dict) -> list[str]:
     return out
 
 
-def push(addon, ctx, key: str, doc: dict) -> str:
+IMAGE_KINDS = ("screenshot", "diagram")
+IMAGE_EXT = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+PINNED_PER_PUSH = 4
+_ARTIFACT_REF = re.compile(r"!\[[^\]]*\]\(artifact:([^)\s]+)\)")
+
+
+def pinned_to_share(doc: dict, sent: set) -> list[tuple[str, str]]:
+    """Phone v4: the pinned images a full ticket shows, not yet sent: image artifacts with a sha256 that the gated text
+    shows (![…](artifact:<name>)) or that prove a criterion. The phone shows them only after hashing the bytes."""
+    shown = set()
+    for g in (doc.get("gates") or {}).values():
+        covers = g.get("covers") if isinstance(g, dict) and isinstance(g.get("covers"), list) else []
+        for name in covers:
+            text = (doc.get("sections") or {}).get(name)
+            if isinstance(text, str):
+                shown.update(_ARTIFACT_REF.findall(text))
+    out = []
+    for it in doc.get("artifact_items") or []:
+        if not isinstance(it, dict) or it.get("source") != "file" or not isinstance(it.get("sha256"), str):
+            continue
+        name, sha = str(it.get("name") or ""), it["sha256"]
+        # `sent` holds (name, sha256): an image re-pinned with --replace (a new sha256) is shared again
+        if (it.get("kind") in IMAGE_KINDS and name.lower().endswith(IMAGE_EXT) and (name, sha) not in sent
+                and "/" not in name and (name in shown or isinstance(it.get("ac"), int))):
+            out.append((name, sha))
+    return out[:PINNED_PER_PUSH]
+
+
+SHARE_RETRY = timedelta(hours=1)        # a pinned image that failed to share is tried again at most hourly
+PINNED_TIMEOUT_S = 10                   # each pinned share; they run after the mirror push, at most this long in all
+MAX_SHARE_BYTES = 50 * 1024 * 1024
+
+
+def share_pinned(addon, ctx, key: str, doc: dict) -> int:
+    """Share the pinned images a full ticket shows that are not on the phone yet (or were re-pinned). Runs after the
+    mirror push, never before it; stops after PINNED_TIMEOUT_S in all. A failure is retried at most hourly and noted
+    once per failure (the same sha256 and reason are not noted again). Returns how many were shared."""
+    st = addon.state
+    link = st.links().get(key) or {}
+    sent = {(a.get("name"), a.get("sha256")) for a in link.get("context_artifacts") or []}
+    failed = link.get("share_failures") or {}
+    now = datetime.now(timezone.utc)
+    started, shared = time.monotonic(), 0
+    for name, sha in pinned_to_share(doc, sent):
+        f = failed.get(name) or {}
+        try:
+            last = datetime.fromisoformat(str(f.get("at"))) if f.get("sha256") == sha else None
+        except ValueError:
+            last = None
+        if last is not None and now - last < SHARE_RETRY:
+            continue
+        left = PINNED_TIMEOUT_S - (time.monotonic() - started)
+        if left <= 1:
+            break
+        try:
+            share_artifact(addon, ctx, key, name, expect_sha=sha, timeout=left, quiet=True)
+            st.share_failure(key, name, None)
+            shared += 1
+        except SharingError as e:
+            if st.share_failure(key, name, {"sha256": sha, "code": e.code, "at": now.isoformat()}):
+                addon.note_error(f"share {key}/{name}: {e.detail}")
+                st.log({"kind": "file", "key": key, "fields": ["artifact"], "result": "refused" if e.code == "refused" else "retry",
+                        "reason": f"{e.code}: {e.detail}"[:200]})
+    return shared
+
+
+def push(addon, ctx, key: str, doc: dict, *, pinned: bool = True) -> str:
     """Push one snapshot of `key`. Returns the CLI status: pushed | stale | duplicate | gone."""
     st, settings = addon.state, ctx.settings
     link = st.links()[key]
@@ -104,27 +175,82 @@ def push(addon, ctx, key: str, doc: dict) -> str:
     stored = r.get("rev") if isinstance(r.get("rev"), int) else rev     # after a takeover: server_rev + 1
     st.commit_rev(key, max(stored, int(r.get("server_rev") or 0)), r.get("id"), gen=gen,
                   done=doc.get("status") == "done")
+    # Phone v4: the pinned images go after the mirror (which never waits for them); when some went out, one more push
+    # carries their FILEs
+    if pinned and level == "full" and (settings.get("sync_artifacts") or "on-request") != "never":
+        if share_pinned(addon, ctx, key, doc):
+            return push(addon, ctx, key, doc, pinned=False)
     return status
 
 
-def share_artifact(addon, ctx, key: str, name: str) -> str:
-    """Share one artifact of `key` as a context FILE (7 days) and remember it on the link; returns the FILE id."""
+def checked_artifact(ctx, key: str, name: str, expect_sha: str | None = None) -> tuple[bytes, str]:
+    """The bytes of artifact `name` of `key`, read once, as orch-core reads them: opened without following a link
+    (O_NOFOLLOW), a plain file with one link (no hard link), inside artifacts/<key> after resolving, and, when the
+    item is pinned, hashing to its sha256. Returns (bytes, sha256 hex); SharingError otherwise."""
     name = Path(str(name)).name
-    path = ctx.addon.ws.artifacts_dir / key / name
-    if not name or not path.is_file():
+    if not name or name in (".", ".."):
         raise SharingError("not_found", f"{key} has no artifact {name!r}")
+    root = Path(os.path.realpath(ctx.addon.ws.artifacts_dir))
+    base = ctx.addon.ws.artifacts_dir / key
+    if Path(os.path.realpath(base)) != root / key:
+        raise SharingError("refused", f"the artifact folder of {key} is a link")
+    path = base / name
     try:
-        r = addon.sharing(ctx).run_json("share", str(path), "--name", name, "--ttl", "7d", "--tag", "context", timeout=120)
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except OSError:
+        raise SharingError("not_found", f"{key} has no artifact {name!r} (or it is a link)") from None
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise SharingError("refused", f"{key}/{name} is not a plain file (a link)")
+        if Path(os.path.realpath(path)).parent != root / key:
+            raise SharingError("refused", f"{key}/{name} is outside the ticket's artifacts")
+        if info.st_size > MAX_SHARE_BYTES:
+            raise SharingError("refused", f"{key}/{name} is larger than {MAX_SHARE_BYTES} bytes")
+        chunks, total = [], 0
+        while True:
+            chunk = os.read(fd, 1 << 20)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_SHARE_BYTES:
+                raise SharingError("refused", f"{key}/{name} is larger than {MAX_SHARE_BYTES} bytes")
+            chunks.append(chunk)
+    finally:
+        os.close(fd)
+    data = b"".join(chunks)
+    digest = hashlib.sha256(data).hexdigest()
+    if expect_sha is not None and digest != expect_sha:
+        raise SharingError("refused", f"{key}/{name} no longer matches its pinned sha256")
+    return data, digest
+
+
+def share_artifact(addon, ctx, key: str, name: str, *, expect_sha: str | None = None, timeout: float = 120,
+                   quiet: bool = False) -> str:
+    """Share one artifact of `key` as a context FILE (7 days) and remember it on the link (with its sha256); returns
+    the FILE id. The CLI gets a private copy of exactly the checked bytes (checked_artifact), never the path."""
+    name = Path(str(name)).name
+    data, digest = checked_artifact(ctx, key, name, expect_sha)
+    copy = out_dir(ctx) / f"share-{secrets.token_hex(8)}"
+    fd = os.open(copy, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+    try:
+        r = addon.sharing(ctx).run_json("share", str(copy), "--name", name, "--ttl", "7d", "--tag", "context",
+                                        timeout=timeout)
     except SharingError as e:
-        addon.state.log({"kind": "file", "key": key, "fields": ["artifact"], "size": path.stat().st_size,
-                         "result": "refused" if e.code == "refused" else "retry", "reason": f"{e.code}: {e.detail}"[:200]})
+        if not quiet:
+            addon.state.log({"kind": "file", "key": key, "fields": ["artifact"], "size": len(data),
+                             "result": "refused" if e.code == "refused" else "retry", "reason": f"{e.code}: {e.detail}"[:200]})
         raise
+    finally:
+        copy.unlink(missing_ok=True)
     file_id = str(r.get("id") or "")
-    addon.state.log({"kind": "file", "key": key, "tix": file_id, "fields": ["artifact"], "size": path.stat().st_size,
+    addon.state.log({"kind": "file", "key": key, "tix": file_id, "fields": ["artifact"], "size": len(data),
                      "result": "ok" if file_id else "refused"})
     if not file_id:
         raise SharingError("bad_output", "the sharing CLI did not return a FILE id")
-    addon.state.add_context_artifact(key, name, file_id)
+    addon.state.add_context_artifact(key, name, file_id, sha256=digest)
     return file_id
 
 

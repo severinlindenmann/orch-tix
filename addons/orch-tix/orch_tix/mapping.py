@@ -84,6 +84,7 @@ def _full(doc: dict, sync_log: bool, context_artifacts) -> dict:
 
 
 _MOVE_KEYS = ("who", "kind", "label", "ref", "why", "epic")
+_ITEM_KEYS = ("source", "kind", "name", "sha256", "task", "ac")
 
 
 def _move(doc: dict, keys=_MOVE_KEYS) -> dict | None:
@@ -113,6 +114,8 @@ def _title(doc: dict, context_artifacts) -> dict:
     out["claim"] = {"harness": (doc.get("claim") or {}).get("harness")}
     out["artifacts"] = [str(a) for a in doc.get("artifacts") or []]
     out["context_artifacts"] = _context(context_artifacts)
+    # schema 1.5 artifacts: names, kinds, the pinned sha256 and what they prove; the labels (free text) stay at full
+    out["artifact_items"] = [_keep(i, _ITEM_KEYS) for i in doc.get("artifact_items") or [] if isinstance(i, dict)]
     return out
 
 

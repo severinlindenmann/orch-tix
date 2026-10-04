@@ -138,12 +138,26 @@ class State:
                 links[key]["redaction"] = value
         self._update("links.json", fn)
 
-    def add_context_artifact(self, key: str, name: str, file_id: str) -> None:
+    def add_context_artifact(self, key: str, name: str, file_id: str, *, sha256: str | None = None) -> None:
         def fn(links):
             entry = links.setdefault(key, {"gen": 1, "rev": 0})
             arts = [a for a in entry.get("context_artifacts") or [] if a.get("name") != name]
-            entry["context_artifacts"] = [*arts, {"name": name, "file": file_id}]
+            entry["context_artifacts"] = [*arts, {"name": name, "file": file_id, **({"sha256": sha256} if sha256 else {})}]
         self._update("links.json", fn)
+
+    def share_failure(self, key: str, name: str, failure: dict | None) -> bool:
+        """Record (or with None clear) the last failed share of a pinned image. True when this failure is new: another
+        sha256 or reason than the one recorded, so it is noted once per failure."""
+        def fn(links):
+            entry = links.setdefault(key, {"gen": 1, "rev": 0})
+            fails = entry.setdefault("share_failures", {})
+            old = fails.get(name)
+            if failure is None:
+                fails.pop(name, None)
+                return False
+            fails[name] = failure
+            return not old or old.get("sha256") != failure.get("sha256") or old.get("code") != failure.get("code")
+        return self._update("links.json", fn)
 
     # -- the "Sent to TIX" log (feedback round E): what left this machine and what came back ------------
     def log(self, entry: dict) -> None:

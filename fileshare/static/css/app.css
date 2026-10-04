@@ -793,7 +793,7 @@ h1, h2, h3, .page-title, .settings-title, .brand-main, .ws-title, .t-title { fon
 .title-count:empty { display: none; }
 .phone-page .page-body { max-width: 640px; }
 .needs-list { display: flex; flex-direction: column; gap: 12px; }
-.slot-join, .slot-top, .needs-sections { display: contents; }
+.slot-join, .slot-top, .slot-search, .needs-sections { display: contents; }
 .ws { display: flex; flex-direction: column; gap: 10px; }
 .ws-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-top: 6px; }
 .ws-title { font-size: 16px; font-weight: 800; }
@@ -914,6 +914,46 @@ h1, h2, h3, .page-title, .settings-title, .brand-main, .ws-title, .t-title { fon
 .section-text, .gate-text, .hist li, .qa-text, .dq-head, .dq-opt-text, .qa-label, .ncard-title, .t-title, .chap-line, .task { unicode-bidi: plaintext; }
 .hist-caption { margin-bottom: 4px; }
 .hidden-refused { align-items: flex-start; }
+/* ---- phone v4 (orch-core M-report "TIX"): journey, board, receipts, proof, pinned images ---- */
+.seg5 { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+.seg5 i { display: block; height: 5px; border-radius: 3px; background: var(--line); }
+.seg5 i.seg-done { background: var(--ok-mark); }
+.seg5 i.seg-doing { background: var(--info-mark); }
+.journey { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.journey-words { font-size: 12px; color: var(--muted); }
+.card-h { font: var(--type-item); }
+.proof, .arts { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; }
+.proof-list { list-style: none; margin: 0; padding: 0; font-size: 13.5px; display: flex; flex-direction: column; gap: 4px; }
+.proof-open { font-size: 13px; }
+.pin { margin: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: var(--r-md);
+  background: var(--surface2); border: 1px solid var(--line); color: var(--muted); font-size: 12.5px; text-align: center; }
+.pin img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.pin-alt { padding: 6px; overflow-wrap: anywhere; }
+.pin-card { height: 96px; margin: 0 14px; }
+.pin-proof { height: 120px; }
+.pin-thumb { height: 60px; }
+.art-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.art-items { list-style: none; margin: 0; padding: 0; font-size: 13.5px; display: flex; flex-direction: column; gap: 4px; }
+.art-pr { font-size: 13.5px; font-weight: 600; }
+.lab { font: var(--type-meta); color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-top: 6px; }
+.board-search { margin-bottom: 4px; }
+.brow { display: flex; align-items: center; gap: 10px; min-height: var(--tap); padding: 8px 14px; color: var(--text); text-decoration: none; }
+.brow.is-you { border-left: 1px solid var(--line); box-shadow: inset var(--rail-w) 0 0 var(--you-mark), var(--shadow-card); }
+.brow-dot { min-height: 22px !important; padding: 0 6px !important; }
+.brow-text { flex-grow: 1; min-width: 0; overflow-wrap: break-word; }
+.brow-go { color: var(--muted); font-weight: 700; }
+.bagent { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; color: var(--text); text-decoration: none; min-height: var(--tap); }
+.bagent-head { display: flex; align-items: flex-start; gap: 8px; }
+.bagent-title { flex-grow: 1; min-width: 0; overflow-wrap: break-word; }
+.bfold { padding: 0 14px; }
+.bfold > summary { display: flex; align-items: center; justify-content: space-between; min-height: var(--tap); cursor: pointer; list-style: none; }
+.bfold > summary::-webkit-details-marker { display: none; }
+.bfold-body { display: flex; flex-direction: column; gap: 2px; padding-bottom: 10px; }
+.brow-plain { display: block; min-height: 32px; padding: 6px 0; color: var(--text); text-decoration: none; }
+.receipts { display: flex; flex-direction: column; gap: 8px; }
+.receipt { display: flex; align-items: center; gap: 10px; padding: 10px 14px; font-size: 13.5px; }
+.receipt-text { flex-grow: 1; }
+.qa-text { font-weight: 700; font-size: 15px; }
 /* the gate's confirm sheet: a bottom sheet on a phone, the safe option on top */
 dialog.sheet-confirm { width: min(var(--dialog-w), calc(100vw - 32px)); padding: var(--dialog-pad); border: 0; border-radius: var(--dialog-radius);
   background: var(--overlay); box-shadow: var(--shadow-overlay); }
