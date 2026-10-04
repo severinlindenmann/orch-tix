@@ -4,7 +4,7 @@ from pathlib import Path
 
 STATIC = Path(__file__).resolve().parents[1] / "fileshare" / "static"
 POPUP = re.compile(r"(?<![\w.$])(?:window\.|globalThis\.|self\.)?(alert|confirm|prompt)\s*\(")
-PHONE = ["needs.js", "ticket.js", "ticket-card.js", "decision-send.js", "phone-inbox.js", "mirror-model.js", "textsafe.js"]
+PHONE = ["needs.js", "ticket.js", "ticket-card.js", "decision-send.js", "phone-inbox.js", "mirror-model.js", "textsafe.js", "images.js"]
 
 
 def _code(text: str) -> str:

@@ -260,11 +260,122 @@ export function cardLine(row, doc) {
 
 // The card's action label for a gate or a verdict (it opens the ticket's read-and-decide view).
 export function cardAction(row, doc) {
-  if (row?.needs === "approval") return `Read ${approvalGate(doc) === "requirements" ? "requirements" : "plan"} and approve`;
+  if (row?.needs === "approval") return "Review and approve";
   if (row?.needs === "verdict") return "Review and decide";
   return "";
 }
 
 export function chipFor(state) {
   return { role: ROLE[state] || "neu", glyph: GLYPH[state] || GLYPH.todo };
+}
+
+// ---- phone v4 (orch-core M-report "TIX"): journey, blocking headline, task bar, proof, pinned images
+
+const approvedGate = (doc, g) => doc?.gates?.[g]?.state === "approved";
+
+// Five equal stages: Asked always done; Agreed done when requirements (and plan) are approved; Doing while in
+// progress or waiting; Proven while testing; Done when done. [{name, state: done|now|todo}] (core has no journey key).
+export function journey(doc) {
+  const s = doc?.status;
+  // Agreed: the requirements are approved and so is the plan, or the work has started without one (core skips the plan
+  // gate for small sizes, `plan_skip_sizes`; schema 1.5 has no skip flag, the plan gate simply stays pending)
+  const working = s === "in-progress" || s === "waiting" || s === "testing" || s === "done";
+  const awaiting = (Array.isArray(doc?.needs) ? doc.needs : []).some((n) => /^(approve-|re-approve)/.test(String(n?.kind)));
+  const agreed = approvedGate(doc, "requirements") && (approvedGate(doc, "plan") || (working && !awaiting));
+  const stage = s === "done" ? 5 : s === "testing" ? 3 : agreed ? 2 : 1;
+  return ["Asked", "Agreed", "Doing", "Proven", "Done"].map((name, i) => ({
+    name, state: s === "done" || i < stage ? "done" : i === stage ? "now" : "todo" }));
+}
+
+// Who agreed: the mirror never says what the desktop's signed ledger holds, so no human is named; the wording is
+// core's own (dashboard story: "approval not signed here", "closed, not signed here").
+export function agreedNote(doc) {
+  const approved = ["requirements", "plan"].filter((g) => approvedGate(doc, g));
+  // the plan skipped by size: only the requirements were agreed
+  if (!approved.length) return "waits for your approval";
+  return `${approved.map((g) => (g === "requirements" ? "req" : "plan")).join(" + ")}, approval not signed here`;
+}
+
+export function doneNote(doc) {
+  return doc?.status === "done" ? "closed, not signed here" : "your verdict";
+}
+
+// A decision that blocks an agent: an approval, a verdict, or an open blocking question (the headline's count).
+export function isBlocking(row) {
+  if (row?.needs === "approval" || row?.needs === "verdict") return true;
+  if (row?.needs !== "question") return false;
+  return (Array.isArray(row.doc?.questions) ? row.doc.questions : []).some((q) => openQ(q) && q.blocking !== false);
+}
+
+export function blockingCount(rows) {
+  return (Array.isArray(rows) ? rows : []).filter(isBlocking).length;
+}
+
+// Five segments for an agent's card: done tasks scaled to five, then the one in progress.
+export function taskBar(doc, segments = 5) {
+  const t = tasksDone(doc);
+  const out = Array(segments).fill("todo");
+  if (!t) return out;
+  const done = Math.min(segments, Math.floor((t.done / t.total) * segments));
+  for (let i = 0; i < done; i += 1) out[i] = "done";
+  if (done < segments && text(doc?.tasks?.doing)) out[done] = "doing";
+  return out;
+}
+
+// "T4/5" (the task in progress of the total), or "3/5" done, or "".
+export function taskChip(doc) {
+  const t = tasksDone(doc);
+  if (!t) return "";
+  const on = text(doc?.tasks?.doing);
+  return on && /^T[1-9][0-9]*$/.test(on) ? `${on}/${t.total}` : `${t.done}/${t.total}`;
+}
+
+// The acceptance criteria as proof lines: [{n, text, done}] ("- [x] …" boxes, full only).
+export function acItems(doc) {
+  const s = text(doc?.sections?.["Acceptance criteria"]);
+  if (!s) return [];
+  const out = [];
+  for (const line of s.split("\n")) {
+    const m = /^\s*[-*]\s+\[([ xX/])\]\s*(.*)$/.exec(line);
+    if (m) out.push({ n: out.length + 1, text: m[2].trim(), done: m[1] === "x" || m[1] === "X" });
+  }
+  return out;
+}
+
+const IMAGE_KINDS = new Set(["screenshot", "diagram"]);
+const IMAGE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.(png|jpe?g|gif|webp)$/i;
+const SHA_HEX = /^[0-9a-f]{64}$/;
+const FILE_REF = /^FILE[1-9][0-9]{0,11}$/;
+
+// The images a ticket may show: artifact items of an image kind with a well-formed sha256 (pinned by core) whose
+// file reached the phone as a FILE (the addon's context artifacts, by name). [{name, sha256, file, label, ac, task}].
+// The phone fetches the FILE and shows it only when its bytes hash to this sha256 (images.js).
+export function pinnedImages(doc) {
+  const files = new Map((Array.isArray(doc?.context_artifacts) ? doc.context_artifacts : [])
+    .filter((a) => isObj(a) && typeof a.name === "string" && FILE_REF.test(String(a.file))).map((a) => [a.name, a.file]));
+  return (Array.isArray(doc?.artifact_items) ? doc.artifact_items : []).filter((it) => isObj(it) && it.source === "file"
+    && IMAGE_KINDS.has(it.kind) && typeof it.name === "string" && IMAGE_NAME.test(it.name) && SHA_HEX.test(String(it.sha256))
+    && files.has(it.name))
+    .map((it) => ({ name: it.name, sha256: it.sha256, file: files.get(it.name), label: typeof it.label === "string" ? it.label : it.name,
+      ac: Number.isInteger(it.ac) ? it.ac : null, task: typeof it.task === "string" ? it.task : null }));
+}
+
+const ARTIFACT_REF = /!\[[^\]]*\]\(artifact:([^)\s]+)\)/g;
+
+// The first pinned image the gated text of `gates` references as ![…](artifact:<name>); never a URL from the text.
+export function gateImage(doc, gates) {
+  const pinned = new Map(pinnedImages(doc).map((i) => [i.name, i]));
+  for (const g of gates || []) {
+    for (const name of Array.isArray(doc?.gates?.[g]?.covers) ? doc.gates[g].covers : []) {
+      const t = doc?.sections?.[name];
+      if (typeof t !== "string") continue;
+      for (const m of t.matchAll(ARTIFACT_REF)) if (pinned.has(m[1])) return pinned.get(m[1]);
+    }
+  }
+  return null;
+}
+
+// The first pinned image that proves an acceptance criterion.
+export function proofImage(doc) {
+  return pinnedImages(doc).find((i) => i.ac !== null) || null;
 }

@@ -17,9 +17,12 @@ import {
   NEEDS_LABEL, NEEDS_PILL, NOT_YET_MS, QUEUED_TEXT, UNKNOWN_SPACE, outcomeRole, outcomeText, approvalGate, canSendAnswer, cardTitle, decisionValue, groupBySpace,
   lastSeenText, needsYou, questionCount, targetFor,
 } from "./mirror-model.js";
-import { cardAction, cardLine, moveChip, progressStrip, quickAnswer } from "./ticket-card.js";
+import {
+  blockingCount, cardAction, cardLine, gateImage, moveChip, progressStrip, proofImage, quickAnswer, taskBar, taskChip,
+} from "./ticket-card.js";
+import { pinnedFigure } from "./images.js";
 import { OutboxFullError, queuedDecisions } from "./outbox-ui.js";
-import { sendDecisions } from "./decision-send.js";
+import { myDecisions, sendDecisions } from "./decision-send.js";
 import { pairingFor } from "./pairing.js";
 import { openDecision } from "./mirror-crypto.js";
 import { hexToBytes } from "./crypto.js";
@@ -74,7 +77,9 @@ function quickAnswerEl(row, doc, qa) {
   const slot = `${row.id}:${q.hash}`;
   const st = quick.get(slot) || { armed: null, ids: {}, busy: false, status: null };
   quick.set(slot, st);
-  const opts = qa.options.map((o) => el("button", { type: "button", class: "btn qa-opt", "aria-pressed": String(st.armed === o.key),
+  // the recommended option first (v4), each keeping its own number
+  const ordered = [...qa.options.filter((o) => o.rec), ...qa.options.filter((o) => !o.rec)];
+  const opts = ordered.map((o) => el("button", { type: "button", class: "btn qa-opt", "aria-pressed": String(st.armed === o.key),
     dataset: { key: o.key, fkey: `qa:${slot}:${o.key}` } }, el("span", { class: "qa-label" }, `${o.n} · `, shown(o.label)),
     o.rec ? el("span", { class: "pill r-ok qa-rec" }, icon("check"), el("span", {}, "recommended")) : null,
     o.cost ? el("span", { class: "dq-cost" }, String(o.cost)) : null));
@@ -199,8 +204,11 @@ function cardAct(row, doc) {
   const action = cardAction(row, doc);
   if (!action) return null;
   const line = cardLine(row, doc);
+  // v4: the gated text's first pinned image (or the proof's for a verdict), shown only once its sha256 is verified
+  const img = row.needs === "approval" ? gateImage(doc, ["requirements", "plan"]) : proofImage(doc);
   return el("div", { class: "card-act" }, line ? el("p", { class: "ncard-meta" }, line) : null,
-    el("a", { class: "btn btn-block card-go", href: `/t/${row.n}#answer` }, el("span", {}, action), el("span", { "aria-hidden": "true" }, "›")));
+    img ? pinnedFigure(img, "pin-card") : null,
+    el("a", { class: "btn btn-primary btn-block card-go", href: `/t/${row.n}#answer` }, el("span", {}, action), el("span", { "aria-hidden": "true" }, "›")));
 }
 
 function card(row, label, { tickets = false } = {}) {
@@ -212,7 +220,7 @@ function card(row, label, { tickets = false } = {}) {
   lines.push(label);
   if (row.needs === "question" && row.open_questions) lines.push(questionCount(row.open_questions));
   lines.push(shortAge(row.updated_at));
-  const pills = tickets ? [moveChipEl(row, doc)] : [doc ? needsChip(row, doc) : needsPill(row)];
+  const pills = tickets || doc?.move?.label ? [moveChipEl(row, doc)] : [doc ? needsChip(row, doc) : needsPill(row)];
   return el("article", { class: `card ncard${you ? " is-you" : ""}`, dataset: { n: String(row.n) } },
     el("a", { class: "ncard-link", href: `/t/${row.n}${you ? "#answer" : ""}` },
       el("span", { class: "ncard-row" }, el("span", { class: "ncard-pills" }, pills), el("b", { class: "ncard-key" }, key)),
@@ -262,9 +270,18 @@ async function render(state) {
   const labels = new Map([...spaces.values()].map((s) => [s.id, s.label || UNKNOWN_SPACE]));
   const groups = groupBySpace(list, labels);
   const count = document.getElementById("needs-count");
-  if (count) count.textContent = tickets ? String(list.length) : list.length ? `${list.length}` : "";
   const sub = document.getElementById("needs-sub");
-  if (sub) sub.textContent = groups.length ? `${groups.length} workspace${groups.length === 1 ? "" : "s"}` : "";
+  if (tickets) {
+    if (count) count.textContent = String(list.length);
+    if (sub) sub.textContent = groups.length ? `${groups.length} workspace${groups.length === 1 ? "" : "s"}` : "";
+  } else {
+    // v4: the headline counts the decisions that block an agent; the rest wait for a moment
+    const n = blockingCount(list);
+    const title = document.getElementById("needs-title");
+    if (title) title.textContent = n ? `${n} decision${n === 1 ? "" : "s"}` : list.length ? "Nothing blocks the agents" : "Needs you";
+    if (count) count.textContent = "";
+    if (sub) sub.textContent = n ? "then the agents run on their own" : list.length ? `${list.length} when you have a moment` : "";
+  }
   const root = document.getElementById("needs-list");
   const linked = rows.filter((r) => r.doc).length;
   const empty = tickets
@@ -285,18 +302,116 @@ async function render(state) {
   // open while the list refreshes) and the sections. A focused control that is rebuilt (an option of a card)
   // gets the focus back by its data-fkey.
   if (!state.slots) {
-    state.slots = { join: el("div", { class: "slot-join" }), top: el("div", { class: "slot-top" }), list: el("div", { class: "needs-sections" }) };
-    root.replaceChildren(state.slots.join, state.slots.top, state.slots.list);
+    state.slots = { join: el("div", { class: "slot-join" }), top: el("div", { class: "slot-top" }),
+      search: el("div", { class: "slot-search" }), list: el("div", { class: "needs-sections" }) };
+    // v4 Board: search and the lists first, the ticket request form after them
+    root.replaceChildren(...(tickets ? [state.slots.join, state.slots.search, state.slots.list, state.slots.top]
+      : [state.slots.join, state.slots.top, state.slots.search, state.slots.list]));
   }
   const focusKey = document.activeElement?.dataset?.fkey;
   state.slots.join.replaceChildren(joinBanner(joins, spaces) || "");
   if (state.slots.top.firstChild !== top) state.slots.top.replaceChildren(top || "");
-  state.slots.list.replaceChildren(...(groups.length ? groups.map((g) => section(g, spaces.get(g.space), { tickets })) : nothing ? [empty] : []));
+  // the board's search box keeps its node (and the phone keyboard) while the list below re-renders
+  if (tickets && list.length && !state.slots.search.firstChild) state.slots.search.replaceChildren(boardSearch(state));
+  state.slots.list.replaceChildren(...(tickets ? board(state, list)
+    : groups.length ? groups.map((g) => section(g, spaces.get(g.space), { tickets })) : nothing ? [empty] : []),
+  !tickets ? receiptsEl(state) : "");
   if (focusKey && document.activeElement?.dataset?.fkey !== focusKey) {
     [...root.querySelectorAll("[data-fkey]")].find((n) => n.dataset.fkey === focusKey)?.focus();
   }
   root.dataset.from = state.from;
   document.getElementById("needs-loading").hidden = !state.partial;
+}
+
+// ---- v4 Board (the Tickets tab): your move, the agents with their task bar, the folded backlog; a search box filters
+// as you type (title and key, on this phone only).
+const BOARD_STATUS_BACKLOG = new Set(["backlog"]);
+
+function boardRow(row) {
+  const doc = row.doc;
+  const key = doc?.id || row.id;
+  const label = moveChip(row, doc).text;          // the document's move label (hidden characters never), else local rules
+  return el("a", { class: "card brow is-you", href: `/t/${row.n}${row.needs ? "#answer" : ""}`, dataset: { n: String(row.n) } },
+    el("span", { class: "pill r-you brow-dot", "aria-hidden": "true" }, icon("dot")),
+    el("span", { class: "brow-text" }, el("b", {}, key), " ", shown(label)), el("span", { class: "brow-go", "aria-hidden": "true" }, "›"));
+}
+
+function agentCard(row) {
+  const doc = row.doc;
+  const key = doc?.id || row.id;
+  const chip = taskChip(doc);
+  return el("a", { class: "card bagent", href: `/t/${row.n}`, dataset: { n: String(row.n) } },
+    el("span", { class: "bagent-head" }, el("b", { class: "bagent-title" }, key, " ", shown(cardTitle(doc, key))),
+      chip ? el("span", { class: "pill r-info" }, icon("half"), el("span", {}, chip)) : null),
+    el("span", { class: "seg5", role: "img", "aria-label": chip ? `Tasks ${chip}` : "No tasks yet" },
+      taskBar(doc).map((t) => el("i", { class: `seg-${t}` }))));
+}
+
+function matches(row, q) {
+  if (!q) return true;
+  const doc = row.doc;
+  return `${doc?.id || ""} ${row.id} ${doc?.title || ""}`.toLowerCase().includes(q);
+}
+
+function boardSearch(state) {
+  const input = el("input", { class: "input board-search", type: "search", "aria-label": "Search tickets",
+    placeholder: "Search — filters as you type", autocomplete: "off" });
+  input.addEventListener("input", () => { state.boardQuery = input.value; render(state); });
+  return input;
+}
+
+function board(state, list) {
+  if (!list.length) {
+    return [el("section", { class: "empty" }, el("h2", {}, "No linked tickets yet."),
+      el("p", { class: "hint" }, "Link a ticket on the desktop and it shows here."))];
+  }
+  const q = (state.boardQuery || "").trim().toLowerCase();
+  const rows = list.filter((r) => matches(r, q));
+  const yours = rows.filter((r) => r.needs || r.doc?.move?.who === "you");
+  const agents = rows.filter((r) => !yours.includes(r) && (r.doc?.move?.who === "agent" || r.doc?.status === "in-progress"));
+  const backlog = rows.filter((r) => !yours.includes(r) && !agents.includes(r) && BOARD_STATUS_BACKLOG.has(r.doc?.status));
+  const rest = rows.filter((r) => !yours.includes(r) && !agents.includes(r) && !backlog.includes(r));
+  const lab = (text) => el("h2", { class: "lab" }, text);
+  const fold = (title, items, cls) => (items.length ? el("details", { class: `card bfold ${cls}` },
+    el("summary", {}, el("span", {}, title), el("span", { class: "muted", "aria-hidden": "true" }, "▾")),
+    el("div", { class: "bfold-body" }, items.map((r) => el("a", { class: "brow-plain", href: `/t/${r.n}` },
+      el("b", {}, r.doc?.id || r.id), " ", shown(cardTitle(r.doc, r.doc?.id || r.id)))))) : null);
+  return [
+    yours.length ? lab(`Your move · ${yours.length}`) : null, yours.map(boardRow),
+    agents.length ? lab(`Agents · ${agents.length}`) : null, agents.map(agentCard),
+    fold(`Backlog · ${backlog.length} idea${backlog.length === 1 ? "" : "s"}`, backlog, "bfold-backlog"),
+    fold(`Other · ${rest.length}`, rest, "bfold-other"),
+    q && !rows.length ? el("p", { class: "hint" }, "No ticket matches this search.") : null].flat().filter(Boolean);
+}
+
+// ---- v4 receipts: the phone's decisions the desktop applied in the last 24 hours, in place of their cards
+const RECEIPT_VERB = { approve: "Approved", answer: "Answered", verdict: "Verdict given", request_changes: "Changes requested",
+  ticket_request: "Ticket requested" };
+
+function receiptsEl(state) {
+  const items = state.receipts || [];
+  if (!items.length) return "";
+  return el("section", { class: "receipts", "aria-label": "Applied from your phone" }, items.map((r) =>
+    el("div", { class: "card receipt" }, el("span", { class: "pill r-ok" }, icon("check")),
+      el("span", { class: "receipt-text" }, `${RECEIPT_VERB[r.kind] || "Decided"} ${r.mine ? "from this phone" : "from TIX"} · applied ${asOf(Date.parse(r.ack_at))}`,
+        r.key ? el("span", { class: "muted" }, ` · ${r.key}`) : null))));
+}
+
+// One request per workspace, in parallel; only decisions this browser sent say "from this phone".
+async function loadReceipts(spaces, rows) {
+  const keys = new Map(rows.map((r) => [r.id, r.doc?.id || r.id]));
+  const since = Date.now() - 86400000;
+  const mine = myDecisions();
+  const lists = await Promise.all([...spaces.values()].map((s) => api("GET", `/api/decisions?space=${encodeURIComponent(s.id)}`)
+    .then((r) => r.decisions || [], () => [])));       // receipts are a courtesy: none when a list doesn't load
+  const out = [];
+  for (const d of lists.flat()) {
+    const at = Date.parse(d.ack_at || "");
+    if (d.ack === "applied" && at >= since) {
+      out.push({ kind: d.kind, ack_at: d.ack_at, key: d.ticket ? keys.get(d.ticket) || d.ticket : "", mine: mine.has(d.id) });
+    }
+  }
+  return out.sort((a, b) => String(b.ack_at).localeCompare(String(a.ack_at))).slice(0, 5);
 }
 
 // "14:05": when a cached list arrived, in this browser's time.
@@ -338,6 +453,14 @@ export async function start() {
       if (held) held.hidden = true;
       await render(state);
       cacheLabels(state.spaces, state.rows);
+      // receipts after the list is on screen: their requests never hold the first render
+      if (view === "needs") {
+        loadReceipts(spaces, rows).then((receipts) => {
+          if (state.rows !== rows) return;          // a newer refresh took over
+          state.receipts = receipts;
+          render(state);
+        });
+      }
       window.dispatchEvent(new CustomEvent("fs:needs-changed"));
     } catch (e) {
       // The session is gone although keys are still here (the worker answered with the cached shell):

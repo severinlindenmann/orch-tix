@@ -41,6 +41,7 @@
     "/static/js/files.js",
     "/static/js/fileview.js",
     "/static/js/format.js",
+    "/static/js/images.js",
     "/static/js/keystore.js",
     "/static/js/linkshare.js",
     "/static/js/login.js",

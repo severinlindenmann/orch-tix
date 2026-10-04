@@ -13,6 +13,7 @@ import { openRecorder } from "./recorder.js";
 import { maxUpload, uploadFiles } from "./upload.js";
 import { openMessage, sealTicketRequest } from "./mirror-crypto.js";
 import { pairingFor, signDecision } from "./pairing.js";
+import { rememberMine } from "./decision-send.js";
 import { QUEUED_TEXT, SENT_PAIRED_TEXT, SENT_TEXT, outcomeText, UNKNOWN_SPACE, VOICE_TTL, buildTicketRequest, messageView, newDecisionId } from "./mirror-model.js";
 
 const isoNow = () => new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -105,6 +106,7 @@ export function ticketRequestCard({ mk, keyVersion, spaces }) {
     busy = true;
     paint();
     decisionId ||= newDecisionId();               // a double tap or a retry is the same request
+    rememberMine(decisionId);
     try {
       const req = buildTicketRequest({ space: space.value, title: title.value, body: body.value, at: isoNow(), decisionId,
         voice: voice?.file ? voice : null });

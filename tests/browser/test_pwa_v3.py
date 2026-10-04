@@ -105,9 +105,8 @@ def test_the_four_tabs_and_the_tickets_view(phone_page, mirror_with_question):
     page.wait_for_url("**/?view=tickets")
     assert nav.get_by_role("link", name="Tickets").get_attribute("aria-current") == "page"
     page.get_by_role("heading", name="Tickets").wait_for()
-    card = page.get_by_role("article").filter(has_text="Export the meter readings as CSV")
-    card.get_by_text("Answer Q1").wait_for()                               # the move chip: the document's move (1.4)
-    assert card.locator(".strip li > span[aria-hidden]").all_inner_texts() == ["R ✓", "P ✓", "T 1/3"]
+    row = page.locator(".brow").filter(has_text="DEMO-0038")                # v4 board: your move, the move's label
+    row.get_by_text("Answer Q1").wait_for()
     nav.get_by_role("link", name="Files").click()
     page.wait_for_url("**/files")
     page.locator("#file-list").wait_for(state="attached")
@@ -219,7 +218,7 @@ def test_screenshots_390(phone_page, live_server, sim, mirror_with_question, sch
     page.wait_for_timeout(300)
     page.screenshot(path=out / f"needs-you-{scheme}.png", full_page=True)
     page.goto(live_server.url + "/?view=tickets")
-    page.get_by_role("article").first.wait_for()
+    page.locator(".brow, .bagent").first.wait_for()
     page.screenshot(path=out / f"tickets-{scheme}.png", full_page=True)
     page.goto(f"{live_server.url}/t/{mirror_with_question.n}")
     page.get_by_role("radio", name="ISO 8601").check()
@@ -592,11 +591,11 @@ def test_an_approval_card_opens_the_read_and_approve_view(phone_page, mirror_wit
     card.get_by_text("Approve plan", exact=True).wait_for()               # the chip: the verb of your move
     card.get_by_text("2 steps · claude-code waits").wait_for()
     assert card.locator(".qa-opt").count() == 0
-    card.get_by_role("link", name="Read plan and approve").click()
+    card.get_by_role("link", name="Review and approve").click()
     page.wait_for_url("**/t/*#answer")
     page.locator("#decision").get_by_text("1. Inventory").wait_for()
     assert page.locator(".t-head").get_by_text("Approve plan", exact=True).is_visible()
-    assert page.locator(".t-head .strip li > span[aria-hidden]").all_inner_texts()[:2] == ["R ✓", "P ●"]
+    assert page.locator(".t-head .journey-words").inner_text() == "Asked ✓ · Agreed · Doing · Proven · Done"
 
 
 def test_done_asks_in_a_confirm_sheet_and_escape_sends_nothing(phone_page, mirror_with_question):
@@ -687,8 +686,10 @@ def test_typing_a_ticket_request_survives_a_list_refresh(phone_page, mirror_with
     title = page.get_by_label("Title")
     title.fill("Rotate the API")
     page.evaluate("() => { window.__card = document.querySelector('.req-card'); }")
+    page.evaluate("""() => { window.__renders = 0; new MutationObserver(() => window.__renders++)
+      .observe(document.querySelector('.needs-sections'), { childList: true }); }""")
     mirror_with_question.push({**EXAMPLE_DOC, "title": "Export the readings, renamed"}, rev=2)   # the long-poll re-renders
-    page.get_by_text("Export the readings, renamed").wait_for()
+    page.wait_for_function("() => window.__renders > 0")
     assert page.evaluate("() => document.activeElement.id") == "req-title"
     assert title.input_value() == "Rotate the API"
     assert page.evaluate("() => window.__card === document.querySelector('.req-card') && window.__card.isConnected")

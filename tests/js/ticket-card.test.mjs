@@ -121,7 +121,7 @@ test("a gate card says how long the plan is and what opens", () => {
   const doc = { ...FULL, gates: { ...FULL.gates, plan: { state: "pending", hash: H("f") } }, needs: [{ kind: "approve-plan" }] };
   assert.equal(planSteps(doc), 2);
   assert.equal(cardLine({ needs: "approval" }, doc), "2 steps · claude-code waits");
-  assert.equal(cardAction({ needs: "approval" }, doc), "Read plan and approve");
+  assert.equal(cardAction({ needs: "approval" }, doc), "Review and approve");
   assert.equal(cardLine({ needs: "approval" }, { ...TITLE, needs: [{ kind: "approve-plan" }] }), "Read it on the desktop · claude-code waits");
   assert.equal(cardAction({ needs: "verdict" }, TITLE), "Review and decide");
   assert.equal(cardLine({ needs: "verdict" }, TITLE), "All 14 jobs export; Excel opens every file.");

@@ -22,7 +22,10 @@ import {
   approveTogether, gateCovers, normalizedGateText, history, verdictCanonical, verdictHash, verdictView, decisionValue, notSentText, splitQueued, canSendAnswer, cardTitle,
   NOT_YET_MS, ageOf, artifactList, isRollback, verificationSummary, outcomeRole, outcomeText, shortHash, targetChanged, targetFor,
 } from "./mirror-model.js";
-import { chapters, chipFor, costText, moreSections, planSteps } from "./ticket-card.js";
+import {
+  acItems, agreedNote, chapters, chipFor, costText, doneNote, journey, mainPr, moreSections, pinnedImages, planSteps, proofImage,
+} from "./ticket-card.js";
+import { pinnedFigure } from "./images.js";
 import { moveChipEl, needsPill, pill, stripEl } from "./needs.js";
 
 const VOICE_TAG = "voice";
@@ -485,6 +488,57 @@ function whenText(iso) {
   return `${two(d.getDate())}.${two(d.getMonth() + 1)} ${two(d.getHours())}:${two(d.getMinutes())}`;
 }
 
+// ---- v4: the journey as five segments with words; who agreed is named only from a signed ledger, which the mirror
+// does not carry, so core's own "not signed here" wording
+function journeyEl(doc) {
+  const stages = journey(doc);
+  const word = { done: "done", now: "now", todo: "not yet" };
+  const agreed = stages[1].state === "done" ? agreedNote(doc) : "";
+  return el("div", { class: "journey" },
+    el("span", { class: "seg5 seg5-journey", role: "img", "aria-label": `Journey: ${stages.map((x) => `${x.name} ${word[x.state]}`).join(", ")}` },
+      stages.map((x) => el("i", { class: `seg-${x.state === "now" ? "doing" : x.state}` }))),
+    el("p", { class: "journey-words" }, stages.map((x) => `${x.name}${x.state === "done" ? " ✓" : ""}`).join(" · ")),
+    agreed || doc.status === "done" ? el("p", { class: "t-meta journey-who" },
+      [agreed ? `Agreed: ${agreed}` : "", doc.status === "done" ? `Done: ${doneNote(doc)}` : ""].filter(Boolean).join(" · ")) : null);
+}
+
+// "Proof so far · AC p/t": the first pinned evidence image (shown once its sha256 is verified), then the criteria.
+function proofCard(doc) {
+  const ac = acItems(doc);
+  const img = proofImage(doc);
+  if (!ac.length && !img) return null;
+  const done = ac.filter((a) => a.done);
+  const open = ac.filter((a) => !a.done);
+  return el("section", { class: "card proof", "aria-labelledby": "proof-title" },
+    el("h2", { class: "card-h", id: "proof-title" }, `Proof so far${ac.length ? ` · AC ${done.length}/${ac.length}` : ""}`),
+    img ? pinnedFigure(img, "pin-proof") : null,
+    done.length ? el("ul", { class: "proof-list" }, done.map((a) => el("li", {}, el("span", { class: "t-ok", "aria-hidden": "true" }, "✓ "),
+      `AC${a.n} `, shown(a.text)))) : null,
+    open.length ? el("p", { class: "muted proof-open" }, open.map((a, i) => [i ? " · " : "", `○ AC${a.n} `, shown(a.text)])) : null);
+}
+
+// "Artifacts · N": pinned images as a 3-column grid of verified thumbnails, then the other items by name and kind
+// (never a URL: the document carries none), the files sent for context (links to Files) and the main PR.
+function artifactsCard(doc) {
+  const items = Array.isArray(doc.artifact_items) ? doc.artifact_items.filter((x) => x && typeof x === "object") : [];
+  const imgs = pinnedImages(doc);
+  const shownNames = new Set(imgs.map((i) => i.name));
+  const files = artifactList(doc).filter((a) => !shownNames.has(a.name));     // each image once: its thumbnail
+  const others = items.filter((x) => !(x.source === "file" && shownNames.has(x.name)));
+  const pr = mainPr(doc);
+  const count = items.length || files.length;
+  if (!count && !pr) return null;
+  return el("section", { class: "card arts", "aria-labelledby": "art-title" },
+    el("h2", { class: "card-h", id: "art-title" }, `Artifacts · ${count}`),
+    imgs.length ? el("div", { class: "art-grid" }, imgs.map((i) => pinnedFigure(i, "pin-thumb"))) : null,
+    others.length ? el("ul", { class: "art-items" }, others.map((x) => el("li", {},
+      shown(typeof x.label === "string" && x.label ? x.label : x.name || x.kind), el("span", { class: "muted" }, ` · ${x.kind}`)))) : null,
+    files.length ? el("ul", { class: "art-list" }, files.map((a) => el("li", {}, a.file
+      ? el("a", { href: `/files?f=${encodeURIComponent(a.file)}` }, icon("files"), a.name)
+      : el("span", {}, icon("files"), a.name)))) : null,
+    pr ? el("p", { class: "art-pr" }, pr.text) : null);
+}
+
 function sectionRow(sec) {
   return el("section", { class: "section-row" }, el("h3", { class: "section-name" }, shown(sec.name)), el("div", { class: "section-text" }, shown(sec.text)));
 }
@@ -525,14 +579,10 @@ function extras() {
     out.push(el("details", { class: "chap chap-quiet" }, el("summary", {}, el("span", { class: "chap-name" }, `More · ${more.length} section${more.length === 1 ? "" : "s"}`)),
       el("div", { class: "chap-body" }, more.map(sectionRow))));
   }
-  const arts = artifactList(doc);
-  if (arts.length) {
-    out.push(el("section", { class: "tsection", "aria-labelledby": "art-title" },
-      el("h2", { class: "sect", id: "art-title" }, "Artifacts"),
-      el("ul", { class: "art-list" }, arts.map((a) => el("li", {}, a.file
-        ? el("a", { href: `/files?f=${encodeURIComponent(a.file)}` }, icon("files"), a.name)
-        : el("span", {}, icon("files"), a.name))))));
-  }
+  const proof = proofCard(doc);
+  if (proof) out.unshift(proof);
+  const arts = artifactsCard(doc);
+  if (arts) out.splice(proof ? 1 : 0, 0, arts);
   const log = history(doc);
   if (log.length) {
     out.push(el("details", { class: "chap chap-quiet" },
@@ -569,11 +619,13 @@ function render() {
   main.replaceChildren(
     el("header", { class: "t-head" },
       el2("div", "t-ids", el("b", {}, key), el("span", { class: "muted" },
-        [typeof doc?.size === "string" ? doc.size.toUpperCase() : "", row.id, label].filter(Boolean).join(" · "))),
+        [typeof doc?.size === "string" ? doc.size.toUpperCase() : "", typeof doc?.parent === "string" && doc.parent ? `epic ${doc.parent}` : "",
+          row.id, label].filter(Boolean).join(" · "))),
       el("h1", { class: "t-title" }, doc ? shown(cardTitle(doc, key)) : state.rollback ? key
         : row.error === "binding" ? "Ticket held back" : "Couldn't decrypt this ticket"),
       el2("div", "t-pills", moveChipEl(row, doc)),
-      doc ? stripEl(doc) : null,
+      doc ? journeyEl(doc) : null,
+      doc && doc.redaction !== "full" ? stripEl(doc) : null,
       el("p", { class: "t-meta" }, [row.updated_at ? `Updated ${shortAge(row.updated_at)}` : "",
         row.needs ? "" : "nothing waits on you"].filter(Boolean).join(" · "))),
     state.rollback ? el("p", { class: "banner banner-decrypt", role: "alert" }, doc

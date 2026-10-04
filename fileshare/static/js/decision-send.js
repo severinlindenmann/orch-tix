@@ -15,6 +15,27 @@ const isoNow = () => new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 
 // items: [{target, value}]. ids: slot -> decision id, kept by the caller until the decisions have gone out
 // (filled in here). Resolves {queued, sent}; throws what the server refused (a 4xx) or an OutboxFullError.
+// The decisions this browser sent (their ids, newest last, at most 200), so a receipt names "this phone" only for
+// its own: /api/decisions lists every session's. Best effort (no storage: neutral wording).
+const MINE_KEY = "tix:my-decisions";
+export function rememberMine(decisionId) {
+  try {
+    const list = JSON.parse(localStorage.getItem(MINE_KEY) || "[]").filter((x) => x !== decisionId);
+    list.push(decisionId);
+    localStorage.setItem(MINE_KEY, JSON.stringify(list.slice(-200)));
+  } catch {
+    /* private window or blocked storage */
+  }
+}
+
+export function myDecisions() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(MINE_KEY) || "[]"));
+  } catch {
+    return new Set();
+  }
+}
+
 export async function sendDecisions({ row, doc, kind, items, note = "", voice = null, ids = {} }) {
   const device = deriveBrowserName(navigator) || "phone";
   const pairing = await pairingFor(null, row.space).catch(() => null);
@@ -22,6 +43,7 @@ export async function sendDecisions({ row, doc, kind, items, note = "", voice = 
   for (const it of items) {
     const slot = `${kind}:${it.target.qid || it.target.gate || "verdict"}`;
     const decisionId = ids[slot] ||= newDecisionId();
+    rememberMine(decisionId);
     let body = buildDecision({ space: row.space, doc, kind, target: it.target, value: it.value, note,
       device, at: isoNow(), voice: voice?.file ? voice : null, decisionId });
     // A paired phone signs the decision before it is sealed (orch-core applies it directly);
