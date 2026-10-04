@@ -443,7 +443,79 @@ def test_at_most_four_pinned_images_per_push(tix_ws, tix, runner, tmp_path):
     shared_before = len(_shared(runner))
     from orch_tix.sync import share_pinned
     n = share_pinned(tix.obj, tix.ctx.provider_context(), tid, tix.ctx.document(tid))
-    assert n <= 4 and len(_shared(runner)) - shared_before <= 4
+    assert n == 4 and len(_shared(runner)) - shared_before == 4
+
+
+def test_a_linked_artifact_folder_is_refused(tix_ws, tix, runner, tmp_path):
+    ops = Ops(tix_ws.ws, AGENT)
+    tid = _full_ticket(tix_ws, tix, ops)
+    f = _proof(ops, tid, tmp_path, "a.png")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "a.png").write_bytes(f.read_bytes())
+    folder = f.parent
+    f.unlink()
+    folder.rmdir()
+    folder.symlink_to(elsewhere, target_is_directory=True)           # the ticket's folder becomes a link
+    from orch_tix.cli import SharingError
+    from orch_tix.sync import checked_artifact
+    with pytest.raises(SharingError) as e:
+        checked_artifact(tix.ctx.provider_context(), tid, "a.png")
+    assert e.value.code == "refused"
+    pump_all(tix_ws.ws, tix_ws.ws.addons)
+    assert "a.png" not in _shared(runner)
+
+
+def test_pinned_cap_is_8_mb_and_on_request_keeps_50(tix_ws, tix, runner, tmp_path):
+    ops = Ops(tix_ws.ws, AGENT)
+    tid = _full_ticket(tix_ws, tix, ops)
+    _proof(ops, tid, tmp_path, "big.png", b"\x89PNG" + b"0" * (8 * 1024 * 1024))     # a few bytes past 8 MB
+    from orch_tix.cli import SharingError
+    from orch_tix.sync import MAX_PINNED_BYTES, checked_artifact, share_pinned
+    pctx = tix.ctx.provider_context()
+    n = share_pinned(tix.obj, pctx, tid, tix.ctx.document(tid))
+    assert n == 0 and "big.png" not in _shared(runner)               # refused, never sent
+    with pytest.raises(SharingError, match="larger than"):
+        checked_artifact(pctx, tid, "big.png", max_bytes=MAX_PINNED_BYTES)
+    assert len(checked_artifact(pctx, tid, "big.png")[0]) == 8 * 1024 * 1024 + 4      # on-request: under 50 MB
+
+
+def test_an_os_error_while_copying_is_a_sharing_error_and_the_copy_is_gone(tix_ws, tix, runner, tmp_path, monkeypatch):
+    ops = Ops(tix_ws.ws, AGENT)
+    tid = _full_ticket(tix_ws, tix, ops)
+    _proof(ops, tid, tmp_path, "a.png")
+    from orch_tix import sync
+    from orch_tix.cli import SharingError
+    real = sync.os.fdopen
+
+    def failing(fd, *a, **k):
+        f = real(fd, *a, **k)
+        if a and a[0] == "wb":                                       # only the private copy, not the state files
+            f.write = lambda data: (_ for _ in ()).throw(OSError(28, "No space left on device"))
+        return f
+    monkeypatch.setattr(sync.os, "fdopen", failing)
+    pctx = tix.ctx.provider_context()
+    with pytest.raises(SharingError) as e:
+        sync.share_artifact(tix.obj, pctx, tid, "a.png")
+    assert e.value.code == "retry"
+    assert list(sync.out_dir(pctx).glob("share-*")) == []            # the private copy never stays
+    # through the pinned path nothing escapes: it is noted, not raised
+    assert sync.share_pinned(tix.obj, pctx, tid, tix.ctx.document(tid)) == 0
+    assert list(sync.out_dir(pctx).glob("share-*")) == []
+
+
+def test_the_mirror_push_comes_before_a_failing_share_and_is_kept(tix_ws, tmp_path):
+    runner = CapturingRunner.from_dir(REC, strict=True)
+    runner.recordings = [r for r in runner.recordings if r.argv[1:2] != ("share",)]
+    runner.add(SHARE, returncode=7, stdout_json={"error": "network", "detail": "cannot reach the server"})
+    tix = tix_ws.load(ADDON, runner=runner)
+    ops = Ops(tix_ws.ws, AGENT)
+    tid = _full_ticket(tix_ws, tix, ops)
+    _proof(ops, tid, tmp_path, "proof.png")
+    pump_all(tix_ws.ws, tix_ws.ws.addons)                            # must not raise
+    kinds = [c[1] for c in runner.calls]
+    assert "share" in kinds and kinds.index("mirror") < kinds.index("share")
+    assert tix.obj.state.links()[tid]["rev"] >= 1                    # the committed push is not undone
 
 
 def test_a_symlinked_or_hard_linked_or_swapped_artifact_is_never_shared(tix_ws, tix, runner, tmp_path):
