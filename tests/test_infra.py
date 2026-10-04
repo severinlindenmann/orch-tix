@@ -5,8 +5,10 @@ config mistakes that previously only showed up as outages on the box.
 """
 import configparser
 import logging
+import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -384,20 +386,41 @@ def test_ci_js_timeout_precedes_the_files_and_jobs_are_bounded():
         assert re.search(rf"^    timeout-minutes: {minutes}$", m.group(1), re.M), job
 
 
-def test_ci_browser_shards_cover_every_browser_file_once_and_browser_aggregates():
+def _collect_browser(shard=None):
+    env = {**os.environ, "PYTEST_ADDOPTS": ""}
+    env.pop("BROWSER_SHARD", None)
+    if shard:
+        env["BROWSER_SHARD"] = f"{shard}/4"
+    out = subprocess.run([sys.executable, "-m", "pytest", "-m", "browser", "tests/browser", "--collect-only", "-q"],
+                         cwd=ROOT, env=env, capture_output=True, text=True, check=True).stdout
+    return [line for line in out.splitlines() if "::" in line]
+
+
+def test_ci_browser_shards_cover_every_browser_test_once_and_browser_aggregates():
     text = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
     m = re.search(r"^  browser-shard:\n(.*?)(?=^  \S|\Z)", text, re.M | re.S)
     assert m and "shard: [1, 2, 3, 4]" in m.group(1)
-    shards = [1, 2, 3, 4]
-    # the selection the workflow runs: sorted file list, every 4th starting at the shard index
-    assert "ls tests/browser/test_*.py | sort | awk" in m.group(1)
-    assert "(NR - 1) % 4 == s - 1" in m.group(1) and "-v s=${{ matrix.shard }}" in m.group(1)
-    files = sorted(p.as_posix() for p in (ROOT / "tests" / "browser").glob("test_*.py"))
-    parts = [[f for i, f in enumerate(files) if i % 4 == s - 1] for s in shards]
-    assert sorted(sum(parts, [])) == files and all(parts)
+    # the selection the workflow runs: every test goes to one shard, split by measured duration (tests/browser/shard.py)
+    assert "BROWSER_SHARD=${{ matrix.shard }}/4" in m.group(1) and "pytest -m browser tests/browser" in m.group(1)
+    everything = _collect_browser()
+    parts = [_collect_browser(s) for s in (1, 2, 3, 4)]
+    assert all(parts)
+    assert sorted(sum(parts, [])) == sorted(everything) and len(set(everything)) == len(everything)
     agg = re.search(r"^  browser:\n(.*?)(?=^  \S|\Z)", text, re.M | re.S).group(1)
     assert "if: always()" in agg and "needs: browser-shard" in agg
     assert 'needs.browser-shard.result }}" = success' in agg
+
+
+def test_browser_shard_split_is_balanced_deterministic_and_takes_new_files_in():
+    from tests.browser.shard import DEFAULT_TEST_SECONDS, assign
+    durations = {"slow.py": 400, "a.py": 100, "b.py": 100}
+    tests = [(f"{f}::t{i}", f) for f, n in (("slow.py", 40), ("a.py", 10), ("b.py", 10), ("new.py", 3)) for i in range(n)]
+    shards = assign(tests, 4, durations)
+    assert shards == assign(list(reversed(tests)), 4, durations)
+    assert sorted(sum(shards, [])) == sorted(n for n, _ in tests)
+    weight = {n: durations[f] / sum(1 for _, g in tests if g == f) if f in durations else DEFAULT_TEST_SECONDS for n, f in tests}
+    loads = [sum(weight[n] for n in sh) for sh in shards]
+    assert max(loads) - min(loads) <= max(weight.values())
 
 
 def test_ci_runs_on_prs_and_main_only_and_needs_no_secrets():

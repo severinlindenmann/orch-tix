@@ -205,3 +205,18 @@ def mirror_with_question(live_server, sim):
     assert r.status_code == 200, r.text
     out = r.json()
     return MirrorFixture(live_server.url, sim, space, out["n"], out["id"], uuid, headers, dek)
+
+
+# ---- CI sharding: BROWSER_SHARD="2/4" keeps only the tests assigned to shard 2 of 4 (tests/browser/shard.py) ----
+def pytest_collection_modifyitems(config, items):
+    spec = os.environ.get("BROWSER_SHARD")
+    if not spec:
+        return
+    from .shard import assign
+    index, count = (int(x) for x in spec.split("/"))
+    here = Path(__file__).parent
+    mine = [i for i in items if here in Path(str(i.path)).parents]
+    chosen = set(assign([(i.nodeid, Path(str(i.path)).name) for i in mine], count)[index - 1])
+    skipped = [i for i in mine if i.nodeid not in chosen]
+    config.hook.pytest_deselected(items=skipped)
+    items[:] = [i for i in items if i not in skipped]
