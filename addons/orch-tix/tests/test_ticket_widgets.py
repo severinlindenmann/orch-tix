@@ -213,3 +213,66 @@ def test_the_cache_keys_on_the_document_not_its_nonce():
     a = '<meta name="orch-frame" content="aaaaaaaa11"><p>x</p>'
     assert doc_sha(a) == doc_sha(a.replace("aaaaaaaa11", "bbbbbbbb22"))
     assert doc_sha(a) != doc_sha(a.replace("<p>x</p>", "<p>y</p>"))
+
+
+# -- the privacy gate: what leaves the machine at each level and setting ---------------------------------------------
+
+SECRETS = ("412 kB", "main.js", "Measured twice", "sqlite", "SQLite", "decision-matrix", "Bundle size", "Storage")
+
+
+def _leaks(runner) -> list[str]:
+    sent = json.dumps(runner.files[-1], ensure_ascii=False)
+    return [s for s in SECRETS if s in sent]
+
+
+def _files_of(tix, tid) -> dict:
+    return tix.obj.state.links()[tid].get("widget_files") or {}
+
+
+@pytest.mark.parametrize("docs", ["never", "always"])
+@pytest.mark.parametrize("level", ["title", "key-only"])
+def test_below_full_no_section_widget_document_hash_or_file_leaves(tix_ws, tix, runner, level, docs):
+    import hashlib
+    tid = _ticket(tix_ws, tix, {"redaction": level, "sync_widget_docs": docs})
+    doc = runner.files[-1]["doc"]
+    assert doc["redaction"] == level and "widgets" not in doc and "widgets_format" not in doc and "sections" not in doc
+    assert _leaks(runner) == []
+    assert not _shares(runner) and _files_of(tix, tid) == {}
+    for w in (BARS, MATRIX):                       # no digest of a fence's text either
+        assert hashlib.sha256(json.dumps(w).encode()).hexdigest() not in json.dumps(runner.files[-1])
+
+
+def test_full_with_agent_html_off_sends_text_and_core_documents_only(tix_ws, tix, runner):
+    tid = _ticket(tix_ws, tix, {"redaction": "full", "sync_widget_docs": "never"})
+    bars, matrix = runner.files[-1]["doc"]["widgets"]
+    assert set(matrix) == {"section", "index", "key", "layer", "name", "title", "text", "raw_sha256"}
+    assert "doc" in bars and "file" not in bars
+    assert not _shares(runner) and _files_of(tix, tid) == {}
+
+
+def test_a_workspace_that_turns_agent_html_off_after_sharing_sends_and_keeps_nothing(tix_ws, tix, runner):
+    gone = _rm(runner)
+    tid = _ticket(tix_ws, tix, {"redaction": "full", "sync_widget_docs": "always"})
+    assert runner.files[-1]["doc"]["widgets"][1]["file"] == "FILE91" and len(_shares(runner)) == 1
+    tix_ws.enable("orch-tix", {"sharing_path": SHARING, "redaction": "full", "sync_widget_docs": "never"})
+    tix.obj.act("push_now", tid, tix.ctx.provider_context())
+    matrix = runner.files[-1]["doc"]["widgets"][1]
+    assert "file" not in matrix and "sha256" not in matrix and "doc" not in matrix
+    assert gone == ["FILE91"] and len(_shares(runner)) == 1       # the shared document is deleted, never re-sent
+    assert _files_of(tix, tid) == {}
+
+
+def test_the_panel_title_only_override_beats_a_full_workspace(tix_ws, tix, runner):
+    gone = _rm(runner)
+    tid = _ticket(tix_ws, tix, {"redaction": "full", "sync_widget_docs": "always"})
+    assert len(_shares(runner)) == 1
+    tix.obj.act("redaction", tid, tix.ctx.provider_context())     # "Show only the title on the phone"
+    doc = runner.files[-1]["doc"]
+    assert doc["redaction"] == "title" and "widgets" not in doc and "sections" not in doc
+    assert _leaks(runner) == [] and gone == ["FILE91"] and len(_shares(runner)) == 1
+
+
+def test_full_without_sharing_when_artifacts_are_never_sent(tix_ws, tix, runner):
+    _ticket(tix_ws, tix, {"redaction": "full", "sync_widget_docs": "always", "sync_artifacts": "never"})
+    matrix = runner.files[-1]["doc"]["widgets"][1]
+    assert "file" not in matrix and "sha256" not in matrix and not _shares(runner)
