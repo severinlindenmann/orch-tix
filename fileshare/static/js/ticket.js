@@ -562,10 +562,16 @@ async function loadKeyLinks() {
   for (const r of cached?.rows || []) {
     if (typeof r?.doc?.id === "string" && Number.isInteger(r.n)) map.set(r.doc.id.toUpperCase(), `/t/${r.n}`);
   }
-  if (map.size) {
-    state.keyHrefs = map;
-    render();
-  }
+  if (!map.size) return;
+  state.keyHrefs = map;
+  // Draw again only when this ticket's text names another mirrored ticket, and never under a focused control (a
+  // deep-linked decision card, a draft being typed): the next render picks the links up anyway.
+  const self = String(state.doc?.id || "").toUpperCase();
+  const text = Object.values(state.doc?.sections || {}).filter((s) => typeof s === "string").join("\n");
+  const names = keySplit(text, (k) => (k.toUpperCase() !== self && map.has(k.toUpperCase()) ? "/t/1" : null))
+    .some((p) => p.key);
+  const busy = document.activeElement && document.activeElement !== document.body;
+  if (names && !busy) render();
 }
 
 function sectionRow(sec) {

@@ -58,7 +58,18 @@ def _keep(doc: dict, keys) -> dict:
 
 
 def _first_line(text) -> str:
-    return next((line.strip() for line in str(text or "").splitlines() if line.strip()), "")
+    """The first non-empty line outside fenced blocks (a ```orch widget, such as a receipt's gates, is no summary)."""
+    fence = None
+    for line in str(text or "").splitlines():
+        m = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
+        if fence is None and m:
+            fence = m.group(1)
+        elif fence is not None:
+            if line.strip().startswith(fence[0] * len(fence)) and not line.strip().strip(fence[0]):
+                fence = None
+        elif line.strip():
+            return line.strip()
+    return ""
 
 
 def _progress(doc: dict) -> dict:

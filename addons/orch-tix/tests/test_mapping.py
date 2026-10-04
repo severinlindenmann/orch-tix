@@ -172,3 +172,12 @@ def test_title_keeps_idle_days_and_key_only_drops_it():
 def test_full_passes_receipts_through():
     d = redact(DOC, "full", sync_log=False, context_artifacts=[])
     assert _receipt(d)["run"]["steps"][1]["status"] == "fail"
+
+
+def test_the_verification_summary_skips_widget_blocks():
+    fence = '```orch\n{"type": "gates", "id": "receipt-t2", "items": [{"name": "verify", "status": "pass"}]}\n```'
+    doc = {**DOC, "sections": {**DOC["sections"], "Verification": fence + "\n\n- AC1 opens in Excel, checked by hand"}}
+    d = redact(doc, "title", sync_log=False, context_artifacts=[])
+    assert d["verification_summary"] == "- AC1 opens in Excel, checked by hand"
+    only = {**DOC, "sections": {**DOC["sections"], "Verification": fence}}
+    assert "verification_summary" not in redact(only, "title", sync_log=False, context_artifacts=[])
