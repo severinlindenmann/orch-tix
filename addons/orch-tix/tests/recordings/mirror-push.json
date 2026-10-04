@@ -1,0 +1,2 @@
+{"argv": ["/opt/sharing/sharing", "mirror", "push", "--file", "*", "--json"], "returncode": 0,
+ "stdout_json": {"status": "pushed", "id": "TIX-42", "uuid": "00000000000000000000000000000000", "server_rev": null, "gen": 1}}

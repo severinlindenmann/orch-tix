@@ -1,0 +1,30 @@
+{
+  "name": "orch-tix", "title": "TIX", "version": "0.1.0", "requires_api": "2", "kind": "in-process",
+  "description": "Mirror tickets that need you to the TIX phone app, bring phone decisions back, and share files.",
+  "capabilities": ["provider", "page", "panel", "decisions", "settings", "events"],
+  "slots": ["today.summary", "today.from_addons", "ticket.sync", "workspace.settings"],
+  "binaries": ["setting:sharing_path"],
+  "remote_humans": true,
+  "menu": {"title": "Shared files", "icon": "share"},
+  "entry": "orch_tix:create",
+  "settings_schema": [
+    {"key": "sharing_path", "label": "sharing CLI (absolute path)", "type": "text", "default": ""},
+    {"key": "link_mode", "label": "Link tickets", "type": "select", "options": ["off", "manual", "auto-on-question", "all-active"], "default": "auto-on-question"},
+    {"key": "redaction", "label": "Show on the phone", "type": "select", "options": ["full", "title", "key-only"], "default": "title"},
+    {"key": "sync_log", "label": "Send agent log lines", "type": "bool", "default": false},
+    {"key": "sync_artifacts", "label": "Send artifacts", "type": "select", "options": ["never", "on-request", "always"], "default": "on-request"}
+  ],
+  "actions": [
+    {"id": "link", "label": "Sync to TIX"},
+    {"id": "unlink", "label": "Stop syncing", "confirm": "Remove this ticket from the phone?"},
+    {"id": "push_now", "label": "Sync now"},
+    {"id": "send_artifact", "label": "Send to phone"},
+    {"id": "redaction", "label": "Show in full on the phone", "confirm": "Send all sections of this ticket to the phone?"},
+    {"id": "download", "label": "Download"},
+    {"id": "save_to_ticket", "label": "Attach to ticket"},
+    {"id": "upload", "label": "Upload", "accepts_file": {"max_bytes": 209715200}},
+    {"id": "public_link", "label": "Create link", "confirm": "Anyone with the link can read this file."},
+    {"id": "upload_link", "label": "Create upload link"},
+    {"id": "ack_message", "label": "Mark as done"}
+  ]
+}

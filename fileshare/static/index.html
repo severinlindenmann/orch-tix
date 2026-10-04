@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<title>Needs you · tix</title>
+<link rel="icon" href="/static/img/icon.svg?v={{BUILD}}" type="image/svg+xml">
+<link rel="icon" href="/static/img/icon-32.png?v={{BUILD}}" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png?v={{BUILD}}">
+<meta name="theme-color" content="#15171a">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="tix">
+<link rel="stylesheet" href="/static/css/tokens.css?v={{BUILD}}">
+<link rel="stylesheet" href="/static/css/app.css?v={{BUILD}}">
+<script type="module" src="/static/js/shell.js?v={{BUILD}}"></script>
+<script type="module" src="/static/js/needs.js?v={{BUILD}}"></script>
+</head>
+<body class="app page-needs phone">
+<div id="banner"></div>
+<div class="shell">
+  <aside class="sidebar" aria-label="App">
+    <a class="brand" href="/"><span class="brand-icon" aria-hidden="true"></span><span class="brand-main">tix</span></a>
+    <nav class="appnav" aria-label="Main">
+      <a class="nav-item" href="/" data-tab="needs" aria-current="page"><span class="nav-icon" data-icon="bell"><span id="needs-badge" class="count-badge" hidden></span></span><span class="nav-label">Needs you</span></a>
+      <a class="nav-item" href="/?view=tickets" data-tab="tickets"><span class="nav-icon" data-icon="list"></span><span class="nav-label">Tickets</span></a>
+      <a class="nav-item" href="/files" data-tab="files"><span class="nav-icon" data-icon="files"></span><span class="nav-label">Files</span><span class="nav-count" id="files-new" hidden></span></a>
+      <a class="nav-item" href="/settings" data-tab="settings"><span class="nav-icon" data-icon="gear"><span id="devices-badge" class="count-badge" hidden></span></span><span class="nav-label">Settings</span></a>
+    </nav>
+    <div class="sidebar-foot">
+      <button class="btn-dashed" type="button" id="onboard-btn" data-action="onboard"><span data-icon="plus"></span>Onboard device</button>
+      <div class="this-browser">
+        <span class="this-browser-label">This browser</span>
+        <button id="browser-name" class="browser-name" type="button" hidden><span class="browser-name-value"></span><span class="browser-name-pen" data-icon="pen"></span></button>
+        <button class="link-btn" type="button" id="logout" data-action="logout">Sign out</button>
+      </div>
+    </div>
+  </aside>
+
+  <main class="page phone-page" id="main">
+    <header class="m-head">
+      <a class="brand" href="/"><span class="brand-icon" aria-hidden="true"></span><span class="brand-main">tix</span></a>
+    </header>
+    <div class="page-body">
+      <div class="title-row">
+        <h1 class="page-title" id="needs-title">Needs you</h1>
+        <span class="title-count" id="needs-count"></span>
+      </div>
+      <p class="hint" id="needs-sub"></p>
+      <div class="banner banner-error" id="needs-error" role="alert" hidden><span></span><button class="btn" type="button" id="needs-retry">Retry</button></div>
+      <p class="stale-line" id="needs-asof" role="status" hidden></p>
+      <p class="hint" id="needs-skipped" hidden></p>
+      <p class="muted list-msg" id="needs-loading">Loading and decrypting…</p>
+      <div class="needs-list" id="needs-list" aria-live="polite"></div>
+      <p class="hint foot">Tickets, questions and labels are end-to-end encrypted. The server sees only workspace ids, TIX ids, status and counts.</p>
+    </div>
+  </main>
+</div>
+</body>
+</html>

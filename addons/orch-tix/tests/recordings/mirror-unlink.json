@@ -1,0 +1,1 @@
+{"argv": ["/opt/sharing/sharing", "mirror", "unlink", "--key", "*", "--gen", "*", "--json"], "returncode": 0, "stdout_json": {"status": "unlinked"}}

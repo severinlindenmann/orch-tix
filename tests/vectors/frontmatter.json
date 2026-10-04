@@ -1,0 +1,318 @@
+{
+ "bad": [
+  {
+   "line": 3,
+   "name": "tab-indentation",
+   "text": "---\ntitle: T\n\tbad: value\n---\nbody\n"
+  },
+  {
+   "line": 3,
+   "name": "mapping-without-colon",
+   "text": "---\ntitle: T\nthis has no colon\n---\nbody\n"
+  },
+  {
+   "line": 2,
+   "name": "unclosed-quote",
+   "text": "---\ntitle: \"unterminated\n---\nbody\n"
+  },
+  {
+   "line": 2,
+   "name": "unclosed-bracket",
+   "text": "---\nlabels: [a, b\n---\nbody\n"
+  },
+  {
+   "line": 3,
+   "name": "duplicate-key",
+   "text": "---\ntitle: A\ntitle: B\n---\nbody\n"
+  },
+  {
+   "line": 4,
+   "name": "inconsistent-indentation",
+   "text": "---\ntesting:\n  mode: auto\n   then: ask\n---\nbody\n"
+  },
+  {
+   "line": 1,
+   "name": "missing-closing-fence",
+   "text": "---\ntitle: T\nbody: still yaml\n"
+  },
+  {
+   "line": 2,
+   "name": "unclosed-quote-in-inline-list-item",
+   "text": "---\nlabels: [a, 'b, c]\n---\nbody\n"
+  },
+  {
+   "line": 3,
+   "name": "unclosed-quote-list-item",
+   "text": "---\nitems:\n  - \"never closed\n---\nbody\n"
+  },
+  {
+   "line": 2,
+   "name": "text-after-closing-single-quote",
+   "text": "---\na: 'x' y'\n---\nbody\n"
+  },
+  {
+   "line": 2,
+   "name": "text-after-closing-double-quote",
+   "text": "---\na: \"x\" y\n---\nbody\n"
+  },
+  {
+   "line": 3,
+   "name": "text-after-quoted-list-item",
+   "text": "---\nitems:\n  - 'x' y\n---\nbody\n"
+  },
+  {
+   "line": 2,
+   "name": "text-after-quoted-inline-item",
+   "text": "---\nlabels: ['x' y, z]\n---\nbody\n"
+  }
+ ],
+ "ok": [
+  {
+   "body": "Scalars body.\n",
+   "fm": {
+    "bool_false": false,
+    "bool_true": true,
+    "int_val": 42,
+    "neg_int": -7,
+    "null_val": null,
+    "plain": "hello world",
+    "quoted_colon": "a: b",
+    "quoted_hash": "value # not a comment",
+    "single_quoted": "also fine",
+    "tilde_val": null
+   },
+   "name": "scalars",
+   "text": "---\nplain: hello world\nquoted_hash: \"value # not a comment\"\nquoted_colon: \"a: b\"\nsingle_quoted: 'also fine'\nint_val: 42\nneg_int: -7\nbool_true: true\nbool_false: false\nnull_val: null\ntilde_val: ~\n---\nScalars body.\n"
+  },
+  {
+   "body": "Inline list body.\n",
+   "fm": {
+    "empty_list": [],
+    "labels": [
+     "bug",
+     "ui"
+    ],
+    "mixed": [
+     "a",
+     "b, c"
+    ]
+   },
+   "name": "inline-lists",
+   "text": "---\nlabels: [bug, ui]\nmixed: [a, \"b, c\"]\nempty_list: []\n---\nInline list body.\n"
+  },
+  {
+   "body": "Block list of scalars.\n",
+   "fm": {
+    "run": [
+     "pytest -q",
+     "node --test tests/js"
+    ]
+   },
+   "name": "block-list-scalars",
+   "text": "---\nrun:\n  - pytest -q\n  - node --test tests/js\n---\nBlock list of scalars.\n"
+  },
+  {
+   "body": "The T5 questions shape.\n",
+   "fm": {
+    "questions": [
+     {
+      "id": "q1",
+      "options": [
+       "a",
+       "b"
+      ],
+      "required": true,
+      "text": "Which approach?",
+      "type": "single"
+     },
+     {
+      "id": "q2",
+      "required": false,
+      "text": "Anything else?",
+      "type": "text"
+     }
+    ]
+   },
+   "name": "block-list-mappings",
+   "text": "---\nquestions:\n  - id: q1\n    text: \"Which approach?\"\n    type: single\n    options: [a, b]\n    required: true\n  - id: q2\n    text: Anything else?\n    type: text\n    required: false\n---\nThe T5 questions shape.\n"
+  },
+  {
+   "body": "The testing: block.\n",
+   "fm": {
+    "testing": {
+     "mode": "auto",
+     "run": [
+      "pytest -q"
+     ],
+     "then": "ask"
+    }
+   },
+   "name": "nested-mappings",
+   "text": "---\ntesting:\n  mode: auto\n  run:\n    - pytest -q\n  then: ask\n---\nThe testing: block.\n"
+  },
+  {
+   "body": "Comments body.\n",
+   "fm": {
+    "note": "a quoted # stays literal",
+    "title": "Tag suggestions"
+   },
+   "name": "comments",
+   "text": "---\n# a full-line comment, ignored entirely\ntitle: Tag suggestions   # trailing comment, also ignored\nnote: \"a quoted # stays literal\"   # but a trailing one is still stripped\n---\nComments body.\n"
+  },
+  {
+   "body": "",
+   "fm": {
+    "title": "No body here"
+   },
+   "name": "empty-body",
+   "text": "---\ntitle: No body here\n---\n"
+  },
+  {
+   "body": "Some text.\n---\nMore text after a stray delimiter.\n",
+   "fm": {
+    "title": "Body has its own fence-looking line"
+   },
+   "name": "body-with-dashes",
+   "text": "---\ntitle: Body has its own fence-looking line\n---\nSome text.\n---\nMore text after a stray delimiter.\n"
+  },
+  {
+   "body": "Body line one.\r\nBody line two.\r\n",
+   "fm": {
+    "labels": [
+     "a",
+     "b"
+    ],
+    "testing": {
+     "mode": "auto"
+    },
+    "title": "CRLF ticket"
+   },
+   "name": "crlf",
+   "text": "---\r\ntitle: CRLF ticket\r\nlabels: [a, b]\r\ntesting:\r\n  mode: auto\r\n---\r\nBody line one.\r\nBody line two.\r\n"
+  },
+  {
+   "body": "Just a plain markdown body.\nNo frontmatter fence at all.\n",
+   "fm": {},
+   "name": "no-frontmatter",
+   "text": "Just a plain markdown body.\nNo frontmatter fence at all.\n"
+  },
+  {
+   "body": "body\n",
+   "fm": {
+    "note": "I'm done",
+    "title": "Don't break it's cache"
+   },
+   "name": "apostrophe-mid-value",
+   "text": "---\nnote: I'm done\ntitle: Don't break it's cache\n---\nbody\n"
+  },
+  {
+   "body": "body\n",
+   "fm": {
+    "item": [
+     "say \"hi\" twice"
+    ],
+    "title": "Fix the \"save\" button"
+   },
+   "name": "double-quotes-mid-value",
+   "text": "---\ntitle: Fix the \"save\" button\nitem:\n  - say \"hi\" twice\n---\nbody\n"
+  },
+  {
+   "body": "body\n",
+   "fm": {
+    "labels": [
+     "it's",
+     "fine",
+     "quoted, item",
+     "a \"b\" c"
+    ]
+   },
+   "name": "apostrophe-in-inline-list-item",
+   "text": "---\nlabels: [it's, fine, 'quoted, item', a \"b\" c]\n---\nbody\n"
+  },
+  {
+   "body": "body\n",
+   "fm": {
+    "key's": "v",
+    "note": "it'#s literal"
+   },
+   "name": "hash-after-mid-value-apostrophe",
+   "text": "---\nnote: it'#s literal # but this is a comment\nkey's: v\n---\nbody\n"
+  },
+  {
+   "body": "body\n",
+   "fm": {
+    "items": [
+     "x"
+    ],
+    "k": "v",
+    "list": [
+     "a",
+     "b"
+    ]
+   },
+   "name": "quoted-then-comment-or-key",
+   "text": "---\nk: \"v\"   # comment\nlist: ['a' , \"b\"]\nitems:\n  - 'x'  # c\n---\nbody\n"
+  }
+ ],
+ "roundtrip": [
+  {
+   "acceptance": [
+    "Tags round-trip",
+    "No regression in existing tests"
+   ],
+   "body": "Some markdown body.",
+   "branch": "feature/tag-suggestions",
+   "estimate": 3,
+   "labels": [
+    "bug",
+    "ui"
+   ],
+   "testing": {
+    "mode": "auto",
+    "run": [
+     "pytest -q",
+     "node --test tests/js"
+    ],
+    "then": "ask"
+   },
+   "title": "Tag suggestions"
+  },
+  {
+   "allow_text": true,
+   "questions": [
+    {
+     "id": "q1",
+     "options": [
+      "rewrite",
+      "patch"
+     ],
+     "recommended": "patch",
+     "required": true,
+     "text": "Which approach?",
+     "type": "single"
+    },
+    {
+     "id": "q2",
+     "required": false,
+     "text": "Anything else?",
+     "type": "text"
+    }
+   ]
+  },
+  {
+   "hash": "it'#s",
+   "labels": [
+    "it's",
+    "a \"b\" c"
+   ],
+   "note": "I'm done",
+   "questions": [
+    {
+     "id": "q1",
+     "text": "Anything I've missed?"
+    }
+   ],
+   "title": "Fix the \"save\" button"
+  }
+ ]
+}

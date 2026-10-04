@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<title>Set up · tix.severin.io/share</title>
+<link rel="icon" href="/static/img/icon.svg?v={{BUILD}}" type="image/svg+xml">
+<link rel="icon" href="/static/img/icon-32.png?v={{BUILD}}" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png?v={{BUILD}}">
+<meta name="theme-color" content="#15171a">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="tix">
+<link rel="stylesheet" href="/static/css/tokens.css?v={{BUILD}}">
+<link rel="stylesheet" href="/static/css/app.css?v={{BUILD}}">
+<script type="module" src="/static/js/setup.js?v={{BUILD}}"></script>
+</head>
+<body>
+<main class="auth-wrap">
+  <div class="card auth-card">
+    <h1 class="wordmark">tix<span class="mono">/share</span></h1>
+
+    <div class="seg" role="tablist" aria-label="Setup mode" id="mode-tabs">
+      <button type="button" role="tab" id="tab-new" aria-selected="true" aria-controls="setup-form">New setup</button>
+      <button type="button" role="tab" id="tab-restore" aria-selected="false" aria-controls="restore-form">Restore from recovery key</button>
+    </div>
+    <p class="notice" id="already-note" hidden>This share is already set up. Only use this page to restore access with your recovery key.</p>
+
+    <form id="setup-form" role="tabpanel" aria-labelledby="tab-new" novalidate>
+      <p class="muted">Choose the passphrase that unlocks your files. It never leaves this browser.</p>
+      <div class="field">
+        <label class="label" for="setup-code">Setup code</label>
+        <input class="input mono" id="setup-code" autocomplete="off" autocapitalize="off" spellcheck="false" required>
+        <p class="hint">Print one on the server (see RUNBOOK §2): <code>sudo -u fileshare env HOME=/opt/fileshare /opt/fileshare/.local/bin/uv run --frozen --no-dev --project /opt/fileshare python -m fileshare.admin setup-code --data-dir /var/lib/fileshare</code></p>
+      </div>
+      <div class="field">
+        <label class="label" for="new-pass">Passphrase</label>
+        <input class="input" id="new-pass" type="password" autocomplete="new-password" required>
+        <p class="hint" id="strength" aria-live="polite">At least 12 characters. A few random words work well.</p>
+      </div>
+      <div class="field">
+        <label class="label" for="new-pass2">Confirm passphrase</label>
+        <input class="input" id="new-pass2" type="password" autocomplete="new-password" required>
+      </div>
+      <p class="error-text" id="setup-error" role="alert" hidden></p>
+      <button class="btn btn-accent btn-block" type="submit" id="setup-submit">
+        <span class="spinner" aria-hidden="true" hidden></span><span class="btn-label">Create key and finish setup</span>
+      </button>
+    </form>
+
+    <form id="restore-form" role="tabpanel" aria-labelledby="tab-restore" hidden novalidate>
+      <p class="muted">Enter your recovery key and choose a new passphrase. Your files stay readable.</p>
+      <div class="field">
+        <label class="label" for="restore-code">Setup code</label>
+        <input class="input mono" id="restore-code" autocomplete="off" autocapitalize="off" spellcheck="false" required>
+      </div>
+      <div class="field">
+        <label class="label" for="recovery">Recovery key</label>
+        <input class="input mono" id="recovery" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="shrk-XXXXX-XXXXX-…" required>
+      </div>
+      <div class="field">
+        <label class="label" for="restore-pass">New passphrase</label>
+        <input class="input" id="restore-pass" type="password" autocomplete="new-password" required>
+      </div>
+      <div class="field">
+        <label class="label" for="restore-pass2">Confirm new passphrase</label>
+        <input class="input" id="restore-pass2" type="password" autocomplete="new-password" required>
+      </div>
+      <p class="error-text" id="restore-error" role="alert" hidden></p>
+      <button class="btn btn-accent btn-block" type="submit" id="restore-submit">
+        <span class="spinner" aria-hidden="true" hidden></span><span class="btn-label">Restore access</span>
+      </button>
+    </form>
+
+    <section id="recovery-screen" aria-labelledby="recovery-title" hidden>
+      <h2 class="modal-title" id="recovery-title">Save your recovery key</h2>
+      <p class="muted">If you forget your passphrase, this key is the only way back in. Without either one, your files are lost for good. It will not be shown again.</p>
+      <code class="recovery-key" id="recovery-key"></code>
+      <div class="btn-row">
+        <button class="btn" type="button" id="copy-recovery">Copy</button>
+        <button class="btn" type="button" id="download-recovery">Download .txt</button>
+      </div>
+      <label class="check"><input type="checkbox" id="stored"><span>I stored the recovery key somewhere safe, offline</span></label>
+      <button class="btn btn-accent btn-block" type="button" id="continue" disabled>Continue</button>
+    </section>
+  </div>
+</main>
+</body>
+</html>

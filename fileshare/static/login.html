@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<title>Log in · tix.severin.io/share</title>
+<link rel="icon" href="/static/img/icon.svg?v={{BUILD}}" type="image/svg+xml">
+<link rel="icon" href="/static/img/icon-32.png?v={{BUILD}}" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png?v={{BUILD}}">
+<meta name="theme-color" content="#15171a">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="tix">
+<link rel="stylesheet" href="/static/css/tokens.css?v={{BUILD}}">
+<link rel="stylesheet" href="/static/css/app.css?v={{BUILD}}">
+<script type="module" src="/static/js/login.js?v={{BUILD}}"></script>
+</head>
+<body>
+<main class="auth-wrap">
+  <form class="card auth-card" id="login-form" novalidate>
+    <h1 class="wordmark">tix<span class="mono">/share</span></h1>
+    <p class="muted">Sign in to view and manage shared files.</p>
+    <div class="field">
+      <label class="label" for="passphrase">Passphrase</label>
+      <input class="input" id="passphrase" name="passphrase" type="password" autocomplete="current-password" autofocus required>
+    </div>
+    <p class="error-text" id="login-error" role="alert" hidden></p>
+    <button class="btn btn-accent btn-block" id="login-submit" type="submit">
+      <span class="spinner" aria-hidden="true" hidden></span><span class="btn-label">Log in</span>
+    </button>
+    <p class="hint center">Your passphrase never leaves this browser. Only a key derived from it is sent.</p>
+  </form>
+</main>
+</body>
+</html>

@@ -1,0 +1,56 @@
+# /etc/systemd/system/fileshare.service
+#
+# The encrypted file share, as a plain systemd unit under uv (no Docker). The
+# process never holds a key that opens file content; the hardening below is
+# still not optional -- it is the isolation boundary for everything else on
+# this shared box. Pattern copied from the old orchestrator.service.
+
+[Unit]
+Description=fileshare (tix.severin.io encrypted file share)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fileshare
+Group=fileshare
+WorkingDirectory=/opt/fileshare
+Environment=HOME=/opt/fileshare
+Environment=PATH=/opt/fileshare/.local/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=/etc/fileshare/fileshare.env
+# Starlette spools multipart upload bodies to TMPDIR. /tmp may be tmpfs, which
+# would hold a 200 MiB upload in RAM, so spool to disk under the data dir. Its
+# own directory, not the blob store's tmp/: the startup sweep owns that one.
+Environment=TMPDIR=/var/lib/fileshare/spool
+# Must exist before Python resolves tempfile.gettempdir(), or it silently falls
+# back to /tmp. Recreated on every start, so a restored data dir needs nothing.
+ExecStartPre=/usr/bin/mkdir -p -m 0700 /var/lib/fileshare/spool
+# --no-proxy-headers: X-Real-IP (set by Caddy) is the one client-IP source, and
+# it is trusted only because we bind to 127.0.0.1.
+ExecStart=/opt/fileshare/.local/bin/uv run --frozen --no-dev --project /opt/fileshare \
+          uvicorn --factory fileshare.app:create_app \
+          --host 127.0.0.1 --port 8808 --workers 1 --no-proxy-headers
+UMask=0027
+Restart=on-failure
+RestartSec=3
+
+# --- hardening: this is what replaces a container boundary ---
+NoNewPrivileges=true
+PrivateTmp=yes
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+# The only writable paths. Uploads go to /var/lib/fileshare/{spool,tmp,blobs}; forget
+# a path here and it fails at runtime, not install time. "-" = ignore if absent
+# (the venv does not exist until the first `uv sync`).
+ReadWritePaths=/var/lib/fileshare -/opt/fileshare/.venv -/opt/fileshare/.cache -/opt/fileshare/.local
+
+[Install]
+WantedBy=multi-user.target

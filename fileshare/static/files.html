@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<title>Files · tix</title>
+<link rel="icon" href="/static/img/icon.svg?v={{BUILD}}" type="image/svg+xml">
+<link rel="icon" href="/static/img/icon-32.png?v={{BUILD}}" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png?v={{BUILD}}">
+<meta name="theme-color" content="#15171a">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="tix">
+<link rel="stylesheet" href="/static/css/tokens.css?v={{BUILD}}">
+<link rel="stylesheet" href="/static/css/app.css?v={{BUILD}}">
+<template id="preview-css">{{PREVIEW_CSS}}</template>
+<script src="/static/vendor/markdown-it.min.js?v={{BUILD}}"></script>
+<script src="/static/vendor/purify.min.js?v={{BUILD}}"></script>
+<script type="module" src="/static/js/shell.js?v={{BUILD}}"></script>
+<script type="module" src="/static/js/files.js?v={{BUILD}}"></script>
+<script type="module" src="/static/js/upload.js?v={{BUILD}}"></script>
+</head>
+<body class="app page-files" data-max-upload="{{MAX_UPLOAD}}">
+<div id="banner"></div>
+<div class="shell">
+  <aside class="sidebar" aria-label="App">
+    <a class="brand" href="/"><span class="brand-icon" aria-hidden="true"></span><span class="brand-main">tix</span></a>
+    <nav class="appnav" aria-label="Main">
+      <a class="nav-item" href="/" data-tab="needs"><span class="nav-icon" data-icon="bell"><span id="needs-badge" class="count-badge" hidden></span></span><span class="nav-label">Needs you</span></a>
+      <a class="nav-item" href="/?view=tickets" data-tab="tickets"><span class="nav-icon" data-icon="list"></span><span class="nav-label">Tickets</span></a>
+      <a class="nav-item" href="/files" data-tab="files" aria-current="page"><span class="nav-icon" data-icon="files"></span><span class="nav-label">Files</span><span class="nav-count" id="files-new" hidden></span></a>
+      <a class="nav-item" href="/settings" data-tab="settings"><span class="nav-icon" data-icon="gear"><span id="devices-badge" class="count-badge" hidden></span></span><span class="nav-label">Settings</span></a>
+    </nav>
+    <div class="sidebar-foot">
+      <button class="btn-dashed" type="button" id="onboard-btn" data-action="onboard"><span data-icon="plus"></span>Onboard device</button>
+      <div class="this-browser">
+        <span class="this-browser-label">This browser</span>
+        <button id="browser-name" class="browser-name" type="button" hidden><span class="browser-name-value"></span><span class="browser-name-pen" data-icon="pen"></span></button>
+        <button class="link-btn" type="button" id="logout" data-action="logout">Sign out</button>
+      </div>
+    </div>
+  </aside>
+
+  <main id="dropzone" class="files-layout">
+    <section class="list-col" aria-label="Files">
+      <header class="m-head">
+        <a class="brand" href="/"><span class="brand-icon" aria-hidden="true"></span><span class="brand-main">tix</span></a>
+        <button class="round-btn" type="button" data-action="onboard" aria-label="Onboard device"><span data-icon="plus"></span></button>
+      </header>
+      <div class="list-head">
+        <div class="list-title-row">
+          <h1 class="page-title">Files</h1>
+          <span class="list-count" id="count"></span>
+          <div class="dock" id="dock" role="group" aria-label="Share">
+            <button class="dock-btn dock-primary" id="upload-btn" type="button" data-action="upload"><span data-icon="upload"></span><span class="dock-label">Upload</span></button>
+            <button class="dock-btn" id="paste-btn" type="button" data-action="paste" aria-label="Paste from clipboard" title="Paste (⌘V)"><span data-icon="paste"></span></button>
+            <button class="dock-btn" id="record-btn" type="button" data-action="record" aria-label="Record audio" title="Record"><span data-icon="mic"></span></button>
+            <button class="dock-btn" id="note-btn" type="button" data-action="note" aria-label="New note" title="Note"><span data-icon="note"></span></button>
+          </div>
+          <div class="list-menu-wrap" id="list-menu-wrap" hidden>
+            <button class="icon-btn" type="button" id="list-menu-btn" aria-label="Filter by device or project" aria-haspopup="true" aria-expanded="false" aria-controls="list-menu"><span data-icon="filter"></span></button>
+            <div class="popover" id="list-menu" hidden>
+              <label class="chip-select"><span class="label">Device</span><select class="input" id="filter-device"></select></label>
+              <label class="chip-select"><span class="label">Project</span><select class="input" id="filter-project"></select></label>
+            </div>
+          </div>
+          <button class="icon-btn" type="button" id="droplink-btn" aria-label="Upload links" title="Upload links"><span data-icon="link"></span></button>
+        </div>
+        <div id="pending-banner" class="banner banner-info" role="status" hidden>
+          <span data-icon="devices"></span><span class="pending-text"></span><a href="/settings#devices">Review</a>
+        </div>
+        <label class="search-box">
+          <span data-icon="search"></span>
+          <input class="search" id="search" type="search" placeholder="Search name, note or ID" aria-label="Search files" autocomplete="off" spellcheck="false">
+          <kbd class="d-only">/</kbd>
+        </label>
+        <div class="chips" role="group" aria-label="Filter by type" id="type-chips">
+          <button class="chip" type="button" id="acked-chip" aria-pressed="false">Done</button>
+        </div>
+      </div>
+
+      <div class="list-body">
+        <div class="banner banner-error" id="load-error" role="alert" hidden>
+          <span id="load-error-text"></span>
+          <button class="btn" type="button" id="retry">Retry</button>
+        </div>
+
+        <p class="muted list-msg" id="loading">Loading and decrypting…</p>
+
+        <section class="offline-state" id="offline" role="status" hidden>
+          <span class="offline-icon" data-icon="cloudOff"></span>
+          <h2>Offline</h2>
+          <p>You're offline. New notes, recordings and uploads will be sent when you're back online.</p>
+        </section>
+
+        <div class="outbox-slot" id="outbox-slot" hidden></div>
+
+        <section class="empty" id="empty" hidden>
+          <h2>No files yet</h2>
+          <p>Onboard a device or upload a file to get started.</p>
+          <button class="btn btn-accent" type="button" data-action="onboard">Onboard device</button>
+        </section>
+
+        <div id="results" hidden>
+          <p class="empty-inline" id="no-match" hidden>No files match these filters.</p>
+          <div class="file-list" id="file-list"></div>
+        </div>
+
+        <div class="load-more-wrap"><button class="btn" type="button" id="load-more" hidden>Load more</button></div>
+
+        <p class="hint drop-hint d-only">Drop files anywhere, or press <kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>V</kbd> to share a screenshot or text.</p>
+        <p class="hint foot">File contents, names and notes are end-to-end encrypted. The server sees only sizes, devices, projects and dates.</p>
+      </div>
+    </section>
+
+    <section class="detail" id="detail" aria-label="Selected file">
+      <div class="detail-empty">
+        <span data-icon="files"></span>
+        <p>Select a file to see it here.</p>
+        <p class="hint"><kbd>↑</kbd> <kbd>↓</kbd> to move, <kbd>Enter</kbd> to open, <kbd>/</kbd> to search.</p>
+      </div>
+    </section>
+  </main>
+</div>
+</body>
+</html>

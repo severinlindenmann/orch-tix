@@ -1,0 +1,937 @@
+{
+ "context_artifacts": [
+  {
+   "file": "FILE7",
+   "name": "report.md"
+  }
+ ],
+ "history": [
+  {
+   "at": "2026-10-02T09:00Z",
+   "seq": 11,
+   "what": "created the ticket",
+   "who": "claude-code"
+  },
+  {
+   "at": "2026-10-02T09:05Z",
+   "seq": 12,
+   "what": "approved the requirements",
+   "who": "human (desktop log)"
+  },
+  {
+   "at": "2026-10-02T09:10Z",
+   "seq": 13,
+   "text": "split the exporter",
+   "what": "asked for changes on the plan",
+   "who": "human (desktop log)"
+  },
+  {
+   "at": "2026-10-02T09:20Z",
+   "seq": 14,
+   "what": "approved the plan",
+   "who": "human (desktop log)"
+  },
+  {
+   "at": "2026-10-02T09:24Z",
+   "seq": 15,
+   "what": "started T2",
+   "who": "claude-code"
+  },
+  {
+   "at": "2026-10-02T09:30Z",
+   "seq": 16,
+   "what": "asked Q1",
+   "who": "claude-code"
+  }
+ ],
+ "levels": {
+  "full": {
+   "artifacts": [
+    "report.md"
+   ],
+   "blocked_by": [],
+   "branches": {},
+   "claim": {
+    "at": "2026-10-02T09:00Z",
+    "harness": "claude-code",
+    "session": "7f3c9a21"
+   },
+   "context_artifacts": [
+    {
+     "file": "FILE7",
+     "name": "report.md"
+    }
+   ],
+   "created": "2026-10-02T09:00Z",
+   "external": [],
+   "follow_ups": [],
+   "gates": {
+    "plan": {
+     "approved": "2026-10-02T09:00Z",
+     "changes_requested": null,
+     "covers": [
+      "Plan"
+     ],
+     "hash": "sha256:4ef7c8bc5c13ded5a90c946bff7b6b0950f9db15f3089cbe117cfe68182fa59e",
+     "state": "approved",
+     "via": "dashboard"
+    },
+    "requirements": {
+     "approved": "2026-10-02T09:00Z",
+     "changes_requested": null,
+     "covers": [
+      "Requirements",
+      "Acceptance criteria",
+      "Out of scope",
+      "size",
+      "type"
+     ],
+     "hash": "sha256:eed4a231276678a366a47ea903846470742c5251b2323a34c5b0f0bf23459daa",
+     "state": "approved",
+     "via": "dashboard"
+    },
+    "verify": {
+     "at": null,
+     "verdict": null,
+     "via": null
+    }
+   },
+   "history": [
+    {
+     "at": "2026-10-02T09:00Z",
+     "seq": 11,
+     "what": "created the ticket",
+     "who": "claude-code"
+    },
+    {
+     "at": "2026-10-02T09:05Z",
+     "seq": 12,
+     "what": "approved the requirements",
+     "who": "human (desktop log)"
+    },
+    {
+     "at": "2026-10-02T09:10Z",
+     "seq": 13,
+     "text": "split the exporter",
+     "what": "asked for changes on the plan",
+     "who": "human (desktop log)"
+    },
+    {
+     "at": "2026-10-02T09:20Z",
+     "seq": 14,
+     "what": "approved the plan",
+     "who": "human (desktop log)"
+    },
+    {
+     "at": "2026-10-02T09:24Z",
+     "seq": 15,
+     "what": "started T2",
+     "who": "claude-code"
+    },
+    {
+     "at": "2026-10-02T09:30Z",
+     "seq": 16,
+     "what": "asked Q1",
+     "who": "claude-code"
+    }
+   ],
+   "id": "DEMO-0038",
+   "labels": [
+    "export"
+   ],
+   "move": {
+    "kind": "answer",
+    "label": "Answer Q1",
+    "ref": "Q1",
+    "who": "you",
+    "why": "The agent asked a blocking question and waits for your answer."
+   },
+   "needs": [
+    {
+     "detail": "Q1",
+     "kind": "answer"
+    },
+    {
+     "detail": "T3",
+     "kind": "task"
+    }
+   ],
+   "open_questions": 1,
+   "parent": null,
+   "priority": "high",
+   "prs": [],
+   "questions": [
+    {
+     "answer": null,
+     "answered": null,
+     "asked": "2026-10-02T09:00Z",
+     "blocking": true,
+     "hash": "sha256:d001617f80066f8d8fa4baaec5a10e45f14f9cbab0cc32344e4d2e0c9648aa7e",
+     "id": "Q1",
+     "note": null,
+     "options": [
+      {
+       "cost": "none",
+       "key": "A",
+       "label": "ISO 8601"
+      },
+      {
+       "cost": null,
+       "key": "B",
+       "label": "Local time"
+      }
+     ],
+     "recommended": "A",
+     "text": "Which timestamp format?",
+     "type": "single",
+     "via": null,
+     "why": "Excel parses only some formats"
+    }
+   ],
+   "redaction": "full",
+   "repos": [],
+   "schema_version": "1.4.0",
+   "sections": {
+    "Acceptance criteria": "- [ ] Opens in Excel",
+    "Ask": "The client needs the readings as CSV.",
+    "Context": "",
+    "Current state": "",
+    "Findings": "",
+    "Out of scope": "",
+    "Plan": "1. Inventory\n2. Exporter",
+    "Requirements": "- One file per day",
+    "Summary": "",
+    "Tasks": "- [x] T1 Inventory the meter export jobs\n  - ref: ac:1\n  - note: 14 jobs listed\n- [/] T2 Write the CSV exporter\n  - needs: T1\n  - verify: pytest tests/test_export.py\n- [ ] T3 Ask the client for the delimiter\n  - owner: human",
+    "Verification": "All 14 jobs export; Excel opens every file.\nDetails in the report."
+   },
+   "size": "m",
+   "sprint": null,
+   "status": "waiting",
+   "tasks": {
+    "added_since_approval": 0,
+    "can_move_to_testing": false,
+    "doing": "T2",
+    "error": null,
+    "format": "orch.tasks.v1",
+    "next": "T2",
+    "open": [
+     "T2",
+     "T3"
+    ],
+    "plan_approved": "2026-10-02T09:00Z",
+    "status": "waiting",
+    "summary": {
+     "blocked": 0,
+     "closed": 1,
+     "doing": 1,
+     "done": 1,
+     "skipped": 0,
+     "todo": 1,
+     "total": 3
+    },
+    "tasks": [
+     {
+      "added": null,
+      "added_after_approval": false,
+      "id": "T1",
+      "needs": [],
+      "needs_open": [],
+      "note": "14 jobs listed",
+      "on": null,
+      "on_ref": null,
+      "owner": "agent",
+      "refs": [
+       {
+        "exists": true,
+        "kind": "ac",
+        "label": null,
+        "target": "1",
+        "text": "Opens in Excel"
+       }
+      ],
+      "state": "done",
+      "text": "Inventory the meter export jobs",
+      "verify": null,
+      "waits_on_you": false,
+      "why": null
+     },
+     {
+      "added": null,
+      "added_after_approval": false,
+      "id": "T2",
+      "needs": [
+       "T1"
+      ],
+      "needs_open": [],
+      "note": null,
+      "on": null,
+      "on_ref": null,
+      "owner": "agent",
+      "refs": [],
+      "state": "doing",
+      "text": "Write the CSV exporter",
+      "verify": "pytest tests/test_export.py",
+      "waits_on_you": false,
+      "why": null
+     },
+     {
+      "added": null,
+      "added_after_approval": false,
+      "id": "T3",
+      "needs": [],
+      "needs_open": [],
+      "note": null,
+      "on": null,
+      "on_ref": null,
+      "owner": "human",
+      "refs": [],
+      "state": "todo",
+      "text": "Ask the client for the delimiter",
+      "verify": null,
+      "waits_on_you": false,
+      "why": null
+     }
+    ],
+    "ticket": "DEMO-0038"
+   },
+   "title": "Export the meter readings as CSV",
+   "type": "feature",
+   "updated": "2026-10-02T09:00Z",
+   "verdict": null
+  },
+  "full+log": {
+   "artifacts": [
+    "report.md"
+   ],
+   "blocked_by": [],
+   "branches": {},
+   "claim": {
+    "at": "2026-10-02T09:00Z",
+    "harness": "claude-code",
+    "session": "7f3c9a21"
+   },
+   "context_artifacts": [
+    {
+     "file": "FILE7",
+     "name": "report.md"
+    }
+   ],
+   "created": "2026-10-02T09:00Z",
+   "external": [],
+   "follow_ups": [],
+   "gates": {
+    "plan": {
+     "approved": "2026-10-02T09:00Z",
+     "changes_requested": null,
+     "covers": [
+      "Plan"
+     ],
+     "hash": "sha256:4ef7c8bc5c13ded5a90c946bff7b6b0950f9db15f3089cbe117cfe68182fa59e",
+     "state": "approved",
+     "via": "dashboard"
+    },
+    "requirements": {
+     "approved": "2026-10-02T09:00Z",
+     "changes_requested": null,
+     "covers": [
+      "Requirements",
+      "Acceptance criteria",
+      "Out of scope",
+      "size",
+      "type"
+     ],
+     "hash": "sha256:eed4a231276678a366a47ea903846470742c5251b2323a34c5b0f0bf23459daa",
+     "state": "approved",
+     "via": "dashboard"
+    },
+    "verify": {
+     "at": null,
+     "verdict": null,
+     "via": null
+    }
+   },
+   "history": [
+    {
+     "at": "2026-10-02T09:00Z",
+     "seq": 11,
+     "what": "created the ticket",
+     "who": "claude-code"
+    },
+    {
+     "at": "2026-10-02T09:05Z",
+     "seq": 12,
+     "what": "approved the requirements",
+     "who": "human (desktop log)"
+    },
+    {
+     "at": "2026-10-02T09:10Z",
+     "seq": 13,
+     "text": "split the exporter",
+     "what": "asked for changes on the plan",
+     "who": "human (desktop log)"
+    },
+    {
+     "at": "2026-10-02T09:20Z",
+     "seq": 14,
+     "what": "approved the plan",
+     "who": "human (desktop log)"
+    },
+    {
+     "at": "2026-10-02T09:24Z",
+     "seq": 15,
+     "what": "started T2",
+     "who": "claude-code"
+    },
+    {
+     "at": "2026-10-02T09:30Z",
+     "seq": 16,
+     "what": "asked Q1",
+     "who": "claude-code"
+    }
+   ],
+   "id": "DEMO-0038",
+   "labels": [
+    "export"
+   ],
+   "move": {
+    "kind": "answer",
+    "label": "Answer Q1",
+    "ref": "Q1",
+    "who": "you",
+    "why": "The agent asked a blocking question and waits for your answer."
+   },
+   "needs": [
+    {
+     "detail": "Q1",
+     "kind": "answer"
+    },
+    {
+     "detail": "T3",
+     "kind": "task"
+    }
+   ],
+   "open_questions": 1,
+   "parent": null,
+   "priority": "high",
+   "prs": [],
+   "questions": [
+    {
+     "answer": null,
+     "answered": null,
+     "asked": "2026-10-02T09:00Z",
+     "blocking": true,
+     "hash": "sha256:d001617f80066f8d8fa4baaec5a10e45f14f9cbab0cc32344e4d2e0c9648aa7e",
+     "id": "Q1",
+     "note": null,
+     "options": [
+      {
+       "cost": "none",
+       "key": "A",
+       "label": "ISO 8601"
+      },
+      {
+       "cost": null,
+       "key": "B",
+       "label": "Local time"
+      }
+     ],
+     "recommended": "A",
+     "text": "Which timestamp format?",
+     "type": "single",
+     "via": null,
+     "why": "Excel parses only some formats"
+    }
+   ],
+   "redaction": "full",
+   "repos": [],
+   "schema_version": "1.4.0",
+   "sections": {
+    "Acceptance criteria": "- [ ] Opens in Excel",
+    "Ask": "The client needs the readings as CSV.",
+    "Context": "",
+    "Current state": "",
+    "Findings": "",
+    "Log": "2026-10-02T09:05Z agent: step 5\n2026-10-02T09:06Z agent: step 6\n2026-10-02T09:07Z agent: step 7\n2026-10-02T09:08Z agent: step 8\n2026-10-02T09:09Z agent: step 9\n2026-10-02T09:10Z agent: step 10\n2026-10-02T09:11Z agent: step 11\n2026-10-02T09:12Z agent: step 12\n2026-10-02T09:13Z agent: step 13\n2026-10-02T09:14Z agent: step 14\n2026-10-02T09:15Z agent: step 15\n2026-10-02T09:16Z agent: step 16\n2026-10-02T09:17Z agent: step 17\n2026-10-02T09:18Z agent: step 18\n2026-10-02T09:19Z agent: step 19\n2026-10-02T09:20Z agent: step 20\n2026-10-02T09:21Z agent: step 21\n2026-10-02T09:22Z agent: step 22\n2026-10-02T09:23Z agent: step 23\n2026-10-02T09:24Z agent: step 24",
+    "Out of scope": "",
+    "Plan": "1. Inventory\n2. Exporter",
+    "Requirements": "- One file per day",
+    "Summary": "",
+    "Tasks": "- [x] T1 Inventory the meter export jobs\n  - ref: ac:1\n  - note: 14 jobs listed\n- [/] T2 Write the CSV exporter\n  - needs: T1\n  - verify: pytest tests/test_export.py\n- [ ] T3 Ask the client for the delimiter\n  - owner: human",
+    "Verification": "All 14 jobs export; Excel opens every file.\nDetails in the report."
+   },
+   "size": "m",
+   "sprint": null,
+   "status": "waiting",
+   "tasks": {
+    "added_since_approval": 0,
+    "can_move_to_testing": false,
+    "doing": "T2",
+    "error": null,
+    "format": "orch.tasks.v1",
+    "next": "T2",
+    "open": [
+     "T2",
+     "T3"
+    ],
+    "plan_approved": "2026-10-02T09:00Z",
+    "status": "waiting",
+    "summary": {
+     "blocked": 0,
+     "closed": 1,
+     "doing": 1,
+     "done": 1,
+     "skipped": 0,
+     "todo": 1,
+     "total": 3
+    },
+    "tasks": [
+     {
+      "added": null,
+      "added_after_approval": false,
+      "id": "T1",
+      "needs": [],
+      "needs_open": [],
+      "note": "14 jobs listed",
+      "on": null,
+      "on_ref": null,
+      "owner": "agent",
+      "refs": [
+       {
+        "exists": true,
+        "kind": "ac",
+        "label": null,
+        "target": "1",
+        "text": "Opens in Excel"
+       }
+      ],
+      "state": "done",
+      "text": "Inventory the meter export jobs",
+      "verify": null,
+      "waits_on_you": false,
+      "why": null
+     },
+     {
+      "added": null,
+      "added_after_approval": false,
+      "id": "T2",
+      "needs": [
+       "T1"
+      ],
+      "needs_open": [],
+      "note": null,
+      "on": null,
+      "on_ref": null,
+      "owner": "agent",
+      "refs": [],
+      "state": "doing",
+      "text": "Write the CSV exporter",
+      "verify": "pytest tests/test_export.py",
+      "waits_on_you": false,
+      "why": null
+     },
+     {
+      "added": null,
+      "added_after_approval": false,
+      "id": "T3",
+      "needs": [],
+      "needs_open": [],
+      "note": null,
+      "on": null,
+      "on_ref": null,
+      "owner": "human",
+      "refs": [],
+      "state": "todo",
+      "text": "Ask the client for the delimiter",
+      "verify": null,
+      "waits_on_you": false,
+      "why": null
+     }
+    ],
+    "ticket": "DEMO-0038"
+   },
+   "title": "Export the meter readings as CSV",
+   "type": "feature",
+   "updated": "2026-10-02T09:00Z",
+   "verdict": null
+  },
+  "key-only": {
+   "created": "2026-10-02T09:00Z",
+   "gates": {
+    "plan": {
+     "state": "approved"
+    },
+    "requirements": {
+     "state": "approved"
+    },
+    "verify": {}
+   },
+   "id": "DEMO-0038",
+   "move": {
+    "kind": "answer",
+    "who": "you"
+   },
+   "needs": [
+    {
+     "kind": "answer",
+     "qids": [
+      "Q1"
+     ]
+    },
+    {
+     "kind": "task"
+    }
+   ],
+   "open_questions": 1,
+   "redaction": "key-only",
+   "schema_version": "1.4.0",
+   "status": "waiting",
+   "updated": "2026-10-02T09:00Z"
+  },
+  "title": {
+   "artifacts": [
+    "report.md"
+   ],
+   "claim": {
+    "harness": "claude-code"
+   },
+   "context_artifacts": [
+    {
+     "file": "FILE7",
+     "name": "report.md"
+    }
+   ],
+   "created": "2026-10-02T09:00Z",
+   "gates": {
+    "plan": {
+     "covers": [
+      "Plan"
+     ],
+     "hash": "sha256:4ef7c8bc5c13ded5a90c946bff7b6b0950f9db15f3089cbe117cfe68182fa59e",
+     "state": "approved"
+    },
+    "requirements": {
+     "covers": [
+      "Requirements",
+      "Acceptance criteria",
+      "Out of scope",
+      "size",
+      "type"
+     ],
+     "hash": "sha256:eed4a231276678a366a47ea903846470742c5251b2323a34c5b0f0bf23459daa",
+     "state": "approved"
+    },
+    "verify": {}
+   },
+   "history": [
+    {
+     "at": "2026-10-02T09:00Z",
+     "seq": 11,
+     "what": "created the ticket",
+     "who": "claude-code"
+    },
+    {
+     "at": "2026-10-02T09:05Z",
+     "seq": 12,
+     "what": "approved the requirements",
+     "who": "human (desktop log)"
+    },
+    {
+     "at": "2026-10-02T09:10Z",
+     "seq": 13,
+     "what": "asked for changes on the plan",
+     "who": "human (desktop log)"
+    },
+    {
+     "at": "2026-10-02T09:20Z",
+     "seq": 14,
+     "what": "approved the plan",
+     "who": "human (desktop log)"
+    },
+    {
+     "at": "2026-10-02T09:24Z",
+     "seq": 15,
+     "what": "started T2",
+     "who": "claude-code"
+    },
+    {
+     "at": "2026-10-02T09:30Z",
+     "seq": 16,
+     "what": "asked Q1",
+     "who": "claude-code"
+    }
+   ],
+   "id": "DEMO-0038",
+   "labels": [
+    "export"
+   ],
+   "move": {
+    "kind": "answer",
+    "label": "Answer Q1",
+    "ref": "Q1",
+    "who": "you",
+    "why": "The agent asked a blocking question and waits for your answer."
+   },
+   "needs": [
+    {
+     "kind": "answer",
+     "qids": [
+      "Q1"
+     ]
+    },
+    {
+     "kind": "task"
+    }
+   ],
+   "open_questions": 1,
+   "priority": "high",
+   "questions": [
+    {
+     "answered": null,
+     "asked": "2026-10-02T09:00Z",
+     "blocking": true,
+     "hash": "sha256:d001617f80066f8d8fa4baaec5a10e45f14f9cbab0cc32344e4d2e0c9648aa7e",
+     "id": "Q1",
+     "options": [
+      {
+       "cost": "none",
+       "key": "A",
+       "label": "ISO 8601"
+      },
+      {
+       "cost": null,
+       "key": "B",
+       "label": "Local time"
+      }
+     ],
+     "recommended": "A",
+     "text": "Which timestamp format?",
+     "type": "single",
+     "via": null,
+     "why": "Excel parses only some formats"
+    }
+   ],
+   "redaction": "title",
+   "schema_version": "1.4.0",
+   "size": "m",
+   "status": "waiting",
+   "tasks": {
+    "progress": {
+     "done": 1,
+     "total": 3
+    }
+   },
+   "title": "Export the meter readings as CSV",
+   "type": "feature",
+   "updated": "2026-10-02T09:00Z",
+   "verification_summary": "All 14 jobs export; Excel opens every file."
+  }
+ },
+ "source": {
+  "artifacts": [
+   "report.md"
+  ],
+  "blocked_by": [],
+  "branches": {},
+  "claim": {
+   "at": "2026-10-02T09:00Z",
+   "harness": "claude-code",
+   "session": "7f3c9a21"
+  },
+  "created": "2026-10-02T09:00Z",
+  "external": [],
+  "follow_ups": [],
+  "gates": {
+   "plan": {
+    "approved": "2026-10-02T09:00Z",
+    "changes_requested": null,
+    "covers": [
+     "Plan"
+    ],
+    "hash": "sha256:4ef7c8bc5c13ded5a90c946bff7b6b0950f9db15f3089cbe117cfe68182fa59e",
+    "state": "approved",
+    "via": "dashboard"
+   },
+   "requirements": {
+    "approved": "2026-10-02T09:00Z",
+    "changes_requested": null,
+    "covers": [
+     "Requirements",
+     "Acceptance criteria",
+     "Out of scope",
+     "size",
+     "type"
+    ],
+    "hash": "sha256:eed4a231276678a366a47ea903846470742c5251b2323a34c5b0f0bf23459daa",
+    "state": "approved",
+    "via": "dashboard"
+   },
+   "verify": {
+    "at": null,
+    "verdict": null,
+    "via": null
+   }
+  },
+  "id": "DEMO-0038",
+  "labels": [
+   "export"
+  ],
+  "move": {
+   "kind": "answer",
+   "label": "Answer Q1",
+   "ref": "Q1",
+   "who": "you",
+   "why": "The agent asked a blocking question and waits for your answer."
+  },
+  "needs": [
+   {
+    "detail": "Q1",
+    "kind": "answer"
+   },
+   {
+    "detail": "T3",
+    "kind": "task"
+   }
+  ],
+  "parent": null,
+  "priority": "high",
+  "prs": [],
+  "questions": [
+   {
+    "answer": null,
+    "answered": null,
+    "asked": "2026-10-02T09:00Z",
+    "blocking": true,
+    "hash": "sha256:d001617f80066f8d8fa4baaec5a10e45f14f9cbab0cc32344e4d2e0c9648aa7e",
+    "id": "Q1",
+    "note": null,
+    "options": [
+     {
+      "cost": "none",
+      "key": "A",
+      "label": "ISO 8601"
+     },
+     {
+      "cost": null,
+      "key": "B",
+      "label": "Local time"
+     }
+    ],
+    "recommended": "A",
+    "text": "Which timestamp format?",
+    "type": "single",
+    "via": null,
+    "why": "Excel parses only some formats"
+   }
+  ],
+  "repos": [],
+  "schema_version": "1.4.0",
+  "sections": {
+   "Acceptance criteria": "- [ ] Opens in Excel",
+   "Ask": "The client needs the readings as CSV.",
+   "Context": "",
+   "Current state": "",
+   "Findings": "",
+   "Log": "2026-10-02T09:00Z agent: step 0\n2026-10-02T09:01Z agent: step 1\n2026-10-02T09:02Z agent: step 2\n2026-10-02T09:03Z agent: step 3\n2026-10-02T09:04Z agent: step 4\n2026-10-02T09:05Z agent: step 5\n2026-10-02T09:06Z agent: step 6\n2026-10-02T09:07Z agent: step 7\n2026-10-02T09:08Z agent: step 8\n2026-10-02T09:09Z agent: step 9\n2026-10-02T09:10Z agent: step 10\n2026-10-02T09:11Z agent: step 11\n2026-10-02T09:12Z agent: step 12\n2026-10-02T09:13Z agent: step 13\n2026-10-02T09:14Z agent: step 14\n2026-10-02T09:15Z agent: step 15\n2026-10-02T09:16Z agent: step 16\n2026-10-02T09:17Z agent: step 17\n2026-10-02T09:18Z agent: step 18\n2026-10-02T09:19Z agent: step 19\n2026-10-02T09:20Z agent: step 20\n2026-10-02T09:21Z agent: step 21\n2026-10-02T09:22Z agent: step 22\n2026-10-02T09:23Z agent: step 23\n2026-10-02T09:24Z agent: step 24",
+   "Out of scope": "",
+   "Plan": "1. Inventory\n2. Exporter",
+   "Requirements": "- One file per day",
+   "Summary": "",
+   "Tasks": "- [x] T1 Inventory the meter export jobs\n  - ref: ac:1\n  - note: 14 jobs listed\n- [/] T2 Write the CSV exporter\n  - needs: T1\n  - verify: pytest tests/test_export.py\n- [ ] T3 Ask the client for the delimiter\n  - owner: human",
+   "Verification": "All 14 jobs export; Excel opens every file.\nDetails in the report."
+  },
+  "size": "m",
+  "sprint": null,
+  "status": "waiting",
+  "tasks": {
+   "added_since_approval": 0,
+   "can_move_to_testing": false,
+   "doing": "T2",
+   "error": null,
+   "format": "orch.tasks.v1",
+   "next": "T2",
+   "open": [
+    "T2",
+    "T3"
+   ],
+   "plan_approved": "2026-10-02T09:00Z",
+   "status": "waiting",
+   "summary": {
+    "blocked": 0,
+    "closed": 1,
+    "doing": 1,
+    "done": 1,
+    "skipped": 0,
+    "todo": 1,
+    "total": 3
+   },
+   "tasks": [
+    {
+     "added": null,
+     "added_after_approval": false,
+     "id": "T1",
+     "needs": [],
+     "needs_open": [],
+     "note": "14 jobs listed",
+     "on": null,
+     "on_ref": null,
+     "owner": "agent",
+     "refs": [
+      {
+       "exists": true,
+       "kind": "ac",
+       "label": null,
+       "target": "1",
+       "text": "Opens in Excel"
+      }
+     ],
+     "state": "done",
+     "text": "Inventory the meter export jobs",
+     "verify": null,
+     "waits_on_you": false,
+     "why": null
+    },
+    {
+     "added": null,
+     "added_after_approval": false,
+     "id": "T2",
+     "needs": [
+      "T1"
+     ],
+     "needs_open": [],
+     "note": null,
+     "on": null,
+     "on_ref": null,
+     "owner": "agent",
+     "refs": [],
+     "state": "doing",
+     "text": "Write the CSV exporter",
+     "verify": "pytest tests/test_export.py",
+     "waits_on_you": false,
+     "why": null
+    },
+    {
+     "added": null,
+     "added_after_approval": false,
+     "id": "T3",
+     "needs": [],
+     "needs_open": [],
+     "note": null,
+     "on": null,
+     "on_ref": null,
+     "owner": "human",
+     "refs": [],
+     "state": "todo",
+     "text": "Ask the client for the delimiter",
+     "verify": null,
+     "waits_on_you": false,
+     "why": null
+    }
+   ],
+   "ticket": "DEMO-0038"
+  },
+  "title": "Export the meter readings as CSV",
+  "type": "feature",
+  "updated": "2026-10-02T09:00Z",
+  "verdict": null
+ }
+}

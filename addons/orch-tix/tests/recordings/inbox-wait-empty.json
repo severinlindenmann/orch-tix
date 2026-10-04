@@ -1,0 +1,2 @@
+{"argv": ["/opt/sharing/sharing", "inbox", "wait", "--after", "*", "--timeout", "25", "--json"], "returncode": 0,
+ "stdout_json": {"decisions": [], "cursor": 0}}

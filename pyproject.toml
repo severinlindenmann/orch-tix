@@ -1,0 +1,37 @@
+[project]
+name = "fileshare"
+version = "0.1.0"
+description = "tix.severin.io/share — end-to-end encrypted file share between devices"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+  "python-multipart>=0.0.9",
+  "pywebpush>=2",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8",
+  "httpx>=0.27",
+  "cryptography>=43",
+  "pytest-playwright>=0.5",
+]
+
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["fileshare"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["addons", ".venv", "node_modules", ".git"]
+pythonpath = ["."]
+markers = [
+  "e2e: real uvicorn + real installer; needs uv and network for the first run",
+  "browser: Playwright browser tests; needs `uv run playwright install chromium`",
+  "real_pusher: keep the app's SubprocessPusher (the default test app gets a NullPusher)",
+]

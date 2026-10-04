@@ -1,0 +1,3 @@
+{"argv": ["/opt/sharing/sharing", "whoami", "--json"], "returncode": 0,
+ "stdout_json": {"device_id": "dev_test", "device": "desk", "project": "acme", "server": "https://tix.example.invalid",
+                 "reachable": true, "skill_version": "1.8.0", "latest_skill_version": "1.8.0", "update_available": false}}

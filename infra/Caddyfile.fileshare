@@ -1,0 +1,53 @@
+# /etc/caddy/sites/fileshare.caddy
+#
+# A SEPARATE file, imported by the shared /etc/caddy/Caddyfile through the one
+# line that already exists on this box:
+#     import /etc/caddy/sites/*.caddy
+# Removing this file removes fileshare from Caddy completely.
+#
+# FS_DOMAIN is substituted by infra/prepare-vps.sh.
+#
+# CSP is NOT set here: the app sets it on every response, because it embeds the
+# sha256 of the preview stylesheet (fileshare/headers.py). Setting a second CSP
+# here would intersect with it and break the preview.
+
+FS_DOMAIN {
+	@compressible path /static/* /
+	encode @compressible zstd gzip
+
+	# Uploads are ciphertext capped at FS_MAX_UPLOAD = 200 MiB by the app; this
+	# is the outer bound so an oversized body never reaches uvicorn at all.
+	request_body {
+		max_size 210MB
+	}
+
+	reverse_proxy 127.0.0.1:8808 {
+		header_up X-Real-IP {remote_host}
+	}
+
+	# tix frames /sandbox/html itself (HTML previews), so that one path may be
+	# framed by the same origin; every other path stays DENY. The other headers
+	# are identical in both blocks - keep them in step.
+	@sandbox path /sandbox/html
+	@notsandbox not path /sandbox/html
+
+	header @sandbox {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	header @notsandbox {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	# No `log` block on purpose: Caddy here runs hardened and cannot write to
+	# /var/log/caddy, and no other site on this box uses one. Not logging also
+	# keeps anything accidentally placed in a URL out of files on disk.
+}

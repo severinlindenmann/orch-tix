@@ -1,0 +1,139 @@
+{
+ "aad_prefixes": {
+  "decision": "sharing/decision/v1|",
+  "mirror": "sharing/mirror/v1|",
+  "msg": "sharing/msg/v1|",
+  "space": "sharing/space/v1|"
+ },
+ "cases": [
+  {
+   "aad": "73686172696e672f73706163652f76317c6161616161616161616161616161616161616161616161616161616161616161",
+   "env": "AYCBgoOEhYaHiImKi7GcqHfW3iTN5J-B4bI6dvx_TTj5hchPH5wUp1BpjvE_7kP_OMrSFXg5TM_wLaz3fvBx",
+   "key": "f4f5f6f7f8f9fafbfcfdfeff000102030405060708090a0b0c0d0e0f10111213",
+   "label": "Acme Energy · Zürich",
+   "name": "space-label",
+   "nonce": "808182838485868788898a8b",
+   "obj": {
+    "label": "Acme Energy · Zürich"
+   },
+   "pt": "7b226c6162656c223a2241636d6520456e6572677920c2b7205ac3bc72696368227d",
+   "space_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+   "aad": "73686172696e672f6d6972726f722f76317cc15d07113a2450f5bf3679f64fe5264b",
+   "env": "AZSVlpeYmZqbnJ2en4R9QKR8mx3ty1tkMPew1RhqbTABQMiM4IFVBzpUkm3DH1t95b1N62KjRbAe-sUDrGsnTW3jk24MTQErdiI1r0EH7zXdRHUzlFfRtJ2m0XKvMf5JSrIAEGJhMDPR3EbIq1wGc0DDU3rt8_0pedd1s1OQv6m6B6L0GNa50AxLk0Kldt_PtYBW7NiURY5xOingjGVckLFWwpAetu9LR2UnNkPjj5a8uSy11oaIhHe0YTJkWWrrxyz1q-euBMh0wV3dYs6VrDY3JFSpMeBryOmi2JdsEZEkrvYEfw",
+   "key": "1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b",
+   "name": "mirror",
+   "nonce": "9495969798999a9b9c9d9e9f",
+   "obj": {
+    "gen": 1,
+    "id": "DEMO-0038",
+    "mirror_rev": 7,
+    "questions": [
+     {
+      "id": "Q1",
+      "options": [
+       "CSV",
+       "Parquet"
+      ],
+      "text": "CSV or Parquet?"
+     }
+    ],
+    "schema_version": "1.0.0",
+    "status": "waiting",
+    "title": "Export the meter readings"
+   },
+   "pt": "7b2267656e223a312c226964223a2244454d4f2d30303338222c226d6972726f725f726576223a372c227175657374696f6e73223a5b7b226964223a225131222c226f7074696f6e73223a5b22435356222c2250617271756574225d2c2274657874223a22435356206f7220506172717565743f227d5d2c22736368656d615f76657273696f6e223a22312e302e30222c22737461747573223a2277616974696e67222c227469746c65223a224578706f727420746865206d657465722072656164696e6773227d",
+   "ticket_uuid": "c15d07113a2450f5bf3679f64fe5264b"
+  },
+  {
+   "aad": "73686172696e672f6465636973696f6e2f76317cc15d07113a2450f5bf3679f64fe5264b7c4445464748494a4b4c4d4e4f50515253",
+   "decision_uuid": "4445464748494a4b4c4d4e4f50515253",
+   "env": "Aaipqqusra6vsLGys-eSODPgmtBICC4O-RRr3mAL_aNUy1qUo3EPAt0ofvbzXuu3J71bTgI2QYPGpt4ZTs5mlkLKunFfpIFN5E8vu2ZafOjFfBNplNqLk_xuhHod1eiAH-Gk28DsQYPZO9dicrI4GHccO5JkvnxIelgQLJVuO1bC9fdoMk1YvKPDyVj2cz1PX4vVZm7VvUGTIpLRgphgThXNeb8AkJGeKlpfdoW-afw-cBYdGw7yg12g4kXlyPnOtIrg_IIDStPGUxK8zaLISY8u-phRJ60BKtrscn2KLndmbYOUmLHhzk9gjZ425ULl3wlr9WVQDXqzGcEM1jrSa5qrP5S8eLOVeb4YVE_H_NE_cGFsg-Ymbh2I_LyXSI8J3_w7HuKZit58seHCFSUa_li_jqQP_PcxSbiakJnvhGlIqoVmYqjREFlWrSl6eBcWIWy0YHQ63mGs",
+   "key": "1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b",
+   "name": "decision-ticket",
+   "nonce": "a8a9aaabacadaeafb0b1b2b3",
+   "obj": {
+    "at": "2026-10-02T09:41:07Z",
+    "decision_id": "dec_4445464748494a4b4c4d4e4f50515253",
+    "kind": "answer",
+    "note": "Excel on the billing PC",
+    "space": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "target": {
+     "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+     "qid": "Q1"
+    },
+    "ticket": "DEMO-0038",
+    "v": 1,
+    "value": "A"
+   },
+   "pt": "7b226174223a22323032362d31302d30325430393a34313a30375a222c226465636973696f6e5f6964223a226465635f3434343534363437343834393461346234633464346534663530353135323533222c226b696e64223a22616e73776572222c226e6f7465223a22457863656c206f6e207468652062696c6c696e67205043222c227370616365223a226161616161616161616161616161616161616161616161616161616161616161222c22746172676574223a7b2268617368223a227368613235363a30303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030222c22716964223a225131227d2c227469636b6574223a2244454d4f2d30303338222c2276223a312c2276616c7565223a2241227d",
+   "scope": "c15d07113a2450f5bf3679f64fe5264b"
+  },
+  {
+   "aad": "73686172696e672f6465636973696f6e2f76317c61616161616161616161616161616161616161616161616161616161616161617c58595a5b5c5d5e5f6061626364656667",
+   "decision_uuid": "58595a5b5c5d5e5f6061626364656667",
+   "env": "Aby9vr_AwcLDxMXGx7NDknR3RNx11dNpRN89nJ_wMcsd1DLx-2Zf1CZQJTbAJy0gZGMogJfIT_ytPH6SEG3cvx8JEXAhEgUw-z03zAQOcYKKUDjW_fYKC9qoQ1WYglsreFfBjiLV1JcS-i3l9mN6uiHo739hAOUmm6jmJGmri_95u3ERFPn_dpGgCuJ1kz6P2YaziZHzRndaX7b7b-nr21BySXHG2zT1CJrKVDgTG8kiso3p4xNVFoc1xOZyZUcjkZkq2eXRgR4Z_13B_NX64GOAl8xk6L7W7dslMMYXt19MDArrmEtKJdZfwrplxzvctz0lJtyM",
+   "key": "f4f5f6f7f8f9fafbfcfdfeff000102030405060708090a0b0c0d0e0f10111213",
+   "name": "decision-space",
+   "nonce": "bcbdbebfc0c1c2c3c4c5c6c7",
+   "obj": {
+    "at": "2026-10-02T09:42:00Z",
+    "decision_id": "dec_58595a5b5c5d5e5f6061626364656667",
+    "kind": "ticket_request",
+    "space": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "v": 1,
+    "value": {
+     "body": "before Friday",
+     "title": "Rotate the API key"
+    }
+   },
+   "pt": "7b226174223a22323032362d31302d30325430393a34323a30305a222c226465636973696f6e5f6964223a226465635f3538353935613562356335643565356636303631363236333634363536363637222c226b696e64223a227469636b65745f72657175657374222c227370616365223a226161616161616161616161616161616161616161616161616161616161616161222c2276223a312c2276616c7565223a7b22626f6479223a226265666f726520467269646179222c227469746c65223a22526f746174652074686520415049206b6579227d7d",
+   "scope": "6161616161616161616161616161616161616161616161616161616161616161"
+  },
+  {
+   "aad": "73686172696e672f6d73672f76317c6c6d6e6f707172737475767778797a7b",
+   "env": "AdDR0tPU1dbX2Nna289RMRVFAmJvkTEkEq64HUucKRHbHwcWHiq5rONZRp-VfTUW2IGG9mXPHP2Wzde2g_MPHLu6p1nLeFbI_9DGg31QnSAUUPQ3nn-qZ6xCvt8rs9diVk72xc6E5Os0AuoT_K7m",
+   "key": "f4f5f6f7f8f9fafbfcfdfeff000102030405060708090a0b0c0d0e0f10111213",
+   "msg_uuid": "6c6d6e6f707172737475767778797a7b",
+   "name": "msg",
+   "nonce": "d0d1d2d3d4d5d6d7d8d9dadb",
+   "obj": {
+    "files": [
+     "FILE12"
+    ],
+    "from": "desk",
+    "text": "nightly run finished ✓",
+    "ticket": null
+   },
+   "pt": "7b2266696c6573223a5b2246494c453132225d2c2266726f6d223a226465736b222c2274657874223a226e696768746c792072756e2066696e697368656420e29c93222c227469636b6574223a6e756c6c7d"
+  }
+ ],
+ "dek": "1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b",
+ "mk": "f4f5f6f7f8f9fafbfcfdfeff000102030405060708090a0b0c0d0e0f10111213",
+ "space_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+ "uuids": [
+  {
+   "gen": 1,
+   "key": "DEMO-0038",
+   "mirror_event_uuid": "fad6f1f9079a577cbc5fe9b77ab60677",
+   "mirror_uuid": "c15d07113a2450f5bf3679f64fe5264b",
+   "rev": 7,
+   "space_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+   "gen": 2,
+   "key": "DEMO-0038",
+   "mirror_event_uuid": "aac4a78b962d0c9aa69cd10a972b91e9",
+   "mirror_uuid": "d11a4317d253ae6c366d32dfaf59a28c",
+   "rev": 7,
+   "space_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }
+ ],
+ "version": 1,
+ "wrapped_dek": {
+  "aad": "73686172696e672f7464656b2f76317cc15d07113a2450f5bf3679f64fe5264b",
+  "env": "AeTl5ufo6err7O3u7zVww0AX1x2Kca0jL2d-WKO72UU8AnulxE9kKf9qXAKPHfIJqFdml_jo_erNVeUYbw",
+  "nonce": "e4e5e6e7e8e9eaebecedeeef"
+ }
+}

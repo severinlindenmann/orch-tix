@@ -1,0 +1,3 @@
+{"argv": ["/opt/sharing/sharing", "space", "show", "--json"], "returncode": 0,
+ "stdout_json": {"space_id": "ffffffffffffffffffffffffffffffff", "label": "Acme Energy", "owner": true,
+                 "last_seen_at": "2026-10-02T09:40:00Z", "server": "https://tix.example.invalid"}}

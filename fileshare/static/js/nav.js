@@ -1,0 +1,117 @@
+// Pure login guards and the Needs you nav badge, importable without a DOM (node tests import this module directly).
+import { unb64u } from "./crypto.js";
+import { api } from "./api.js";
+
+export const MIN_ITERATIONS = 1000;
+export const MAX_ITERATIONS = 10_000_000;
+export const MIN_SALT_LEN = 16;
+
+// Resolve like the browser will, so tab/newline stripping and backslashes can't smuggle in another host.
+export function safeNext(raw, origin = globalThis.location?.origin) {
+  if (typeof raw !== "string" || !origin) return "/";
+  try {
+    const u = new URL(raw, origin);
+    // A "//host" pathname (e.g. from "/a/..//evil.com") would become protocol-relative when navigated to.
+    if (u.origin !== origin || u.pathname.startsWith("//")) return "/";
+    // Never a fragment: it can hold a key (a /pair link), and a fragment never needs to survive a login.
+    return u.pathname === "/pair" ? "/" : u.pathname + u.search;
+  } catch {
+    return "/";
+  }
+}
+
+// The login link for this page: path and query only, never the fragment (review fix round 1).
+export function loginHref(loc = globalThis.location) {
+  const path = loc.pathname === "/pair" ? "/" : loc.pathname + (loc.search || "");
+  return `/login?next=${encodeURIComponent(path)}`;
+}
+
+export class UnsafeKdfError extends Error {
+  constructor() {
+    super("server returned unsafe key parameters");
+    this.name = "UnsafeKdfError";
+  }
+}
+
+// Returns the decoded salt, or throws UnsafeKdfError before any key is derived.
+export function checkKdf(kdf) {
+  const it = kdf?.kdf_iterations;
+  if (!Number.isInteger(it) || it < MIN_ITERATIONS || it > MAX_ITERATIONS) throw new UnsafeKdfError();
+  let salt;
+  try {
+    salt = unb64u(kdf.kdf_salt);
+  } catch {
+    throw new UnsafeKdfError();
+  }
+  if (!(salt instanceof Uint8Array) || salt.length < MIN_SALT_LEN) throw new UnsafeKdfError();
+  return salt;
+}
+
+// ---- the Needs you badge (TIX on orch-core): what Needs you shows. Mirrors whose SEALED doc needs the human
+// (openRow binds the routing and takes `needs` from the doc; the cleartext never counts), messages to the
+// human, and join requests waiting in this browser.
+
+export function attentionBadge(count) {
+  const n = Number.isInteger(count) && count > 0 ? count : 0;
+  if (!n) return { text: "", title: "", hidden: true };
+  return { text: n > 99 ? "99+" : String(n), title: n === 1 ? "1 thing needs you" : `${n} things need you`, hidden: false };
+}
+
+// Opens the mirrors with this browser's MK (mirrors-data.openRow). Loaded on demand: mirrors-data imports
+// this module too.
+async function openRowsHere(mirrors) {
+  const [{ loadKeys }, { openRow }] = await Promise.all([import("./keystore.js"), import("./mirrors-data.js")]);
+  const keys = await loadKeys();
+  if (!keys) return [];
+  return Promise.all(mirrors.map((m) => openRow(keys.mk, m)));
+}
+
+const optional = async (p, pick) => {
+  try {
+    return pick(await p);
+  } catch {
+    return 0;           // a device token, offline: only what did load
+  }
+};
+
+export async function needsCount(get = (path) => api("GET", path), openRows = openRowsHere) {
+  const { mirrors = [] } = await get("/api/mirrors");
+  const [rows, messages, joins] = await Promise.all([
+    openRows(mirrors),
+    optional(get("/api/messages?after=0&wait=0"), (r) => (r.messages || []).filter((m) => m.to_kind === "human").length),
+    optional(get("/api/join-requests"), (r) => (r.requests || []).length),
+  ]);
+  return rows.filter((r) => r && r.doc && r.needs).length + messages + joins;
+}
+
+// Fills #needs-badge (the sidebar and the tab bar share it). Failures keep the badge as it was:
+// the session and network banners report those.
+export async function refreshAttention(doc = document, get = (path) => api("GET", path), openRows = openRowsHere) {
+  const badge = doc.getElementById("needs-badge");
+  if (!badge) return;
+  let n;
+  try {
+    n = await needsCount(get, openRows);
+  } catch {
+    return;
+  }
+  const b = attentionBadge(n);
+  badge.textContent = b.text;
+  badge.title = b.title;
+  badge.hidden = b.hidden;
+}
+
+// The Tickets tab is the Needs you page with ?view=tickets: mark the right tab as current.
+export function markCurrentTab(doc = document, loc = globalThis.location) {
+  if (!loc || loc.pathname !== "/") return;
+  const tickets = new URLSearchParams(loc.search).get("view") === "tickets";
+  for (const a of doc.querySelectorAll(".nav-item[data-tab]")) {
+    const cur = a.dataset.tab === (tickets ? "tickets" : "needs");
+    if (cur) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+  }
+  if (tickets) {
+    const t = doc.getElementById("needs-title");
+    if (t) t.textContent = "Tickets";
+    doc.title = "Tickets · tix";
+  }
+}

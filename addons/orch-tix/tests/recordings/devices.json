@@ -1,0 +1,2 @@
+{"argv": ["/opt/sharing/sharing", "devices", "--json"], "returncode": 6,
+ "stdout_json": {"error": "browser_only", "detail": "the device list is only shown in your browser (TIX → Devices); a device cannot read it. This device is fine."}}

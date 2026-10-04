@@ -1,0 +1,136 @@
+from orch.core.schema import example_document
+from orch_tix.mapping import needs_of, open_questions, payload, redact
+
+DOC = example_document()
+SECRETS = ("Inventory\n2. Exporter", "One file per day", "Opens in Excel", "7f3c9a21")
+
+
+def test_needs_of_maps_orch_kinds():
+    assert needs_of({"needs": [{"kind": "answer"}]}) == "question"
+    assert needs_of({"needs": [{"kind": "approve-plan"}]}) == "approval"
+    assert needs_of({"needs": [{"kind": "approve-requirements"}]}) == "approval"
+    assert needs_of({"needs": [{"kind": "re-approve"}]}) == "approval"
+    assert needs_of({"needs": [{"kind": "verdict", "round": 3}]}) == "verdict"
+    assert needs_of({"needs": [{"kind": "task"}, {"kind": "broken"}]}) is None
+    assert needs_of({"needs": [{"kind": "task"}, {"kind": "answer"}]}) == "question"
+
+
+def test_title_redaction_keeps_only_the_listed_fields():
+    d = redact(DOC, "title", sync_log=False, context_artifacts=[])
+    text = repr(d)
+    assert d["title"] == DOC["title"] and d["questions"][0]["text"] == "Which timestamp format?"
+    assert d["questions"][0]["options"][0]["label"] == "ISO 8601" and d["questions"][0]["hash"].startswith("sha256:")
+    assert d["gates"]["plan"] == {"state": "approved", "hash": DOC["gates"]["plan"]["hash"], "covers": ["Plan"]}
+    assert d["tasks"] == {"progress": {"done": 1, "total": 3}}
+    assert d["claim"] == {"harness": "claude-code"} and d["redaction"] == "title"
+    assert "sections" not in d and "branches" not in d and "prs" not in d
+    for s in SECRETS:
+        assert s not in text
+
+
+def test_title_carries_the_first_verification_line_only():
+    doc = {**DOC, "sections": {**DOC["sections"], "Verification": "\n\n  All 14 jobs export.  \nDetails: secret path"}}
+    d = redact(doc, "title", sync_log=False, context_artifacts=[])
+    assert d["verification_summary"] == "All 14 jobs export."
+    assert "secret path" not in repr(d)
+
+
+def test_title_drops_unknown_keys():
+    doc = {**DOC, "x-new-field": "leak me"}
+    assert "leak me" not in repr(redact(doc, "title", sync_log=False, context_artifacts=[]))
+    assert "leak me" not in repr(redact(doc, "key-only", sync_log=False, context_artifacts=[]))
+
+
+def test_key_only_has_no_text():
+    d = redact(DOC, "key-only", sync_log=False, context_artifacts=[{"name": "plot.png", "file": "FILE91"}])
+    assert set(d) <= {"schema_version", "id", "status", "needs", "created", "updated", "open_questions", "gates",
+                      "redaction", "move"}
+    assert set(d.get("move", {})) <= {"who", "kind"}                  # whose move and which kind, no label
+    assert d["gates"]["plan"] == {"state": "approved"} and d["open_questions"] == 1
+    assert "Export the meter" not in repr(d) and "timestamp" not in repr(d) and "plot.png" not in repr(d)
+
+
+def test_full_drops_the_log_unless_asked():
+    doc = {**DOC, "sections": {**DOC["sections"], "Log": "\n".join(f"- line {i}" for i in range(30))}}
+    assert "Log" not in redact(doc, "full", sync_log=False, context_artifacts=[])["sections"]
+    log = redact(doc, "full", sync_log=True, context_artifacts=[])["sections"]["Log"]
+    assert log.count("\n") == 19 and "line 29" in log and "line 9\n" not in log
+    full = redact(doc, "full", sync_log=False, context_artifacts=[])
+    assert full["sections"]["Plan"] == DOC["sections"]["Plan"] and full["redaction"] == "full"
+
+
+def test_payload_file_cleartext_fields():
+    p = payload(DOC, key="DEMO-0038", gen=1, rev=7, level="title", sync_log=False, context_artifacts=[])
+    assert {k for k in p if k != "doc"} == {"key", "gen", "rev", "status", "priority", "needs", "open_questions",
+                                             "schema_version"}
+    assert p["needs"] == "question" and p["open_questions"] == open_questions(DOC) == 1
+    assert p["priority"] == "high" and p["status"] == "waiting" and p["gen"] == 1 and p["rev"] == 7
+    no_prio = payload({**DOC, "priority": None}, key="DEMO-0038", gen=1, rev=1, level="key-only", sync_log=False,
+                      context_artifacts=[])
+    assert no_prio["priority"] == "normal" and "title" not in no_prio["doc"]
+
+
+def test_context_artifacts_ride_along_at_title():
+    d = redact(DOC, "title", sync_log=False, context_artifacts=[{"name": "plot.png", "file": "FILE91"}])
+    assert d["context_artifacts"] == [{"name": "plot.png", "file": "FILE91"}]
+
+
+def test_needs_carry_no_detail_text_below_full():
+    doc = {**DOC, "needs": [{"kind": "answer", "detail": "Q1, Q3"}, {"kind": "verdict", "detail": "free text", "round": 7},
+                            {"kind": "re-approve", "detail": "plan"}]}
+    for level in ("title", "key-only"):
+        assert redact(doc, level, sync_log=False, context_artifacts=[])["needs"] == [
+            {"kind": "answer", "qids": ["Q1", "Q3"]}, {"kind": "verdict", "round": 7}, {"kind": "re-approve"}]
+    assert redact(doc, "full", sync_log=False, context_artifacts=[])["needs"] == doc["needs"]
+
+
+def test_answers_and_notes_stay_on_the_desktop_below_full():
+    """Final review M7: an answer (and its note) can carry client detail; the phone needs only that it is done."""
+    q = {**DOC["questions"][0], "answer": "B", "note": "billing wants local time", "answered": "2026-10-02T09:30Z",
+         "via": "dashboard"}
+    doc = {**DOC, "questions": [q]}
+    t = redact(doc, "title", sync_log=False, context_artifacts=[])["questions"][0]
+    assert "answer" not in t and "note" not in t and t["answered"] == "2026-10-02T09:30Z"
+    assert "billing" not in repr(redact(doc, "key-only", sync_log=False, context_artifacts=[]))
+    assert redact(doc, "full", sync_log=False, context_artifacts=[])["questions"][0]["note"] == "billing wants local time"
+
+
+# ---- night build part 2: what the requirements hash covers reaches the phone; history from events
+
+def test_title_keeps_what_each_gate_hash_covers():
+    doc = {**DOC, "gates": {"requirements": {"state": "pending", "hash": "sha256:" + "a" * 64,
+                                             "covers": ["Summary", "Requirements", "size", "type"], "via": "x"}}}
+    d = redact(doc, "title", sync_log=False, context_artifacts=[])
+    assert d["gates"]["requirements"] == {"state": "pending", "hash": "sha256:" + "a" * 64,
+                                          "covers": ["Summary", "Requirements", "size", "type"]}
+    assert "covers" not in redact(doc, "key-only", sync_log=False, context_artifacts=[])["gates"]["requirements"]
+    full = redact(doc, "full", sync_log=False, context_artifacts=[])
+    assert full["gates"]["requirements"]["covers"] == ["Summary", "Requirements", "size", "type"]
+
+
+def test_history_is_redacted_per_level():
+    h = [{"seq": 3, "at": "2026-10-02T09:00Z", "who": "you", "what": "asked for changes on the plan", "text": "leak me"}]
+    assert redact(DOC, "full", sync_log=False, context_artifacts=[], history=h)["history"] == h
+    assert redact(DOC, "title", sync_log=False, context_artifacts=[], history=h)["history"] == [
+        {"seq": 3, "at": "2026-10-02T09:00Z", "who": "you", "what": "asked for changes on the plan"}]
+    assert "history" not in redact(DOC, "key-only", sync_log=False, context_artifacts=[], history=h)
+    assert "history" not in redact(DOC, "title", sync_log=False, context_artifacts=[])
+
+
+def test_title_keeps_the_verdict_hash_and_round_key_only_does_not():
+    doc = {**DOC, "status": "testing", "verdict": {"hash": "sha256:" + "c" * 64, "round": 4, "extra": "no"}}
+    assert redact(doc, "title", sync_log=False, context_artifacts=[])["verdict"] == {"hash": "sha256:" + "c" * 64, "round": 4}
+    assert redact(doc, "full", sync_log=False, context_artifacts=[])["verdict"]["hash"] == "sha256:" + "c" * 64
+    assert "verdict" not in redact(doc, "key-only", sync_log=False, context_artifacts=[])
+
+
+def test_move_and_together_reach_the_phone_per_level():
+    doc = {**DOC, "move": {"who": "you", "kind": "approve-requirements", "label": "Approve requirements and plan",
+                           "ref": "requirements", "why": "The plan is drafted too."},
+           "needs": [{"kind": "approve-requirements", "detail": "secret detail", "together": True}]}
+    t = redact(doc, "title", sync_log=False, context_artifacts=[])
+    assert t["move"]["label"] == "Approve requirements and plan" and t["needs"] == [{"kind": "approve-requirements",
+                                                                                      "together": True}]
+    k = redact(doc, "key-only", sync_log=False, context_artifacts=[])
+    assert k["move"] == {"who": "you", "kind": "approve-requirements"}
+    assert redact(doc, "full", sync_log=False, context_artifacts=[])["move"]["why"] == "The plan is drafted too."

@@ -1,0 +1,6 @@
+# Served skill files: the manifest hashes the checked-out bytes, so pin their line endings on every OS.
+# A CRLF bash wrapper breaks Git Bash; sharing.cmd is a batch file and stays CRLF.
+skill/sharing/sharing.cmd  text eol=crlf
+skill/sharing/sharing      text eol=lf
+skill/sharing/sharing.py   text eol=lf
+skill/sharing/SKILL.md     text eol=lf

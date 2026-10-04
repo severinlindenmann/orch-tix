@@ -1,0 +1,282 @@
+/* GENERATED from static/tokens.json (DTCG 2025.10) v1.1.0 by `python -m orch.dashboard.design.build`.
+   Do not edit: change tokens.json and run the build. Other apps (the phone companion) copy it as is, so it
+   holds custom properties only. Theme: data-theme=light|dark|system on any element (system follows the OS); a wrapper that
+   sets data-theme also paints background: var(--bg) and color: var(--text). Only themed tokens repeat under
+   [data-theme], so a nested theme wrapper never resets density, pointer, phone or motion values. */
+:root {
+  color-scheme: light;
+  --font-heading: "Figtree", system-ui, sans-serif;
+  --font-body: "Manrope", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", "Menlo", "Consolas", monospace;
+  --bg: #F2F3F5;
+  --surface: #FFFFFF;
+  --surface2: #F7F8F9;
+  --raised: #FFFFFF;
+  --overlay: #FFFFFF;
+  --hover: #EEF0F2;
+  --chip: #EEF0F2;
+  --nav-active: #EEF0F2;
+  --line: #E1E4E8;
+  --line2: #C9CED4;
+  --ctl: #7A838D;
+  --ctl-overlay: #7A838D;
+  --text: #15171A;
+  --muted: #495159;
+  --link: #0A6B5A;
+  --on-primary: #FFFFFF;
+  --on-danger: #FFFFFF;
+  --primary: #15171A;
+  --danger: #B42318;
+  --mint: #00CC99;
+  --focus: #15171A;
+  --scrim: rgba(21, 23, 26, 0.48);
+  --ok-bg: #DDF9E8;
+  --ok-fg: #0B4F3D;
+  --ok-mark: #008A6B;
+  --info-bg: #E3ECFC;
+  --info-fg: #1F5FD1;
+  --info-mark: #2F6FEB;
+  --you-bg: #FDE3EE;
+  --you-fg: #B8136A;
+  --you-mark: #E0287F;
+  --warn-bg: #FFF1D6;
+  --warn-fg: #7A4E00;
+  --warn-mark: #B07A10;
+  --err-bg: #FEE4E2;
+  --err-fg: #B42318;
+  --err-mark: #D93A2B;
+  --neu-bg: #EEF0F2;
+  --neu-fg: #495159;
+  --neu-mark: #6B7480;
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+  --s-12: 48px;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-pill: 999px;
+  --type-title: 800 28px/1.2143 "Figtree", system-ui, sans-serif;
+  --type-section: 700 18px/1.3333 "Figtree", system-ui, sans-serif;
+  --type-item: 650 15px/1.4667 "Figtree", system-ui, sans-serif;
+  --type-body: 400 14px/1.5714 "Manrope", system-ui, sans-serif;
+  --type-control: 600 14px/1.4286 "Manrope", system-ui, sans-serif;
+  --type-meta: 600 12px/1.3333 "Manrope", system-ui, sans-serif;
+  --type-stat: 800 18px/1.3333 "Figtree", system-ui, sans-serif;
+  --type-kpi: 800 28px/1.2143 "Figtree", system-ui, sans-serif;
+  --shadow-raised: 0px 1px 3px 0px rgba(21, 23, 26, 0.08);
+  --shadow-overlay: 0px 12px 32px 0px rgba(21, 23, 26, 0.18);
+  --dur-1: 100ms;
+  --dur-2: 200ms;
+  --dur-3: 280ms;
+  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --bp-shell: 900px;
+  --bp-split: 1100px;
+  --bp-wide: 1440px;
+  --cq-narrow: 400px;
+  --cq-medium: 560px;
+  --cq-wide: 800px;
+  --menu-w: 248px;
+  --aside-w: 320px;
+  --content-max: 1280px;
+  --measure: 720px;
+  --control-h: 40px;
+  --control-px: 16px;
+  --control-radius: 10px;
+  --control-border: var(--ctl);
+  --card-pad: 20px;
+  --card-gap: 16px;
+  --card-inner: 12px;
+  --card-radius: 14px;
+  --rail-w: 4px;
+  --row-h: 44px;
+  --cell-py: 12px;
+  --cell-px: 16px;
+  --chip-h: 22px;
+  --chip-px: 8px;
+  --chip-radius: 999px;
+  --dialog-pad: 24px;
+  --dialog-gap: 16px;
+  --dialog-w: 480px;
+  --dialog-radius: 14px;
+  --focus-w: 2px;
+  --focus-offset: 2px;
+  --target-min: 24px;
+  --tap: 44px;
+  --icon-status: 12px;
+  --icon-ui: 18px;
+}
+[data-theme=light] {
+  color-scheme: light;
+  --bg: #F2F3F5;
+  --surface: #FFFFFF;
+  --surface2: #F7F8F9;
+  --raised: #FFFFFF;
+  --overlay: #FFFFFF;
+  --hover: #EEF0F2;
+  --chip: #EEF0F2;
+  --nav-active: #EEF0F2;
+  --line: #E1E4E8;
+  --line2: #C9CED4;
+  --ctl: #7A838D;
+  --ctl-overlay: #7A838D;
+  --text: #15171A;
+  --muted: #495159;
+  --link: #0A6B5A;
+  --on-primary: #FFFFFF;
+  --on-danger: #FFFFFF;
+  --primary: #15171A;
+  --danger: #B42318;
+  --mint: #00CC99;
+  --focus: #15171A;
+  --scrim: rgba(21, 23, 26, 0.48);
+  --ok-bg: #DDF9E8;
+  --ok-fg: #0B4F3D;
+  --ok-mark: #008A6B;
+  --info-bg: #E3ECFC;
+  --info-fg: #1F5FD1;
+  --info-mark: #2F6FEB;
+  --you-bg: #FDE3EE;
+  --you-fg: #B8136A;
+  --you-mark: #E0287F;
+  --warn-bg: #FFF1D6;
+  --warn-fg: #7A4E00;
+  --warn-mark: #B07A10;
+  --err-bg: #FEE4E2;
+  --err-fg: #B42318;
+  --err-mark: #D93A2B;
+  --neu-bg: #EEF0F2;
+  --neu-fg: #495159;
+  --neu-mark: #6B7480;
+  --shadow-raised: 0px 1px 3px 0px rgba(21, 23, 26, 0.08);
+  --shadow-overlay: 0px 12px 32px 0px rgba(21, 23, 26, 0.18);
+}
+[data-theme=dark] {
+  color-scheme: dark;
+  --bg: #15171A;
+  --surface: #1D2025;
+  --surface2: #23272D;
+  --raised: #23272D;
+  --overlay: #2A2F36;
+  --hover: #23272D;
+  --chip: #2A2F36;
+  --nav-active: #2A2F36;
+  --line: #2B3038;
+  --line2: #3A414A;
+  --ctl: #6B7480;
+  --ctl-overlay: #737C88;
+  --text: #F2F3F5;
+  --muted: #A3ABB5;
+  --link: #5BE0B8;
+  --on-primary: #15171A;
+  --on-danger: #15171A;
+  --primary: #E6E8EB;
+  --danger: #FF8A80;
+  --mint: #00CC99;
+  --focus: #00CC99;
+  --scrim: rgba(0, 0, 0, 0.6);
+  --ok-bg: #0F3B30;
+  --ok-fg: #A9F7C0;
+  --ok-mark: #00CC99;
+  --info-bg: #1B2A44;
+  --info-fg: #9CC0FF;
+  --info-mark: #6E9EFF;
+  --you-bg: #3A1F2E;
+  --you-fg: #FF8FC4;
+  --you-mark: #F84A9B;
+  --warn-bg: #3A2E14;
+  --warn-fg: #F5B544;
+  --warn-mark: #F5B544;
+  --err-bg: #3B1D1B;
+  --err-fg: #FF8A80;
+  --err-mark: #FF8A80;
+  --neu-bg: #2A2F36;
+  --neu-fg: #A3ABB5;
+  --neu-mark: #6B7480;
+  --shadow-raised: 0px 1px 3px 0px rgba(0, 0, 0, 0.35);
+  --shadow-overlay: 0px 12px 32px 0px rgba(0, 0, 0, 0.5);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme=light]), [data-theme=system] {
+    color-scheme: dark;
+    --bg: #15171A;
+    --surface: #1D2025;
+    --surface2: #23272D;
+    --raised: #23272D;
+    --overlay: #2A2F36;
+    --hover: #23272D;
+    --chip: #2A2F36;
+    --nav-active: #2A2F36;
+    --line: #2B3038;
+    --line2: #3A414A;
+    --ctl: #6B7480;
+    --ctl-overlay: #737C88;
+    --text: #F2F3F5;
+    --muted: #A3ABB5;
+    --link: #5BE0B8;
+    --on-primary: #15171A;
+    --on-danger: #15171A;
+    --primary: #E6E8EB;
+    --danger: #FF8A80;
+    --mint: #00CC99;
+    --focus: #00CC99;
+    --scrim: rgba(0, 0, 0, 0.6);
+    --ok-bg: #0F3B30;
+    --ok-fg: #A9F7C0;
+    --ok-mark: #00CC99;
+    --info-bg: #1B2A44;
+    --info-fg: #9CC0FF;
+    --info-mark: #6E9EFF;
+    --you-bg: #3A1F2E;
+    --you-fg: #FF8FC4;
+    --you-mark: #F84A9B;
+    --warn-bg: #3A2E14;
+    --warn-fg: #F5B544;
+    --warn-mark: #F5B544;
+    --err-bg: #3B1D1B;
+    --err-fg: #FF8A80;
+    --err-mark: #FF8A80;
+    --neu-bg: #2A2F36;
+    --neu-fg: #A3ABB5;
+    --neu-mark: #6B7480;
+    --shadow-raised: 0px 1px 3px 0px rgba(0, 0, 0, 0.35);
+    --shadow-overlay: 0px 12px 32px 0px rgba(0, 0, 0, 0.5);
+  }
+}
+[data-density=compact] {
+  --control-h: 32px;
+  --control-px: 12px;
+  --card-pad: 12px;
+  --card-gap: 8px;
+  --card-inner: 8px;
+  --row-h: 32px;
+  --cell-py: 6px;
+  --cell-px: 12px;
+}
+@media (pointer: coarse) {
+  :root {
+    --control-h: 44px;
+    --row-h: 44px;
+  }
+}
+@media (max-width: 899px) {
+  :root {
+    --type-title: 800 24px/1.25 "Figtree", system-ui, sans-serif;
+    --type-body: 400 15px/1.4667 "Manrope", system-ui, sans-serif;
+    --type-control: 600 16px/1.25 "Manrope", system-ui, sans-serif;
+    --type-kpi: 800 24px/1.25 "Figtree", system-ui, sans-serif;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-1: 0ms;
+    --dur-2: 0ms;
+    --dur-3: 0ms;
+  }
+}

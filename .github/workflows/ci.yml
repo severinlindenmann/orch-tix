@@ -1,0 +1,88 @@
+name: ci
+# Runs on pull requests to main and on pushes to main only; pushes to other branches run nothing.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: uv sync --frozen
+      - run: uv run pytest -m "not e2e and not browser"
+      - name: JS tests
+        # options must precede the files: Node ignores any that follow them
+        run: node --test --test-timeout=60000 tests/js/*.test.mjs
+
+  client:
+    # the sharing CLI must behave identically on non-Windows OSes in CI (D5)
+    needs: unit
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --frozen
+      # includes the PowerShell installer's static checks
+      - run: uv run pytest tests/client tests/test_installer_ps1.py -m "not e2e and not browser" -v
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: unit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --frozen
+      - run: uv run pytest -m e2e
+
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: unit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --frozen
+      - run: uv run playwright install --with-deps chromium
+      - run: uv run pytest -m browser
+
+  addon:
+    # the orch-tix addon and the CLI round trip, against orch-core main (a public repo: no token, no secrets)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: unit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: severinlindenmann/orch-core
+          ref: main
+          path: orch-core
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --frozen
+      - name: addon tests
+        run: uv run --with "orch-core[dashboard] @ file://$GITHUB_WORKSPACE/orch-core/plugins/orch-core" pytest addons/orch-tix/tests
+      - name: addon check
+        run: uv run --with "orch-core[dashboard] @ file://$GITHUB_WORKSPACE/orch-core/plugins/orch-core" orch addon check addons/orch-tix
+      - name: CLI round trip with orch-core
+        run: uv run --with "orch-core[dashboard] @ file://$GITHUB_WORKSPACE/orch-core/plugins/orch-core" pytest -m e2e tests/client/test_orch_tix_e2e.py

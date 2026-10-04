@@ -1,0 +1,27 @@
+{
+ "basic": [
+  {
+   "dek": "868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5",
+   "enc_label": "AVRVVldYWVpbXF1eX9j3BsWplzUFzsHOM-2coF6KmCCQfGyFnqT7uCynZnc",
+   "eph_priv_int": "9a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9",
+   "eph_priv_pkcs8": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgmpucnZ6foKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLmhRANCAAQOZXLz35F-Omv3_nneZgs_8soGM-WZs7YG4bbcAfGf61smKPBY5TO0Zoi7OjMlT4WZByopZPyCpx71D_wVxi4v",
+   "eph_pub": "040e6572f3df917e3a6bf7fe79de660b3ff2ca0633e599b3b606e1b6dc01f19feb5b2628f058e533b46688bb3a33254f8599072a2964fc82a71ef50ffc15c62e2f",
+   "file_uuid": "72737475767778797a7b7c7d7e7f8081",
+   "label": "logs from Jonas",
+   "link_priv_int": "363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455",
+   "link_priv_jwk_d": "Njc4OTo7PD0-P0BBQkNERUZHSElKS0xNTk9QUVJTVFU",
+   "link_uuid": "404142434445464748494a4b4c4d4e4f",
+   "mk": "2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b",
+   "name": "basic",
+   "pub": "04d4e966ca55318fe79fe8fe6dc4a41dd6df34965c53972011532d3294d12b24b8f8b843a54d7d085581ff88457f85875962cc3ba15a3067f8aa6c0c5ecbdba389",
+   "rng": "404142434445464748494a4b4c4d4e4f5455565758595a5b5c5d5e5f",
+   "sealed_dek": "BA5lcvPfkX46a_f-ed5mCz_yygYz5ZmztgbhttwB8Z_rWyYo8FjlM7RmiLs6MyVPhZkHKilk_IKnHvUP_BXGLi8Brq-wsbKztLW2t7i58b7YBZx2lOfl8GpenIPIkgdvv5hppzcSbjQsOyVew3PBIzNCws6T4ne_nAhY_GpU",
+   "sealed_nonce": "aeafb0b1b2b3b4b5b6b7b8b9",
+   "wrapped_dek": "AcLDxMXGx8jJysvMzRKDWzAzSYv7WSV7ta-iUeq5CKfKE-glU2C-Vhi4W7vTgBG_3JLjfNeUD3oZXLMbvQ",
+   "wrapped_dek_nonce": "c2c3c4c5c6c7c8c9cacbcccd",
+   "wrapped_lpriv": "AWhpamtsbW5vcHFyc_lYhVoyif5IDijuIU7w4c2BgALVy8tLf2s8jVVOhW8Ac-NYl6v_x5OPatbhLzBG27gITDdgDcwH81hdYjwPrDZQ30doPXGDs6A4RiO7b17LnlbRTGFfDKAf46248dYVlrfiEpnhHyJGz-o9E3yisM-3",
+   "wrapped_nonce": "68696a6b6c6d6e6f70717273"
+  }
+ ],
+ "version": 1
+}
