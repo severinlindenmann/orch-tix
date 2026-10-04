@@ -8,7 +8,7 @@ import { decryptBlob, hexToBytes } from "./crypto.js";
 import { resolveRow } from "./preview.js";
 import { el, shown } from "./ui.js";
 import {
-  BLOB_SLACK, MAX_FILE_BYTES, READY_MS, START_HEIGHT, chipText, clampHeight, docSource, frameMessage, readCapped,
+  BLOB_SLACK, MAX_FILE_BYTES, READY_MS, START_HEIGHT, openFrames, openKey, chipText, clampHeight, docSource, frameMessage, readCapped,
   sectionParts, verifyDoc, withNonce, withTheme,
 } from "./widget-model.js";
 
@@ -46,8 +46,10 @@ function card(w) {
   const status = el("span", { class: "wcard-status", role: "status", "aria-live": "polite" });
   const btn = src ? el("button", { type: "button", class: "btn wcard-btn" }, "Show") : null;
   let live = null;
+  const key = openKey(w);
 
   const stop = (why = "") => {
+    if (box.isConnected) openFrames.delete(key);   // a card already replaced by a re-render must not close its successor
     if (live) { live.cleanup(); live = null; }
     box.replaceChildren();
     box.hidden = true;
@@ -58,6 +60,7 @@ function card(w) {
   };
 
   const show = async () => {
+    openFrames.add(key);
     btn.disabled = true;
     status.textContent = "Loading…";
     let html;
@@ -116,6 +119,7 @@ function card(w) {
   };
 
   if (btn) btn.addEventListener("click", () => (live ? stop() : show()));
+  if (btn && openFrames.has(key)) queueMicrotask(show);   // opened before this re-render: shown again, pin checked again
   return el("figure", { class: "wcard", id: `w-${w.key}`, dataset: { layer: w.layer || "" } },
     el("figcaption", { class: "wcard-head" }, w.title ? el("span", { class: "wcard-title" }, w.title) : null,
       el("span", { class: `wcard-chip${w.layer === "type" ? "" : " is-agent"}` }, chipText(w))),

@@ -117,6 +117,37 @@ def test_a_widget_that_navigates_its_frame_is_torn_down(phone_page, mirror_with_
     assert card.locator("iframe").count() == 0 and card.get_by_text("The text instead").is_visible()
 
 
+def test_an_open_frame_stays_open_across_a_redraw_until_its_digest_changes(phone_page, mirror_with_question, sim):
+    """A re-render rebuilds the cards; the widget the person opened is shown again (pin checked again). A changed
+    document is another widget: it comes back closed."""
+    html = '<!doctype html><html><body><p>kept open</p></body></html>'
+    doc = _push(mirror_with_question, sim, extra=_extra(2, html, title="Keep"))
+    page = phone_page("light")
+    _open_findings(page, mirror_with_question)
+    card = page.locator(".wcard").nth(2)
+    card.get_by_role("button", name="Show").click()
+    card.get_by_role("button", name="Stop").wait_for(timeout=10_000)
+    card.frame_locator("iframe").get_by_text("kept open").wait_for()
+    page.evaluate("() => document.querySelector('#w-2')?.setAttribute('data-old', '1')")
+    page.evaluate("() => window.dispatchEvent(new Event('fs:outbox-changed'))")
+    page.wait_for_function("() => !document.querySelector('.wcard[data-old]')")   # the cards were rebuilt
+    page.locator("summary", has_text="More ·").click()      # the redraw folds the sections again (not this change)
+    card = page.locator(".wcard").nth(2)
+    card.get_by_role("button", name="Stop").wait_for(timeout=10_000)
+    card.frame_locator("iframe").get_by_text("kept open").wait_for()
+    assert card.locator("iframe").get_attribute("sandbox") == "allow-scripts"
+    assert page.locator(".wcard").nth(0).get_by_role("button", name="Show").is_visible()   # the others stay closed
+
+    changed = html.replace("kept open", "now different")
+    doc["widgets"][2].update(doc=changed, sha256=_sha(changed))
+    mirror_with_question.push(doc, rev=3)
+    page.wait_for_function("() => !document.querySelector('.wcard iframe')", timeout=15_000)
+    page.locator("summary", has_text="More ·").click()
+    card = page.locator(".wcard").nth(2)
+    card.get_by_role("button", name="Show").wait_for(timeout=15_000)
+    assert card.locator("iframe").count() == 0 and card.locator(".wcard-text").is_visible()
+
+
 def _shows_text_only(card, why: str):
     card.get_by_role("button", name="Show").click()
     card.get_by_text(why).wait_for(timeout=6000)
