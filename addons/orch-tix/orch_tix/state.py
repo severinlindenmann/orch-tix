@@ -86,7 +86,7 @@ class State:
             elif old.get("retired"):
                 entry.update(gen=int(old.get("gen") or 1) + 1, relink=True, n=None, done_at=None,
                              context_artifacts=[])
-            entry.update(linked_at=_now(), by=by, auto=auto, unlinked_by_hand=False, retired=False)
+            entry.update(linked_at=_now(), by=by, auto=auto, unlinked_by_hand=False, retired=False, retired_why=None)
             entry.setdefault("rev", 0)
             links[key] = entry
             return dict(entry)
@@ -95,7 +95,8 @@ class State:
     def unlink(self, key: str, by_hand: bool = True) -> None:
         def fn(links):
             if key in links:
-                links[key].update(retired=True, unlinked_by_hand=by_hand, unlinked_at=_now(), relink=False)
+                links[key].update(retired=True, unlinked_by_hand=by_hand, unlinked_at=_now(), relink=False,
+                                  retired_why="by_hand" if by_hand else "done")
         self._update("links.json", fn)
 
     def reserve_rev(self, key: str, rev: int) -> None:
@@ -122,12 +123,13 @@ class State:
 
     def retire(self, key: str, gen: int | None = None) -> None:
         """The server says this link is over (unlinked elsewhere): keep the entry. A retired link is never
-        auto-linked again, whatever retired it; only the explicit link action re-links (with --relink)."""
+        auto-linked again by hand or done; one the server lost (retired_why "gone") sync.drain links again."""
         def fn(links):
             if key in links:
                 # a human's Stop syncing that raced this push stays a human's: never auto-link it again
-                links[key].update(retired=True, relink=False, unlinked_at=_now(),
-                                  unlinked_by_hand=bool(links[key].get("unlinked_by_hand")))
+                by_hand = bool(links[key].get("unlinked_by_hand"))
+                links[key].update(retired=True, relink=False, unlinked_at=_now(), unlinked_by_hand=by_hand,
+                                  retired_why="by_hand" if by_hand else "gone")
                 if gen:
                     links[key]["gen"] = int(gen)
         self._update("links.json", fn)
