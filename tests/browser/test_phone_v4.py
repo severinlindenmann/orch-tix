@@ -138,6 +138,37 @@ def test_proof_and_artifacts_show_a_pinned_image_only_when_its_sha256_verifies(p
     assert not any("evil" in u for u in requests)
 
 
+def test_proof_lists_the_checks_orch_ran_and_artifacts_say_who_added_them(phone_page, mirror_with_question):
+    """Schema 1.7: receipts of `orch task done --run` (facts only), `by` on artifacts, the idle note."""
+    run_ok = {"exit": 0, "timed_out": False, "commit": "1a2b3c4" + "0" * 33, "dirty": False, "seconds": 42,
+              "check": "verify", "steps": [{"name": "build", "status": "pass", "seconds": 30},
+                                           {"name": "test", "status": "pass", "seconds": 12}]}
+    run_bad = {"exit": 1, "timed_out": False, "commit": None, "dirty": True, "seconds": 3, "check": None,
+               "steps": [{"name": "verify", "status": "fail", "seconds": 3}]}
+    items = [
+        {"source": "file", "kind": "receipt", "label": "T2 verify: passed", "name": "receipt-T2-a.log",
+         "task": "T2", "by": "agent:claude-code", "run": run_ok},
+        {"source": "file", "kind": "receipt", "label": "T3 verify: failed", "name": "receipt-T3-a.log",
+         "task": "T3", "by": "agent:claude-code", "run": run_bad},
+        {"source": "link", "kind": "link", "label": "PR #31", "by": "human:you"},
+    ]
+    doc = _testing_doc(artifact_items=items, revalidate={"idle_days": 40})
+    mirror_with_question.push(doc, rev=2, needs=None, open_questions=0, status="in-progress")
+    page = phone_page("light")
+    page.goto(f"{mirror_with_question.base}/t/{mirror_with_question.n}")
+    runs = page.locator(".proof .proof-runs li")
+    expect(runs).to_have_count(2)
+    expect(runs.nth(0)).to_contain_text("T2 verify · passed · 1a2b3c4 · 42s")
+    expect(runs.nth(0)).to_contain_text("build ✓ · test ✓")
+    expect(runs.nth(1)).to_contain_text("T3 verify · failed (exit 1) · uncommitted changes · 3s")
+    expect(runs.nth(1).locator(".t-err")).to_have_count(1)
+    arts = page.locator(".arts")
+    expect(arts).to_contain_text("· link · by you")
+    expect(arts).to_contain_text("· receipt · by claude-code")
+    expect(page.locator(".t-idle")).to_have_text("Untouched for 40 days — check it still holds")
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")  # no sideways scroll at 390 px
+
+
 def test_a_pinned_gate_image_on_the_approval_card(phone_page, mirror_with_question):
     good = png(10, 20, 200)
     fid = mirror_with_question.sim.upload("dialog.png", good)["id"]

@@ -903,6 +903,7 @@ h1, h2, h3, .page-title, .settings-title, .brand-main, .ws-title, .t-title { fon
 .task.is-todo, .task.is-skipped { color: var(--muted); }
 .task-mark { flex: none; width: 16px; text-align: center; font-weight: 700; }
 .t-ok { color: var(--ok-fg); } .t-info { color: var(--info-fg); } .t-warn { color: var(--warn-fg); } .t-neu { color: var(--muted); }
+.t-err { color: var(--err-fg); }
 .kv-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 14px; }
 .gate-refused { align-items: flex-start; }
 .hist-when { font: var(--type-meta); color: var(--muted); font-variant-numeric: tabular-nums; }

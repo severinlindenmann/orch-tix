@@ -379,3 +379,44 @@ export function gateImage(doc, gates) {
 export function proofImage(doc) {
   return pinnedImages(doc).find((i) => i.ac !== null) || null;
 }
+
+// ---- schema 1.7: receipts, who added an artifact, idle tickets ----------------------------------------------------
+
+const CHECK_NAME = /^[a-z][a-z0-9-]{0,39}$/;
+const STEP_STATUS = new Set(["pass", "fail", "skip"]);
+const COMMIT_HEX = /^[0-9a-f]{7,40}$/;
+
+// The receipts of `orch task done --run`, one line each: [{task, ok, text, steps: [{name, status}]}]. Built only from
+// the facts the addon keeps (exit codes, step names and statuses, commit, seconds); never a command or output.
+export function receipts(doc) {
+  const items = Array.isArray(doc?.artifact_items) ? doc.artifact_items : [];
+  return items.filter((it) => isObj(it) && it.kind === "receipt" && isObj(it.run) && /^T[1-9][0-9]*$/.test(String(it.task)))
+    .map((it) => {
+      const r = it.run;
+      const steps = (Array.isArray(r.steps) ? r.steps : []).filter((s) => isObj(s) && typeof s.name === "string"
+        && s.name.length > 0 && s.name.length <= 60 && STEP_STATUS.has(s.status)).map((s) => ({ name: s.name, status: s.status }));
+      const ok = r.exit === 0 && r.timed_out !== true;
+      const check = typeof r.check === "string" && CHECK_NAME.test(r.check) ? r.check : "verify";
+      const failed = steps.find((s) => s.status === "fail");
+      const who = failed && failed.name !== check ? `${failed.name} ` : "";   // "T3 verify · failed", not "verify failed"
+      const code = Number.isInteger(r.exit) ? ` (exit ${r.exit})` : "";
+      const result = ok ? "passed" : r.timed_out === true ? `${who}timed out` : `${who}failed${code}`;
+      const parts = [`${it.task} ${check}`, result];
+      if (typeof r.commit === "string" && COMMIT_HEX.test(r.commit)) parts.push(r.commit.slice(0, 7));
+      if (r.dirty === true) parts.push("uncommitted changes");
+      if (Number.isInteger(r.seconds) && r.seconds >= 0 && r.timed_out !== true) parts.push(`${r.seconds}s`);
+      return { task: it.task, ok, text: parts.join(" · "), steps };
+    });
+}
+
+// Who added an artifact: "you" or the agent's harness; never a session id, null for anything else.
+export function byLabel(item) {
+  const m = /^(?:human:(you)|agent:([A-Za-z0-9._-]{1,40}))(?::[0-9A-Za-z-]{1,8})?$/.exec(typeof item?.by === "string" ? item.by : "");
+  return m ? (m[1] ? "you" : m[2]) : null;
+}
+
+// An open or backlog ticket nobody touched for the workspace's revalidate_days.
+export function idleNote(doc) {
+  const n = doc?.revalidate?.idle_days;
+  return Number.isInteger(n) && n > 0 ? `Untouched for ${n} days — check it still holds` : null;
+}

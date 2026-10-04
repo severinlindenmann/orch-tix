@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   acceptance, cardAction, costText, cardLine, chapters, currentChapter, dayMonth, mainPr, moreSections, moveChip, planSteps,
-  progressStrip, quickAnswer, taskItems, tasksDone,
+  progressStrip, quickAnswer, taskItems, tasksDone, receipts, byLabel, idleNote,
 } from "../../fileshare/static/js/ticket-card.js";
 
 const LEVELS = JSON.parse(readFileSync(new URL("../vectors/addon-docs.json", import.meta.url), "utf8")).levels;
@@ -154,4 +154,44 @@ test("the move chip is the document's move (schema 1.4) when it carries one", ()
   assert.equal(moveChip({ needs: "question", open_questions: 1 }, { ...TITLE, move: { who: "you", label: "" } }).text, "Your move: answer");
   assert.equal(moveChip({ needs: "question", open_questions: 1 }, { ...TITLE, move: { who: "you", label: "Ans\u202Ewer" } }).text,
     "Your move: answer");
+});
+
+
+// ---- schema 1.7: receipts (orch task done --run), who added an artifact, idle tickets
+
+test("receipts read the run facts the addon keeps at title", () => {
+  assert.deepEqual(receipts(TITLE), [{
+    task: "T2", ok: false, text: "T2 verify · test failed (exit 1) · 1a2b3c4 · 42s",
+    steps: [{ name: "build", status: "pass" }, { name: "test", status: "fail" }] }]);
+  assert.deepEqual(receipts(KEY), []);
+});
+
+test("receipts: passing, timed out, uncommitted, junk", () => {
+  const doc = { artifact_items: [
+    { kind: "receipt", task: "T3", run: { exit: 0, check: "ci", commit: "abcdef0".padEnd(40, "1"), dirty: true, seconds: 5,
+      steps: [{ name: "lint", status: "pass" }] } },
+    { kind: "receipt", task: "T4", run: { exit: null, timed_out: true, steps: [{ name: "e2e", status: "fail" }] } },
+    { kind: "receipt", task: "T5", run: "nope" },
+    { kind: "log", task: "T6", run: { exit: 0 } },
+    { kind: "receipt", task: "T7", run: { exit: 0, check: "<b>", steps: [{ name: 5, status: "weird" }] } }] };
+  const out = receipts(doc);
+  assert.deepEqual(out.map((r) => [r.task, r.ok, r.text]), [
+    ["T3", true, "T3 ci · passed · abcdef0 · uncommitted changes · 5s"],
+    ["T4", false, "T4 verify · e2e timed out"],
+    ["T7", true, "T7 verify · passed"]]);
+  assert.deepEqual(out[2].steps, []);
+});
+
+test("byLabel names a person or a harness, never a session", () => {
+  assert.equal(byLabel({ by: "human:you" }), "you");
+  assert.equal(byLabel({ by: "agent:claude-code" }), "claude-code");
+  assert.equal(byLabel({ by: "agent:claude-code:7f3c9a21" }), "claude-code");
+  assert.equal(byLabel({ by: "<script>" }), null);
+  assert.equal(byLabel({}), null);
+});
+
+test("idleNote", () => {
+  assert.equal(idleNote({ revalidate: { idle_days: 40 } }), "Untouched for 40 days — check it still holds");
+  assert.equal(idleNote({ revalidate: { idle_days: "40" } }), null);
+  assert.equal(idleNote(TITLE), null);
 });

@@ -23,7 +23,8 @@ import {
   NOT_YET_MS, ageOf, artifactList, isRollback, verificationSummary, outcomeRole, outcomeText, shortHash, targetChanged, targetFor,
 } from "./mirror-model.js";
 import {
-  acItems, agreedNote, chapters, chipFor, costText, doneNote, journey, mainPr, moreSections, pinnedImages, planSteps, proofImage,
+  acItems, agreedNote, byLabel, chapters, chipFor, costText, doneNote, idleNote, journey, mainPr, moreSections, pinnedImages,
+  planSteps, proofImage, receipts,
 } from "./ticket-card.js";
 import { pinnedFigure } from "./images.js";
 import { moveChipEl, needsPill, pill, stripEl } from "./needs.js";
@@ -506,7 +507,8 @@ function journeyEl(doc) {
 function proofCard(doc) {
   const ac = acItems(doc);
   const img = proofImage(doc);
-  if (!ac.length && !img) return null;
+  const runs = receipts(doc);
+  if (!ac.length && !img && !runs.length) return null;
   const done = ac.filter((a) => a.done);
   const open = ac.filter((a) => !a.done);
   return el("section", { class: "card proof", "aria-labelledby": "proof-title" },
@@ -514,7 +516,13 @@ function proofCard(doc) {
     img ? pinnedFigure(img, "pin-proof") : null,
     done.length ? el("ul", { class: "proof-list" }, done.map((a) => el("li", {}, el("span", { class: "t-ok", "aria-hidden": "true" }, "✓ "),
       `AC${a.n} `, shown(a.text)))) : null,
-    open.length ? el("p", { class: "muted proof-open" }, open.map((a, i) => [i ? " · " : "", `○ AC${a.n} `, shown(a.text)])) : null);
+    open.length ? el("p", { class: "muted proof-open" }, open.map((a, i) => [i ? " · " : "", `○ AC${a.n} `, shown(a.text)])) : null,
+    // receipts of `orch task done --run`: what orch itself ran, step by step (the agent's check, not your verdict)
+    runs.length ? el("ul", { class: "proof-list proof-runs", "aria-label": "Checks orch ran" }, runs.map((r) => el("li", {},
+      el("span", { class: r.ok ? "t-ok" : "t-err", "aria-hidden": "true" }, r.ok ? "✓ " : "✕ "),
+      el("span", { class: "sr-only" }, r.ok ? "passed: " : "failed: "), shown(r.text),
+      r.steps.length > 1 ? el("span", { class: "muted proof-steps" },
+        ` — ${r.steps.map((s) => `${s.name} ${s.status === "pass" ? "✓" : s.status === "fail" ? "✕" : "–"}`).join(" · ")}`) : null))) : null);
 }
 
 // "Artifacts · N": pinned images as a 3-column grid of verified thumbnails, then the other items by name and kind
@@ -532,7 +540,8 @@ function artifactsCard(doc) {
     el("h2", { class: "card-h", id: "art-title" }, `Artifacts · ${count}`),
     imgs.length ? el("div", { class: "art-grid" }, imgs.map((i) => pinnedFigure(i, "pin-thumb"))) : null,
     others.length ? el("ul", { class: "art-items" }, others.map((x) => el("li", {},
-      shown(typeof x.label === "string" && x.label ? x.label : x.name || x.kind), el("span", { class: "muted" }, ` · ${x.kind}`)))) : null,
+      shown(typeof x.label === "string" && x.label ? x.label : x.name || x.kind),
+      el("span", { class: "muted" }, ` · ${x.kind}${byLabel(x) ? ` · by ${byLabel(x)}` : ""}`)))) : null,
     files.length ? el("ul", { class: "art-list" }, files.map((a) => el("li", {}, a.file
       ? el("a", { href: `/files?f=${encodeURIComponent(a.file)}` }, icon("files"), a.name)
       : el("span", {}, icon("files"), a.name)))) : null,
@@ -627,7 +636,8 @@ function render() {
       doc ? journeyEl(doc) : null,
       doc && doc.redaction !== "full" ? stripEl(doc) : null,
       el("p", { class: "t-meta" }, [row.updated_at ? `Updated ${shortAge(row.updated_at)}` : "",
-        row.needs ? "" : "nothing waits on you"].filter(Boolean).join(" · "))),
+        row.needs ? "" : "nothing waits on you"].filter(Boolean).join(" · ")),
+      doc && idleNote(doc) ? el("p", { class: "t-meta t-idle" }, idleNote(doc)) : null),
     state.rollback ? el("p", { class: "banner banner-decrypt", role: "alert" }, doc
       ? "The server sent an older copy of this ticket. Showing the newer one."
       : "The server sent an older copy of this ticket than this phone already saw. Open it again later.") : "",
