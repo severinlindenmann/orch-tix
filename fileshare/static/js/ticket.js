@@ -16,7 +16,7 @@ import { openRecorder } from "./recorder.js";
 import { maxUpload, uploadFiles } from "./upload.js";
 import { sendDecisions } from "./decision-send.js";
 import { pairingFor } from "./pairing.js";
-import { cacheLabels, keysOrLogin, loadDecisions, loadSpaces, openRow, signInAgain, watchMirrors } from "./mirrors-data.js";
+import { cacheLabels, keysOrLogin, loadCachedLists, loadDecisions, loadSpaces, openRow, signInAgain, watchMirrors } from "./mirrors-data.js";
 import {
   NEEDS_LABEL, QUEUED_TEXT, SENT_PAIRED_TEXT, SENT_TEXT, UNKNOWN_SPACE, VERDICT_VALUE, VOICE_TTL, approvalGate, canApproveOnPhone,
   approveTogether, gateCovers, normalizedGateText, history, verdictCanonical, verdictHash, verdictView, decisionValue, notSentText, splitQueued, canSendAnswer, cardTitle,
@@ -24,7 +24,7 @@ import {
 } from "./mirror-model.js";
 import {
   acItems, agreedNote, byLabel, chapters, chipFor, costText, doneNote, idleNote, journey, mainPr, moreSections, pinnedImages,
-  planSteps, proofImage, receipts,
+  keySplit, planSteps, proofImage, receipts,
 } from "./ticket-card.js";
 import { pinnedFigure } from "./images.js";
 import { moveChipEl, needsPill, pill, stripEl } from "./needs.js";
@@ -130,7 +130,7 @@ function noteField(draft, label, onChange) {
 // ---- the page
 
 const state = { n: null, keys: null, row: null, doc: null, space: null, decisions: [], queued: [], failed: [], draft: newDraft(),
-  mode: null, focusOnRender: false };
+  mode: null, focusOnRender: false, keyHrefs: new Map() };
 
 function modeOf(row, doc) {
   if (!doc) return "none";
@@ -548,8 +548,28 @@ function artifactsCard(doc) {
     pr ? el("p", { class: "art-pr" }, pr.text) : null);
 }
 
+// Ticket text with the keys of tickets this phone mirrors as links to them (keySplit); everything else as `shown`.
+function linkedText(text) {
+  const self = String(state.doc?.id || "").toUpperCase();
+  const hrefOf = (k) => (k.toUpperCase() === self ? null : state.keyHrefs.get(k.toUpperCase()) ?? null);
+  return keySplit(text, hrefOf).flatMap((p) => (p.key ? [el("a", { class: "key-link", href: p.href }, p.key)] : shown(p.text)));
+}
+
+// Which of the mirrored tickets has which phone page, from the last-known list (no extra request); best effort.
+async function loadKeyLinks() {
+  const cached = await loadCachedLists(state.keys?.mk).catch(() => null);
+  const map = new Map();
+  for (const r of cached?.rows || []) {
+    if (typeof r?.doc?.id === "string" && Number.isInteger(r.n)) map.set(r.doc.id.toUpperCase(), `/t/${r.n}`);
+  }
+  if (map.size) {
+    state.keyHrefs = map;
+    render();
+  }
+}
+
 function sectionRow(sec) {
-  return el("section", { class: "section-row" }, el("h3", { class: "section-name" }, shown(sec.name)), el("div", { class: "section-text" }, shown(sec.text)));
+  return el("section", { class: "section-row" }, el("h3", { class: "section-name" }, shown(sec.name)), el("div", { class: "section-text" }, linkedText(sec.text)));
 }
 
 function chapterEl(c) {
@@ -755,6 +775,7 @@ export async function start() {
   state.keys = await keysOrLogin();
   if (!state.keys) return;
   await reload();
+  loadKeyLinks();  // not awaited: the page is shown first, the links follow
   watchMirrors(async (rows) => { if (rows.some((x) => x.n === state.n)) await reload(); });
 }
 

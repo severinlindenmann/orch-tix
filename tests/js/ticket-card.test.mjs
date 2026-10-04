@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   acceptance, cardAction, costText, cardLine, chapters, currentChapter, dayMonth, mainPr, moreSections, moveChip, planSteps,
-  progressStrip, quickAnswer, taskItems, tasksDone, receipts, byLabel, idleNote,
+  progressStrip, quickAnswer, taskItems, tasksDone, receipts, byLabel, idleNote, keySplit,
 } from "../../fileshare/static/js/ticket-card.js";
 
 const LEVELS = JSON.parse(readFileSync(new URL("../vectors/addon-docs.json", import.meta.url), "utf8")).levels;
@@ -194,4 +194,16 @@ test("idleNote", () => {
   assert.equal(idleNote({ revalidate: { idle_days: 40 } }), "Untouched for 40 days — check it still holds");
   assert.equal(idleNote({ revalidate: { idle_days: "40" } }), null);
   assert.equal(idleNote(TITLE), null);
+});
+
+
+test("keySplit links only keys the phone knows, and never inside a longer word", () => {
+  const known = new Map([["DEMO-0038", "/t/7"]]);
+  const hrefOf = (k) => known.get(k.toUpperCase()) ?? null;
+  assert.deepEqual(keySplit("see DEMO-0038, DEMO-9999 and xDEMO-0038 or demo-0038.", hrefOf), [
+    { text: "see " }, { key: "DEMO-0038", href: "/t/7" }, { text: ", DEMO-9999 and xDEMO-0038 or " },
+    { key: "demo-0038", href: "/t/7" }, { text: "." }]);
+  assert.deepEqual(keySplit("nothing here", hrefOf), [{ text: "nothing here" }]);
+  assert.deepEqual(keySplit("", hrefOf), []);
+  assert.deepEqual(keySplit("DEMO-0038", () => "javascript:alert(1)"), [{ text: "DEMO-0038" }]);  // only /t/<n>
 });

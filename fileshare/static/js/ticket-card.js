@@ -415,6 +415,26 @@ export function byLabel(item) {
   return m ? (m[1] ? "you" : m[2]) : null;
 }
 
+const KEY_IN_TEXT = /(?<![\w-])([A-Za-z][A-Za-z0-9]*-[0-9]+)(?![\w-])/g;
+const TICKET_HREF = /^\/t\/[1-9][0-9]*$/;
+
+// Ticket text split into plain runs and ticket keys this phone has a page for: [{text} | {key, href}]. `hrefOf(key)`
+// answers "/t/<n>" for a mirrored ticket, else null; a key without a page stays text (and nothing but /t/<n> links).
+export function keySplit(text, hrefOf) {
+  const s = typeof text === "string" ? text : "";
+  const out = [];
+  let at = 0;
+  for (const m of s.matchAll(KEY_IN_TEXT)) {
+    const href = hrefOf(m[1]);
+    if (typeof href !== "string" || !TICKET_HREF.test(href)) continue;
+    if (m.index > at) out.push({ text: s.slice(at, m.index) });
+    out.push({ key: m[1], href });
+    at = m.index + m[1].length;
+  }
+  if (at < s.length) out.push({ text: s.slice(at) });
+  return out;
+}
+
 // An open or backlog ticket nobody touched for the workspace's revalidate_days.
 export function idleNote(doc) {
   const n = doc?.revalidate?.idle_days;

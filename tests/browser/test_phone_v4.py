@@ -169,6 +169,37 @@ def test_proof_lists_the_checks_orch_ran_and_artifacts_say_who_added_them(phone_
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")  # no sideways scroll at 390 px
 
 
+def test_ticket_keys_in_ticket_text_link_to_mirrored_tickets(phone_page, mirror_with_question):
+    """A key of a ticket this phone mirrors links to its page; a key it has no page for stays text."""
+    import os
+    from .conftest import sealed_doc
+    m, s = mirror_with_question, mirror_with_question.sim.s
+    other = {**FULL_DOC, "id": "DEMO-0040", "title": "The meter import", "questions": [], "needs": []}
+    uuid = s.mirror_uuid(m.space, other["id"], 1)
+    dek = os.urandom(32)
+    tu = bytes.fromhex(uuid)
+    r = httpx.put(f"{m.base}/api/mirrors/{uuid}", headers=m.headers, timeout=30, json={
+        "space": m.space, "mirror_rev": 1, "schema_version": "1.0.0", "status": "open", "priority": "normal",
+        "needs": None, "open_questions": 0, "key_version": 1,
+        "wrapped_dek": s.b64u(s.seal(m.sim.mk, dek, s.aad_tdek(tu))),
+        "enc_content": s.seal_mirror(dek, tu, sealed_doc(other, 1)),
+        "event_uuid": s.mirror_event_uuid(m.space, other["id"], 1, 1)})
+    assert r.status_code == 200, r.text
+    n_other = r.json()["n"]
+    doc = _testing_doc(sections={**FULL_DOC["sections"], "Context": "Builds on DEMO-0040, not on DEMO-0999."})
+    m.push(doc, rev=2, needs=None, open_questions=0, status="in-progress")
+    page = phone_page("light")
+    page.goto(f"{m.base}/?view=tickets")                              # the board keeps the last-known list
+    page.locator(".brow-plain, .bfold, .tcard, .brow").first.wait_for()
+    page.goto(f"{m.base}/t/{m.n}")
+    page.locator('.chap[data-chapter="1"] > summary').click()
+    link = page.locator(".section-text a.key-link")
+    expect(link).to_have_count(1)
+    expect(link).to_have_text("DEMO-0040")
+    expect(link).to_have_attribute("href", f"/t/{n_other}")
+    expect(page.locator(".section-text", has_text="DEMO-0999")).to_have_count(1)
+
+
 def test_a_pinned_gate_image_on_the_approval_card(phone_page, mirror_with_question):
     good = png(10, 20, 200)
     fid = mirror_with_question.sim.upload("dialog.png", good)["id"]
