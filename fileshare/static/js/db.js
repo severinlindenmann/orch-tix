@@ -12,9 +12,12 @@
 //       the server hands back later is noticed by the ticket page, Needs you and the service worker)
 //   v6: lists  ("spaces" | "mirrors" -> {body, at}: the last GET /api/spaces and /api/mirrors bodies exactly
 //       as the server sent them, sealed labels and docs, never opened; mirrors-data.js), so Needs you
-//       opens at once and offline. Cleared on sign-out.
+//       opens at once and offline. Cleared on sign-out. Also "keymap": the local-key -> TIX-number map of those
+//       rows, sealed under MK (ticket-cache.js), so a key link needs no decrypt of the whole list.
+//   v7: tickets (TIX number -> {n, row, at, used, size}: each opened ticket's mirror row exactly as the server sent it
+//       (sealed content, never opened), for the offline view; ticket-cache.js). Bounded, LRU, cleared on sign-out.
 export const DB_NAME = "fileshare";
-export const DB_VERSION = 6;
+export const DB_VERSION = 7;
 export const KEYS = "keys";
 export const OUTBOX = "outbox";
 export const LABELS = "labels";
@@ -22,6 +25,7 @@ export const PREFS = "prefs";
 export const PAIRS = "pairs";
 export const SEEN = "seen";
 export const LISTS = "lists";
+export const TICKETS = "tickets";
 
 export function upgrade(db) {
   if (!db.objectStoreNames.contains(KEYS)) db.createObjectStore(KEYS);
@@ -31,12 +35,16 @@ export function upgrade(db) {
   if (!db.objectStoreNames.contains(PAIRS)) db.createObjectStore(PAIRS, { keyPath: "space" });
   if (!db.objectStoreNames.contains(SEEN)) db.createObjectStore(SEEN);
   if (!db.objectStoreNames.contains(LISTS)) db.createObjectStore(LISTS);
+  if (!db.objectStoreNames.contains(TICKETS)) db.createObjectStore(TICKETS);
 }
 
 export const getValue = (store, key) => withStore(store, "readonly", (s) => s.get(key));
 export const putValue = (store, key, value) => withStore(store, "readwrite", (s) => s.put(value, key));
-// Sign-out and an expired session drop the last-known lists (mirrors-data.js) with the keys.
-export const clearLists = () => withStore(LISTS, "readwrite", (s) => s.clear());
+export const deleteValue = (store, key) => withStore(store, "readwrite", (s) => s.delete(key));
+export const allValues = (store) => withStore(store, "readonly", (s) => s.getAll());
+// Sign-out and an expired session drop the last-known lists (mirrors-data.js) and the offline tickets
+// (ticket-cache.js) with the keys.
+export const clearLists = () => Promise.all([LISTS, TICKETS].map((name) => withStore(name, "readwrite", (s) => s.clear()))).then(() => undefined);
 
 export function openDb() {
   return new Promise((resolve, reject) => {

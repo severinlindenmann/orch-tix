@@ -232,9 +232,9 @@ const ICON = "/static/img/icon-192.png";
 // The IndexedDB "fileshare" database the pages use (db.js). Same version and stores; the worker
 // creates nothing the pages wouldn't.
 const DB_NAME = "fileshare";
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 const DB_STORES = [["keys", null], ["outbox", { keyPath: "seq", autoIncrement: true }], ["labels", null], ["prefs", null],
-  ["pairs", { keyPath: "space" }], ["seen", null], ["lists", null]];
+  ["pairs", { keyPath: "space" }], ["seen", null], ["lists", null], ["tickets", null]];
 
 function idbGet(store, key) {
   return new Promise((resolve) => {
