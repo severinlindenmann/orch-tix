@@ -24,7 +24,7 @@ def decision_out(row) -> dict:
             "session_name": row["session_name"], "ack": row["ack"], "ack_at": row["ack_at"]}
 
 
-def create_decision(conn, app, *, session_name: str, body: dict) -> dict:
+def create_decision(conn, app, *, session_name: str, body: dict, session_hash: str | None = None) -> dict:
     with _tx(conn):
         # The duplicate check comes first: a double tap or a resend after a timeout is "already sent" (409),
         # even if the ticket was unlinked in between (Review Focus 4).
@@ -43,9 +43,9 @@ def create_decision(conn, app, *, session_name: str, body: dict) -> dict:
             if row is None:
                 raise api_error(400, "bad_ref", "no live mirrored ticket with that id in this space")
         cur = conn.execute("INSERT INTO decisions (uuid, space_id, ticket_n, kind, session_name, key_version, enc_body,"
-                           " created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                           " created_at, session_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                            (body["uuid"], body["space"], ticket_n, body["kind"], session_name, body["key_version"],
-                            body["enc_body"], clock.now_iso()))
+                            body["enc_body"], clock.now_iso(), session_hash))
     app.state.inbox_bus.bump(cur.lastrowid)
     return {"id": "dec_" + body["uuid"], "seq": cur.lastrowid}
 

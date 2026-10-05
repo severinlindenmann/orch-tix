@@ -88,6 +88,30 @@ def test_a_failing_push_is_left_to_the_periodic_pass(tix_ws, tix, runner):
     assert len(_pushes(runner)) == 1
 
 
+def test_the_push_after_an_applied_phone_decision_says_phone_once_and_only_without_needs(tix_ws):
+    """QA #55: Mission Control tells the server it applied a phone answer (decided_via), once."""
+    from datetime import datetime, timezone
+
+    from helpers import ADDON, CapturingRunner
+    pushed = {"status": "pushed", "id": "TIX-42", "uuid": "0" * 32, "server_rev": None, "gen": 1}
+    runner = CapturingRunner(strict=True).add(PUSH, stdout_json=pushed).add(PUSH, stdout_json=pushed).add(PUSH, stdout_json=pushed)
+    tix = tix_ws.load(ADDON, runner=runner)
+    ops = Ops(tix_ws.ws, AGENT)
+    t = ops.new("Export")                                       # no needs
+    tix.obj.state.link(t.id, by="you", auto=False)
+    rec = {"kind": "answer", "ticket": t.id, "outcome": "applied", "received_at": datetime.now(timezone.utc).isoformat()}
+    tix.obj.state.put_decision("dec_" + "a" * 32, rec)
+    pctx = tix.ctx.provider_context()
+    tix.obj.act("push_now", t.id, pctx)
+    assert runner.files[-1]["decided_via"] == "phone"
+    tix.obj.act("push_now", t.id, pctx)
+    assert "decided_via" not in runner.files[-1]                # announced once
+    tix.obj.state.put_decision("dec_" + "b" * 32, {**rec, "outcome": None})
+    ops.ask(t.id, [{"text": "Which format?", "options": ["A", "B"]}])
+    tix.obj.act("push_now", t.id, pctx)
+    assert "decided_via" not in runner.files[-1]                # needs something again, or not decided: never
+
+
 def test_a_reset_event_log_forgets_the_done_marks(tix_ws, tix, runner):
     """A log that starts over numbers from 1 again: marks left from the old numbering would make the periodic pass
     acknowledge every new event as 'already synced' and the phone would never hear of them."""

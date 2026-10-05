@@ -10,7 +10,7 @@ from datetime import timedelta
 
 from fileshare import clock
 from fileshare.deps import api_error, rate_slot
-from fileshare.ids import format_ticket_id
+from fileshare.ids import format_ticket_id, parse_ticket_ref
 from fileshare.tickets import _tx, _write_event, Actor
 
 SCHEMA_MAJORS = ("1",)
@@ -130,7 +130,8 @@ def list_join_requests(conn, *, status: str = "pending") -> list[dict]:
     return [out for out in (join_request_out(conn, r) for r in rows) if out["status"] == status]
 
 
-def decide_join(conn, app, *, space_id: str, req_id: str, decision: str, decided_by: str) -> dict:
+def decide_join(conn, app, *, space_id: str, req_id: str, decision: str, decided_by: str,
+                session_hash: str | None = None) -> dict:
     """The browser session approves or denies. Approval moves ownership and bumps owner_gen; mirror_rev is
     kept (final review I1: a reset let the phone see the new owner's rev 1 as a rollback). The new owner's CLI
     pushes above the stored rev. The request row is the audit."""
@@ -155,8 +156,10 @@ def decide_join(conn, app, *, space_id: str, req_id: str, decision: str, decided
                      (decision, now, decided_by, req_id))
     log.info("space %s: join request jr_%s %s (device %s, was owned by %s)", space_id, req_id, decision,
              row["device_id"], row["from_device"])
-    # Replace the phone's "<device> wants to sync" notification silently (the SW closes it on "clear").
-    push_v2(app, {"v": 2, "s": space_id, "t": "", "k": "clear", "n": 0, "c": attention_total(conn)})
+    # Tell the OTHER phones/browsers how the request ended ("Workspace request approved"); the one that decided knows
+    # (QA #55): it gets no copy, and closes the "wants to sync" notification itself when the app is open.
+    push_v2(app, {"v": 2, "s": space_id, "t": "", "k": "clear", "w": "join", "r": decision, "n": 0,
+                  "c": attention_total(conn)}, {session_hash} if session_hash else None)
     return join_request_out(conn, join_request_row(conn, space_id, req_id))
 
 
@@ -337,9 +340,13 @@ def attention_total(conn) -> int:
     return needs_total(conn) + human_messages_open(conn) + join_requests_open(conn)
 
 
-def push_v2(app, payload: dict) -> None:
+def push_v2(app, payload: dict, exclude_sessions=None) -> None:
+    """`exclude_sessions`: browser sessions whose subscriptions get no copy (the phone that made the decision)."""
     try:
-        app.state.pusher.notify_payload(payload)
+        if exclude_sessions:
+            app.state.pusher.notify_payload(payload, frozenset(exclude_sessions))
+        else:
+            app.state.pusher.notify_payload(payload)
     except Exception as e:      # a push never fails the request (spec T7)
         log.warning("push: notify failed: %s", e)
 
@@ -504,7 +511,26 @@ def recover_held(app) -> int:
     return len(rows)
 
 
-def after_needs_change(conn, app, *, space, ticket, before, after, open_questions) -> None:
+DECISION_ORIGIN_WINDOW = timedelta(minutes=15)
+_DECIDING = ("answer", "approve", "request_changes", "verdict")
+
+
+def decision_session(conn, space: str, ticket: str) -> str | None:
+    """The browser session that sent the newest answer/approve/request_changes/verdict for this ticket in the last 15
+    minutes that was not refused or overtaken (no ack yet, applied, or held for an Apply): the one to leave out of the
+    "handled" push. Only asked when Mission Control said it applied a phone answer (decided_via)."""
+    n = parse_ticket_ref(ticket)
+    if n is None:
+        return None
+    cutoff = clock.now_iso(clock.now() - DECISION_ORIGIN_WINDOW)
+    row = conn.execute(
+        f"SELECT session_hash FROM decisions WHERE space_id = ? AND ticket_n = ? AND kind IN ({','.join('?' * len(_DECIDING))})"
+        " AND created_at >= ? AND (ack IS NULL OR ack = 'applied' OR ack LIKE 'waiting-%') ORDER BY seq DESC LIMIT 1",
+        (space, n, *_DECIDING, cutoff)).fetchone()
+    return row["session_hash"] if row is not None else None
+
+
+def after_needs_change(conn, app, *, space, ticket, before, after, open_questions, decided_via=None) -> None:
     """Push only when a mirror starts needing the human or needs something else; replace it when it stops.
     The payload is cleartext routing only (TIX spec §7): no title, text, client name or local key. Needs pushes
     are coalesced per workspace (NeedsPushGate); a clear goes out at once."""
@@ -514,8 +540,14 @@ def after_needs_change(conn, app, *, space, ticket, before, after, open_question
     if after is None:
         if gate is not None and not gate.clear_wanted(space, ticket):
             return          # its "needs you" never left the server (held in the window): nothing to withdraw
-        push_v2(app, {"v": 2, "s": space, "t": ticket, "k": "clear", "n": 0, "c": attention_total(conn),
-                      "cs": space_needs_total(conn, space)})
+        payload = {"v": 2, "s": space, "t": ticket, "k": "clear", "n": 0, "c": attention_total(conn),
+                   "cs": space_needs_total(conn, space)}
+        # Mission Control says (decided_via) when it applied a phone answer; the server does not guess. Then the SW words
+        # it "Decided on a phone", and the session that sent the answer gets no push at all.
+        decided = decision_session(conn, space, ticket) if decided_via == "phone" else None
+        if decided_via == "phone":
+            payload["via"] = "phone"
+        push_v2(app, payload, {decided} if decided else None)
         return
     if gate is not None and not gate.due(space, ticket, lambda sp, held: _flush_held(app, sp, held)):
         return

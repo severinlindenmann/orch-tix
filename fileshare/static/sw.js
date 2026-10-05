@@ -201,7 +201,7 @@ self.addEventListener("fetch", (event) => {
 
 self.addEventListener("message", (event) => {
   if (event.data?.type === "needs-spaces") {
-    event.waitUntil(reconcileNeeds(event.data.spaces, event.data.tickets, event.data.messages, event.data.at).catch(() => {}));
+    event.waitUntil(reconcileNeeds(event.data.spaces, event.data.tickets, event.data.messages, event.data.at, event.data.joins).catch(() => {}));
     return;
   }
   if (!event.data || event.data.type !== "cache-pages") return;
@@ -435,14 +435,21 @@ async function groupNote() {
 // silently without that ticket. A join request's clear (empty t) replaces its own notification.
 async function clearFor(d, s, m) {
   const { label } = await spaceInfo(s);
-  const handled = (tag, body, title = "Handled on desktop") => ({ title, options: { body, tag, silent: true, renotify: false,
+  // Where it was decided (QA #55): the server says via "phone" when a phone's answer ended the need; the phone that
+  // sent it gets no push at all, so this is another device. Anything else was done on the desktop side.
+  const word = d.via === "phone" ? "Decided on a phone" : "Handled on desktop";
+  const handled = (tag, body, title = word) => ({ title, options: { body, tag, silent: true, renotify: false,
     icon: ICON, data: { url: "/", s, handled: true } } });
   if (d.w === "message" && !m) {
     // The owner read the message(s) in the browser (QA N-04): the message notification (its own tag, QA N-07) is
     // replaced; a needs notification of the workspace is never touched.
     return handled(s ? `tix:msg:${s}` : "tix:msg", s ? `Read on desktop · ${label}` : "Read on desktop", "Read on desktop");
   }
-  if (!m) return handled(s ? `tix:join:${s}` : "tix", `Handled on desktop · ${label}`);
+  if (!m && d.w === "join") {
+    const t = d.r === "denied" ? "Workspace request denied" : "Workspace request approved";
+    return handled(`tix:join:${s}`, `${t} · ${label}`, t);
+  }
+  if (!m) return handled(s ? `tix:join:${s}` : "tix", `${word} · ${label}`);
   const quiet = (n, data, body) => ({ title: n.data?.title || n.title || "TIX", options: { body: body ?? (n.data?.body || n.body || ""),
     tag: n.tag, silent: true, renotify: false, icon: ICON, data } });
   // `cs` is how many tickets of THIS workspace still need you, counted by the server in every needs push. It decides
@@ -455,9 +462,9 @@ async function clearFor(d, s, m) {
   if (mine) {
     const rest = ticketsOf(mine).filter((t) => t !== d.t);
     if (cs !== null) {
-      return cs > 0 ? quiet(mine, { ...mine.data, ts: rest, body: remaining }, remaining) : handled(`tix:${s}`, `Handled on desktop · ${label}`);
+      return cs > 0 ? quiet(mine, { ...mine.data, ts: rest, body: remaining }, remaining) : handled(`tix:${s}`, `${word} · ${label}`);
     }
-    return rest.length && count(d.c) > 0 ? quiet(mine, { ...mine.data, ts: rest }) : handled(`tix:${s}`, `Handled on desktop · ${label}`);
+    return rest.length && count(d.c) > 0 ? quiet(mine, { ...mine.data, ts: rest }) : handled(`tix:${s}`, `${word} · ${label}`);
   }
   const group = await groupNote();
   if (group && (group.data?.spaces || []).includes(s)) {
@@ -465,23 +472,31 @@ async function clearFor(d, s, m) {
     ts[s] = (ts[s] || []).filter((t) => t !== d.t);
     if (!ts[s].length || cs === 0) delete ts[s];
     const spaces = (group.data.spaces || []).filter((x) => x !== s || (cs === null ? ts[x] : cs > 0));
-    if (!spaces.length || (cs === null && count(d.c) === 0)) return handled("tix:all", "Handled on desktop");
+    if (!spaces.length || (cs === null && count(d.c) === 0)) return handled("tix:all", word);
     const body = workspacesText(spaces.length);
     return { title: group.data?.title || group.title || "TIX", options: { body, tag: "tix:all", silent: true, renotify: false,
       icon: ICON, data: { ...group.data, spaces, ts, body } } };
   }
-  return handled(s ? `tix:${s}` : "tix", `Handled on desktop · ${label}`);
+  return handled(s ? `tix:${s}` : "tix", `${word} · ${label}`);
 }
 
 // The page tells the worker which workspaces have something that needs you (it just fetched the list): a notification
 // for a workspace that has nothing left is closed, so a banner a missed clear left behind does not stay until the
 // owner swipes it. Page-driven, not a push, so closing needs no replacement notification.
-async function reconcileNeeds(spaces, tickets, messages, at) {
+async function reconcileNeeds(spaces, tickets, messages, at, joins) {
   const live = new Set((Array.isArray(spaces) ? spaces : []).filter((x) => typeof x === "string" && SPACE_ID.test(x)));
   const open = Array.isArray(tickets) ? new Set(tickets.filter((t) => typeof t === "string")) : null;
   // `at`: when the page asked for its lists. A notification shown after that is newer than the answer (a push landed
   // while it was on its way) and says something the list cannot know yet: leave it.
   const newer = (n) => typeof at === "number" && typeof n.timestamp === "number" && n.timestamp > at;
+  try {      // join requests that were decided (here or elsewhere): their "wants to sync" notification goes
+    for (const x of await self.registration.getNotifications()) {
+      const j = /^tix:join:([0-9a-f]{32})$/.exec(x.tag || "");
+      if (j && Array.isArray(joins) && (x.data?.handled || !joins.includes(j[1]))) x.close();
+    }
+  } catch {
+    /* no notification list */
+  }
   for (const x of await openSpaceTags()) {
     if (newer(x)) continue;
     const sp = x.tag.slice(4);
