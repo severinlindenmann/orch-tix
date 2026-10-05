@@ -150,3 +150,17 @@ def test_manifest_declares_no_slot_the_installed_core_does_not_know(tix_ws, tix)
     from orch.addons.manifest import SLOT_NAMES
     assert set(tix.manifest.slots) <= SLOT_NAMES
     assert tix.obj.widgets("no.such.slot", _view(tix_ws, tix, "today.summary")) == []
+
+
+def test_new_core_features_are_used_only_when_core_has_them():
+    """QA TF-16 / TF-20: Sync now asks nothing and phone decisions carry their origin, but only on an orch-core
+    that supports both (an older one keeps the manifest's confirm text)."""
+    from orch.addons.api import PendingDecision
+    from orch_tix import widgets
+    has = True
+    try:
+        PendingDecision("p", "t", origin="phone")
+    except TypeError:
+        has = False
+    assert widgets.supports_origin() is has
+    assert widgets.SYNC_NOW == ({"confirm": ""} if has else {})

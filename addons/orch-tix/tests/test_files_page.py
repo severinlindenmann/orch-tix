@@ -289,3 +289,28 @@ def test_auto_attach_takes_at_most_3_files_per_tick(tix_ws):
     p.fetch(tix.ctx.provider_context(), "default", None)
     assert len([c for c in runner.calls if c[1] == "get"]) == 5
     assert len(list((tix_ws.ws.artifacts_dir / key).glob("remote-*"))) == 5
+
+
+def test_only_done_files_say_all_caught_up_and_the_done_chip_lists_them(tix, tix_ws):
+    """QA TF-04: "No files on the share yet" is wrong when the share holds done files."""
+    done = {**FILE7, "done": True}
+    tix_ws.cache("orch-tix", make_snapshot("files", "all", items=(done, {**FILE8, "done": True})))
+    table = next(w for w in _walk(_page(tix_ws, tix)) if isinstance(w, Table))
+    assert table.rows == () and "All caught up: 2 done files hidden" in table.empty
+    chip = next(w for w in _walk(_page(tix_ws, tix)) if isinstance(w, Link) and w.text == "Done 2")
+    assert chip.url.endswith("done=1") and not chip.current
+    shown = next(w for w in _walk(_page(tix_ws, tix, done="1")) if isinstance(w, Table))
+    assert [_cell_text(r[0]) for r in shown.rows] == ["report.pdf", "notes.txt"]
+    assert shown.rows[0][3] == "done · in 6 days"
+
+
+def test_open_files_stay_listed_and_done_ones_wait(tix, tix_ws):
+    tix_ws.cache("orch-tix", make_snapshot("files", "all", items=(FILE7, {**FILE8, "done": True})))
+    table = next(w for w in _walk(_page(tix_ws, tix)) if isinstance(w, Table))
+    assert [_cell_text(r[0]) for r in table.rows] == ["report.pdf"]
+
+
+def test_a_truly_empty_share_keeps_the_upload_hint(tix, tix_ws):
+    tix_ws.cache("orch-tix", make_snapshot("files", "all", items=()))
+    table = next(w for w in _walk(_page(tix_ws, tix)) if isinstance(w, Table))
+    assert "No files on the share yet" in table.empty
