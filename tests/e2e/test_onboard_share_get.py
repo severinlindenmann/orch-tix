@@ -227,7 +227,7 @@ def test_onboard_approve_share_get_revoke(live_server, sim, sharing, tmp_path):
         assert who.returncode == 0, who.stderr
         assert json.loads(who.stdout)["device_id"] == cfg["device_id"]
 
-    # A shares a multi-chunk file. B gets it byte-for-byte, twice (a collision gives the FILE1- prefix).
+    # A shares a multi-chunk file. B gets it byte-for-byte, twice (the second get reuses the identical copy, QA TF-19; only different content gets the FILE1- prefix).
     payload = b"# notes\n" + os.urandom(2 * 1024 * 1024 + 123)
     (repo_a / "notes.md").write_bytes(payload)
     r = cli(repo_a, env, "share", "notes.md", "-m", "e2e test", "--json")
@@ -241,7 +241,12 @@ def test_onboard_approve_share_get_revoke(live_server, sim, sharing, tmp_path):
     assert Path(got["path"]).read_bytes() == payload
     assert got["note"] == "e2e test"
     r = cli(repo_b, env, "get", "FILE1", "--json")
-    assert Path(json.loads(r.stdout)["path"]) == repo_b / "share" / "FILE1-notes.md"
+    assert Path(json.loads(r.stdout)["path"]) == repo_b / "share" / "notes.md"          # identical: reused, no pile-up
+    assert sorted(p.name for p in (repo_b / "share").iterdir() if not p.name.startswith(".")) == ["notes.md"]
+    (repo_b / "share" / "notes.md").write_bytes(b"edited locally")
+    r = cli(repo_b, env, "get", "FILE1", "--json")
+    assert Path(json.loads(r.stdout)["path"]) == repo_b / "share" / "FILE1-notes.md"    # different content: both kept
+    assert (repo_b / "share" / "notes.md").read_bytes() == b"edited locally"
     assert (repo_b / "share" / ".gitignore").read_text() == "*\n"
     assert_never_committable(repo_b, repo_config(repo_b)["device_token"])
 
