@@ -737,6 +737,7 @@ async function load() {
     throw e;
   }
   state.offline = null;
+  const row = await openRow(state.keys.mk, r);
   const prevHash = JSON.stringify(state.doc?.questions?.map((q) => q.hash) ?? null) + JSON.stringify(state.doc?.gates ?? null);
   // An older snapshot than the one on screen, or than the newest this browser opened (openRow's
   // high-water mark): keep the newer one on screen, or show none.
