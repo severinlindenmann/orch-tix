@@ -20,6 +20,7 @@ import { cacheLabels, keysOrLogin, loadCachedLists, loadDecisions, loadSpaces, o
 import {
   NEEDS_LABEL, QUEUED_TEXT, SENT_PAIRED_TEXT, SENT_TEXT, UNKNOWN_SPACE, VERDICT_VALUE, VOICE_TTL, approvalGate, canApproveOnPhone,
   approveTogether, gateCovers, normalizedGateText, history, verdictCanonical, verdictHash, verdictView, decisionValue, notSentText, splitQueued, canSendAnswer, cardTitle,
+  NOTIFY_FAILED, NOTIFY_LABEL, notifyHelp, notifyOn, notifyPath,
   NOT_YET_MS, ageOf, artifactList, isRollback, verificationSummary, outcomeRole, outcomeText, shortHash, targetChanged, targetFor,
 } from "./mirror-model.js";
 import {
@@ -641,6 +642,31 @@ function renderOutboxOnly(main) {
   main.replaceChildren(el("section", { class: "decision-status", role: "status", "aria-live": "polite" }, rows));
 }
 
+// "Notify me about this ticket": off by default. The ticket is on the phone either way; this only decides whether
+// the server may push for it. The server keeps it and the desktop merges it (a ticket page of Mission Control shows it).
+function notifyRow() {
+  const on = notifyOn(state.row);
+  const input = el("input", { type: "checkbox", id: "notify-toggle", role: "switch", "aria-describedby": "notify-help" });
+  input.checked = on;
+  const help = el("p", { class: "transcribe-hint", id: "notify-help" }, notifyHelp(on));
+  input.addEventListener("change", async () => {
+    const want = input.checked;
+    input.disabled = true;
+    try {
+      const out = await api("PUT", notifyPath(state.n), { json: { on: want } });
+      state.row = { ...state.row, notify: out.notify === true, notify_rev: out.notify_rev };
+      help.textContent = notifyHelp(state.row.notify);
+    } catch {
+      input.checked = !want;
+      toast(NOTIFY_FAILED);
+    } finally {
+      input.disabled = false;
+    }
+  });
+  return el("section", { class: "card notify-card", "aria-label": "Phone notifications" },
+    el("label", { class: "transcribe-toggle", for: "notify-toggle" }, input, el("span", {}, NOTIFY_LABEL)), help);
+}
+
 function render() {
   const main = document.getElementById("ticket");
   const { row, doc } = state;
@@ -672,7 +698,7 @@ function render() {
     doc ? decisionCard() : state.rollback ? "" : el("p", { class: "banner banner-decrypt", role: "alert" }, row.error === "binding"
       ? "The server's routing for this ticket doesn't match its sealed content. Nothing can be sent from here; check it on the desktop."
       : "This ticket doesn't open with this browser's key."),
-    ...[sentList(), ...(doc ? extras() : [])].filter(Boolean));
+    ...[sentList(), doc ? notifyRow() : null, ...(doc ? extras() : [])].filter(Boolean));
   paintBar();
   if (state.focusOnRender) {
     state.focusOnRender = false;

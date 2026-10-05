@@ -51,7 +51,21 @@ Then, in this workspace:
 | `sync_log` | `false` | With `full`, also send the last 20 log lines |
 
 The phone's history comes from orch events, not the Log: the last 20 entries of who did what ("you approved the plan", "claude-code started T2"). `title` sends only what happened; `full` adds the free text an event carries (a change request's message, a close reason, a log line); `key-only` sends none. The addon keeps the last 30 entries per linked ticket in `history.json`, with the text only for tickets shown in full. The event log is writable by agents, so a human event reads "human (desktop log)", never "you"; decisions applied through the addon (phone answers) are recorded too.
+| `notify_unticketed` | `false` | Phone notifications for agent messages that name no ticket (`sharing msg send` without `--ticket`). Messages that name a ticket follow that ticket's switch. |
 | `sync_artifacts` | `on-request` | `never`, `on-request` (artifacts marked for context, plus "Send to phone") or `always` |
+
+**Phone notifications (off by default, per ticket).** A ticket syncs to TIX and shows under "Needs you" on the phone
+whether or not it may notify. Each ticket has a **"Notify my phone about this ticket"** switch, off by default, which orch-core
+draws for this addon (`ticket_options`, needs an orch-core that has it):
+on the new-ticket form, on the approve card for the requirements or plan gate, and on the ticket page; the phone has
+the same switch on the ticket ("Notify me about this ticket"), and the two stay in step (the phone's change is merged
+into orch-core within a few seconds, recorded as this addon, not as you). The switch travels in the mirror as the
+cleartext field `notify`, and the **server** only pushes for a ticket while it is on, so an off, old or out-of-date
+desktop cannot make the phone buzz. Agent messages tied to a ticket (`sharing msg send --ticket TIX-n`) follow that
+ticket's switch; the workspace setting `notify_unticketed` covers the rest. Workspace join requests always notify.
+**Only a human turns it on**: Mission Control, `orch addon ticket-option set <ticket> orch-tix/notify on` (in your
+terminal, typed confirmation), or the phone. Agents may read it (`orch addon ticket-option list <ticket>`). Changed
+behaviour: after updating, every existing ticket and workspace starts off, so nothing notifies until you switch it on.
 
 **Turning widgets on.** The defaults stay private: `redaction: title` and `sync_widget_docs: never`. A workspace opts
 in with `redaction: full` (the ticket's sections and each widget's text and core document) and, for agent-HTML

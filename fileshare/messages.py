@@ -10,6 +10,7 @@ from fileshare import clock
 from fileshare.deps import api_error, rate_slot
 from fileshare.ids import format_id, format_ticket_id, parse_ticket_ref
 from fileshare.mirrors import attention_total, owner_space, push_v2, space_row
+from fileshare.notify import message_clear_wanted, message_push_allowed
 from fileshare.sessions import session_name
 from fileshare.tickets import _live_file_ns, _tx
 
@@ -117,7 +118,9 @@ def create_message(conn, app, *, principal, body: dict) -> dict:
              body["kind"], body["key_version"], body["enc_body"], json.dumps(files), body["size"], clock.now_iso()))
     seq = cur.lastrowid
     app.state.message_bus.bump(seq)
-    if body["to_kind"] == "human":
+    # Phone notifications are off unless the owner chose them: a ticketed message follows its ticket, the rest the space's
+    # setting. The message itself is stored and shown in the app either way.
+    if body["to_kind"] == "human" and message_push_allowed(conn, body["space"], ticket_n):
         payload = {"v": 2, "s": body["space"] or "", "t": format_ticket_id(ticket_n) if ticket_n else "", "k": "message"}
 
         def trailing() -> None:            # at the end of the sender's minute, on its own connection
@@ -125,7 +128,7 @@ def create_message(conn, app, *, principal, body: dict) -> dict:
             c = db.connect(app.state.settings.db_path)
             try:
                 unread = _unread_for_human(c, from_device)
-                if unread:
+                if unread and message_push_allowed(c, body["space"], ticket_n):
                     push_v2(app, {**payload, "n": unread, "c": attention_total(c)})
             finally:
                 c.close()
@@ -183,6 +186,6 @@ def ack_message(conn, principal, uuid: str, app=None) -> None:
         left = conn.execute("SELECT COUNT(*) FROM messages m WHERE m.to_kind = 'human' AND m.space_id IS ? AND NOT EXISTS"
                             " (SELECT 1 FROM message_acks a WHERE a.message_seq = m.seq AND a.recipient = 'human')",
                             (row["space_id"],)).fetchone()[0]
-        if left == 0:
+        if left == 0 and message_clear_wanted(conn, row["space_id"]):
             push_v2(app, {"v": 2, "s": row["space_id"] or "", "t": "", "k": "clear", "w": "message", "n": 0,
                           "c": attention_total(conn)})

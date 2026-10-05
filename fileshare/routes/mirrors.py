@@ -169,11 +169,53 @@ async def put_mirror(uuid: str, request: Request, principal: Principal = Depends
             "needs": needs, "open_questions": oq, "key_version": _kv(raw.get("key_version")),
             "wrapped_dek": raw.get("wrapped_dek"), "enc_content": raw["enc_content"],
             "event_uuid": _uuid(raw.get("event_uuid"), "event_uuid")}
+    if raw.get("notify") is not None:        # cleartext: whether this ticket may notify the phone (default off)
+        if type(raw["notify"]) is not bool:
+            raise api_error(400, "bad_request", "notify must be true or false")
+        body["notify"] = raw["notify"]
+        seen = raw.get("notify_seen", 0)
+        if type(seen) is not int or seen < 0:
+            raise api_error(400, "bad_request", "notify_seen must be a non-negative integer")
+        body["notify_seen"] = seen
     result, before, after = mirrors.upsert_mirror(conn, request.app, device=principal.device,
                                                   uuid=_uuid(uuid, "uuid"), body=body)
     mirrors.after_needs_change(conn, request.app, space=body["space"], ticket=result["id"], before=before,
                                after=after, open_questions=oq)
     return result
+
+
+@router.put("/api/mirrors/{ref}/notify")
+async def put_mirror_notify(ref: str, request: Request, principal: Principal = Depends(require_session_only),
+                            conn: sqlite3.Connection = Depends(get_db)):
+    """The phone (your browser session; never a device, so an agent's `sharing` credential cannot) turns phone
+    notifications for one mirrored ticket on or off."""
+    raw = await read_bounded_json(request, 1024)
+    if type(raw.get("on")) is not bool:
+        raise api_error(400, "bad_request", "on must be true or false")
+    n = parse_ticket_ref(ref)
+    if n is None:
+        raise api_error(404, "not_found", f"no mirror {ref}")
+    return mirrors.set_notify(conn, request.app, ref_n=n, on=raw["on"],
+                              actor_name=session_name(conn, principal.session_hash) or "browser")
+
+
+@router.put("/api/spaces/{space_id}/notify")
+async def put_space_notify(space_id: str, request: Request, principal: Principal = Depends(require_device_only),
+                           conn: sqlite3.Connection = Depends(get_db)):
+    """The owner's desktop: phone notifications for agent messages that name no ticket (default off)."""
+    raw = await read_bounded_json(request, 1024)
+    if type(raw.get("messages")) is not bool:
+        raise api_error(400, "bad_request", "messages must be true or false")
+    return mirrors.set_space_notify(conn, device=principal.device, space_id=_space_id(space_id), messages=raw["messages"])
+
+
+@router.get("/api/spaces/{space_id}/notify")
+def get_notify_state(space_id: str, principal: Principal = Depends(require_device_only),
+                     conn: sqlite3.Connection = Depends(get_db)):
+    """What the owner's desktop needs to merge phone changes: per mirror the switch and its phone-change counter."""
+    space = _space_id(space_id)
+    row = mirrors.owner_space(conn, space, principal.device)
+    return {"messages": bool(row["notify_messages"]), "mirrors": mirrors.notify_state(conn, space)}
 
 
 @router.delete("/api/mirrors/{uuid}", status_code=204)

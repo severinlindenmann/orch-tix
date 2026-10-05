@@ -182,6 +182,7 @@ def test_a_device_tags_only_a_space_it_owns(app, device_client, other_device_cli
     r = _send(other_device_client, "human", "", space=SPACE)
     assert r.status_code == 403 and r.json()["error"] == "not_owner"
     assert _ids(session_client) == [] and Rec.payloads == []
+    device_client.put(f"/api/spaces/{SPACE}/notify", json={"messages": True})     # messages without a ticket notify
     assert _send(device_client, "human", "", space=SPACE).status_code == 201
     assert _send(session_client, "project", "proj", space=SPACE).status_code == 201
     assert [p["s"] for p in Rec.payloads] == [SPACE]

@@ -1030,3 +1030,7 @@ dialog.sheet-confirm[open] { display: flex; flex-direction: column; gap: 12px; }
 @media (min-width: 900px) {
   .decision-bar { position: sticky; bottom: 0; max-width: 640px; margin: 0 32px; border: 1px solid var(--line); border-radius: 14px 14px 0 0; }
 }
+
+/* Per-ticket phone notifications: the switch row on a ticket (reuses the transcribe switch). */
+.notify-card { display: grid; gap: 4px; padding: 4px 14px 12px; }
+.notify-card .transcribe-hint { margin: 0; }

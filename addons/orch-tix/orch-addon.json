@@ -1,10 +1,13 @@
 {
-  "name": "orch-tix", "title": "TIX", "version": "0.2.0", "requires_api": "2", "kind": "in-process",
+  "name": "orch-tix", "title": "TIX", "version": "0.3.0", "requires_api": "2", "kind": "in-process",
   "description": "Mirror tickets that need you to the TIX phone app, bring phone decisions back, and share files.",
   "capabilities": ["provider", "page", "panel", "decisions", "settings", "events"],
-  "slots": ["today.summary", "today.from_addons", "ticket.sync", "workspace.settings"],
+  "slots": ["today.summary", "today.from_addons", "ticket.sync", "workspace.settings", "guide.section"],
   "binaries": ["setting:sharing_path"],
   "remote_humans": true,
+  "ticket_options": [
+    {"id": "notify", "label": "Notify my phone about this ticket", "help": "Off: the ticket still syncs to TIX and shows under Needs you; only the push notifications stay quiet.", "default": false}
+  ],
   "menu": {"title": "Shared files", "icon": "share"},
   "entry": "orch_tix:create",
   "settings_schema": [
@@ -13,6 +16,7 @@
     {"key": "redaction", "label": "Show on the phone", "type": "select", "options": ["full", "title", "key-only"], "default": "title"},
     {"key": "sync_log", "label": "Send agent log lines", "type": "bool", "default": false},
     {"key": "sync_artifacts", "label": "Send artifacts", "type": "select", "options": ["never", "on-request", "always"], "default": "on-request"},
+    {"key": "notify_unticketed", "label": "Phone notifications for messages without a ticket", "type": "bool", "default": false},
     {"key": "sync_widget_docs", "label": "Send agent-HTML widgets (their HTML and data, as files)", "type": "select", "options": ["never", "always"], "default": "never"}
   ],
   "actions": [

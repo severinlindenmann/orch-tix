@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from orch.addons.api import Intent, PendingDecision, Snapshot
 
+from . import notify
 from .cli import SharingError
 
 MAX_AGE = timedelta(days=14)
@@ -392,6 +393,8 @@ class InboxProvider:
             except (TypeError, ValueError):
                 pass
             reconcile(self.addon, ctx, now)
+            notify.merge_phone_changes(self.addon, ctx)      # the phone's per-ticket switch, adopted here
+            notify.push_message_setting(self.addon, ctx)
         except SharingError as e:
             health = "auth_required" if e.code in _AUTH else "offline"
             return Snapshot(self.id, scope, now, health=health, message=e.detail[:200])

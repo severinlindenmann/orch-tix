@@ -151,6 +151,21 @@ class State:
             entry["done_at"] = (entry.get("done_at") or _now()) if done else None
         self._update("links.json", fn)
 
+    def set_notify_seen(self, key: str, rev: int) -> None:
+        """How many of the phone's notification changes this desktop has merged for `key` (see notify.py)."""
+        def fn(links):
+            if key in links:
+                links[key]["notify_seen"] = max(int(links[key].get("notify_seen") or 0), int(rev))
+        self._update("links.json", fn)
+
+    def message_notify(self):
+        """The "messages without a ticket" value last sent to the server (None: never)."""
+        v = self._read("space.json").get("message_notify_sent")
+        return v if isinstance(v, bool) else None
+
+    def set_message_notify(self, value: bool) -> None:
+        self._update("space.json", lambda d: d.update(message_notify_sent=bool(value)))
+
     def retire(self, key: str, gen: int | None = None) -> None:
         """The server says this link is over (unlinked elsewhere): keep the entry. A retired link is never
         auto-linked again by hand or done; one the server lost (retired_why "gone") sync.drain links again."""
@@ -230,7 +245,8 @@ class State:
 
     def save_space(self, d: dict) -> None:
         with self._lock():
-            self._write("space.json", dict(d))
+            keep = {k: v for k, v in self._read("space.json").items() if k == "message_notify_sent"}
+            self._write("space.json", {**dict(d), **keep})
 
     # -- decisions -----------------------------------------------------------------------------------------
     def decisions(self) -> dict:

@@ -54,9 +54,11 @@ What TIX protects, what it does not, and exactly which fields the server can rea
 - **Losing both the passphrase and the recovery key loses the files.** Nobody,
   including root on the server, can undo that.
 - **Mirrors: what the server sees in cleartext.**
-  - Per space: its id, the owner device and when the desktop was last seen.
+  - Per space: its id, the owner device, when the desktop was last seen and **`notify_messages`**: whether agent
+    messages that name no ticket may notify your phone (a yes/no, off by default).
   - Per mirror: `status`, `priority`, `needs` (question, approval or verdict), the number of open questions,
-    the schema version, the mirror rev and timestamps. It also stores the pushing device's `project` and its
+    the schema version, the mirror rev and timestamps, and **`notify`**: whether this ticket may notify your phone
+    (a yes/no, off by default; see Push notifications). It also stores the pushing device's `project` and its
     name as `created_by_name`, and a `type` column (always `feature` for a mirror).
   - Per decision: the space id, its kind, the TIX number, the browser session's name that sent it, its key
     version, timestamps and the ack.
@@ -92,6 +94,16 @@ What TIX protects, what it does not, and exactly which fields the server can rea
   the browser vendor's push service (Apple, Google or Mozilla), encrypted to the subscription. The **VAPID
   private key** sits in the server database; it only lets someone send notifications to your subscribed
   browsers.
+- **Push notifications are per ticket and off by default.** The server sends a push for a mirror only while its
+  cleartext `notify` is on, and for an agent message only when its ticket's `notify` is on or, with no ticket, its
+  space's `notify_messages` is on. A workspace join request ("<device> wants to sync") always notifies, because it
+  is a security prompt. The switch is the owner's: Mission Control (new ticket, the approve card, the ticket page)
+  sets it through the addon, and the app's "Notify me about this ticket" sets it through a browser-session-only
+  endpoint (a device gets 403). Honest limit: the desktop's device credential, which the `sharing` CLI uses for
+  agents too, can also write `notify` in a mirror push, because the same credential pushes mirrors. orch-core keeps
+  agents from setting it through orch (human-only everywhere), and the sharing skill tells agents not to, but a
+  process that holds the device token could. The worst outcome is a notification on your phone, never access to
+  content: the flag is not a security boundary, only a courtesy switch, and the server still never sees any text.
 - **Downloads in Mission Control** are decrypted by the sharing CLI on the desktop, never in the browser. Core
   serves each one once, as an attachment (single-use token, 5 minutes, `nosniff`, sandbox CSP). Public and
   upload link URLs are shown once and never logged.

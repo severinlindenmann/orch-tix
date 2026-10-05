@@ -209,10 +209,16 @@ def redact(doc: dict, level: str, *, sync_log: bool, context_artifacts, widgets=
 
 
 def payload(doc: dict, *, key: str, gen: int, rev: int, level: str, sync_log: bool, context_artifacts,
-            widgets=None, history=None) -> dict:
-    """The `sharing mirror push --file` body: cleartext routing fields plus the doc the CLI seals."""
-    return {"key": key, "gen": int(gen), "rev": int(rev), "status": str(doc.get("status") or "backlog"),
+            widgets=None, history=None, notify=None, notify_seen: int = 0) -> dict:
+    """The `sharing mirror push --file` body: cleartext routing fields plus the doc the CLI seals. `notify` (cleartext,
+    the human's per-ticket "Notify my phone" choice, default off; None = this orch-core has no such option, so the
+    server keeps what it has) and `notify_seen` (how many phone changes this desktop has merged) are the only
+    notification fields; the server sends a push for the ticket only while notify is on."""
+    body = {"key": key, "gen": int(gen), "rev": int(rev), "status": str(doc.get("status") or "backlog"),
             "priority": str(doc.get("priority") or "normal"), "needs": needs_of(doc),
             "open_questions": open_questions(doc), "schema_version": str(doc.get("schema_version") or "1.0.0"),
             "doc": redact(doc, level, sync_log=sync_log, context_artifacts=context_artifacts, widgets=widgets,
                           history=history)}
+    if notify is not None:
+        body["notify"], body["notify_seen"] = bool(notify), int(notify_seen)
+    return body

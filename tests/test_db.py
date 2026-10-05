@@ -12,10 +12,10 @@ def _tables(conn):
 
 def test_migrate_creates_schema_and_is_idempotent(tmp_path):
     conn = connect(tmp_path / "x.db")
-    assert migrate(conn) == 9
+    assert migrate(conn) == 10
     assert _tables(conn) >= {"meta", "devices", "onboarding_tokens", "files", "sessions", "settings", "links"}
-    assert get_meta(conn, "schema_version") == "9"
-    assert migrate(conn) == 9
+    assert get_meta(conn, "schema_version") == "10"
+    assert migrate(conn) == 10
 
 
 def test_pragmas(tmp_path):
@@ -143,7 +143,7 @@ def test_create_app_migrates(tmp_path):
     from fileshare.settings import Settings
     create_app(Settings(data_dir=tmp_path / "data", public_url="http://testserver", cookie_secure=False))
     conn = connect(tmp_path / "data" / "fileshare.db")
-    assert get_meta(conn, "schema_version") == "9"
+    assert get_meta(conn, "schema_version") == "10"
 
 
 def test_v2_columns(tmp_path):
@@ -183,7 +183,7 @@ def test_migrating_a_001_database_keeps_rows(tmp_path, monkeypatch):
 
     monkeypatch.setattr(db_mod, "MIGRATIONS_DIR", real_dir)
     conn = connect(path)
-    assert migrate(conn) == 9
+    assert migrate(conn) == 10
     f1, f2 = conn.execute("SELECT * FROM files ORDER BY n").fetchall()
     assert (f1["n"], f1["uuid"], f1["wrapped_dek"], f1["enc_meta"], f1["device_id"]) == (
         1, "a" * 32, "w", "m", "dev_000000000001")
@@ -235,13 +235,13 @@ def test_migrating_a_002_database_keeps_rows(tmp_path, monkeypatch):
 
     monkeypatch.setattr(db_mod, "MIGRATIONS_DIR", real_dir)
     conn = connect(path)
-    assert migrate(conn) == 9
-    assert get_meta(conn, "schema_version") == "9"
+    assert migrate(conn) == 10
+    assert get_meta(conn, "schema_version") == "10"
     f = conn.execute("SELECT * FROM files").fetchone()
     assert (f["uuid"], f["acked_at"], f["enc_meta"]) == ("a" * 32, ts, "m")
     assert conn.execute("SELECT name FROM sessions").fetchone()["name"] == "phone"
     assert conn.execute("SELECT COUNT(*) FROM settings").fetchone()[0] == 0
-    assert migrate(conn) == 9
+    assert migrate(conn) == 10
 
 
 LINK_COLS = {"id", "file_n", "token_hash", "wrapped_dek_link", "created_at", "created_by_device",
@@ -300,15 +300,15 @@ def test_migrating_a_003_database_keeps_rows(tmp_path, monkeypatch):
 
     monkeypatch.setattr(db_mod, "MIGRATIONS_DIR", real_dir)
     conn = connect(path)
-    assert migrate(conn) == 9
-    assert get_meta(conn, "schema_version") == "9"
+    assert migrate(conn) == 10
+    assert get_meta(conn, "schema_version") == "10"
     f = conn.execute("SELECT * FROM files").fetchone()
     assert (f["n"], f["uuid"], f["enc_meta"], f["expires_at"]) == (1, "a" * 32, "m", ts)
     assert conn.execute("SELECT rev FROM settings").fetchone()["rev"] == 4
     assert conn.execute("SELECT name FROM sessions").fetchone()["name"] == "phone"
     assert set(_cols(conn, "links")) == LINK_COLS
     assert conn.execute("SELECT COUNT(*) FROM links").fetchone()[0] == 0
-    assert migrate(conn) == 9
+    assert migrate(conn) == 10
 
 
 def test_file_tags_table(tmp_path):
@@ -355,12 +355,12 @@ def test_migrating_a_004_database_keeps_rows(tmp_path, monkeypatch):
 
     monkeypatch.setattr(db_mod, "MIGRATIONS_DIR", real_dir)
     conn = connect(path)
-    assert migrate(conn) == 9
-    assert get_meta(conn, "schema_version") == "9"
+    assert migrate(conn) == 10
+    assert get_meta(conn, "schema_version") == "10"
     assert conn.execute("SELECT uuid FROM files").fetchone()["uuid"] == "a" * 32
     assert conn.execute("SELECT id FROM links").fetchone()["id"] == "lnk_1"
     assert conn.execute("SELECT COUNT(*) FROM file_tags").fetchone()[0] == 0
-    assert migrate(conn) == 9
+    assert migrate(conn) == 10
 
 
 def test_migrating_a_007_database_with_tickets_keeps_them_legacy(tmp_path, monkeypatch):
@@ -386,7 +386,7 @@ def test_migrating_a_007_database_with_tickets_keeps_them_legacy(tmp_path, monke
 
     monkeypatch.setattr(db_mod, "MIGRATIONS_DIR", real_dir)
     conn = connect(path)
-    assert migrate(conn) == 9
+    assert migrate(conn) == 10
     t = conn.execute("SELECT * FROM tickets").fetchone()
     assert (t["n"], t["uuid"], t["status"], t["open_questions"], t["mode"]) == (1, "t" * 32, "waiting", 2, "legacy")
     assert (t["space_id"], t["needs"], t["mirror_rev"], t["schema_version"], t["archived_at"]) == (None,) * 5
@@ -394,5 +394,5 @@ def test_migrating_a_007_database_with_tickets_keeps_them_legacy(tmp_path, monke
     for table in ("spaces", "space_join_requests", "decisions", "messages"):
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
     assert "owner_gen" in _cols(conn, "spaces")
-    assert migrate(conn) == 9
+    assert migrate(conn) == 10
     conn.close()
