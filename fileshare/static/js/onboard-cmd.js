@@ -10,14 +10,23 @@ export function buildCode(lookup) {
   return `shr1.${b64u(lookup)}`;
 }
 
-export function buildCommands(origin, code) {
+// Same rule as the installer's slug(): lower-case, anything but a-z 0-9 . _ - becomes "-", no leading
+// "-" or ".", no trailing "-", at most 64 characters. "" means "let the installer use the hostname".
+export function deviceSlug(name) {
+  return String(name ?? "").toLowerCase().replace(/[^a-z0-9._-]/g, "-").replace(/^[-.]+/, "").replace(/-+$/, "").slice(0, 64);
+}
+
+export function buildCommands(origin, code, deviceName = "") {
+  const dev = deviceSlug(deviceName);
+  const sh = dev ? ` --device '${dev}'` : "";
+  const ps = dev ? ` -Device '${dev}'` : "";
   const curl = `curl --proto '=https' --tlsv1.2 -fsSL ${origin}/onboarding.txt`;
   return {
-    posix: `${curl} | bash -s -- '${code}'`,
-    posixInspect: `${curl} -o onboarding.sh && less onboarding.sh && bash onboarding.sh '${code}'`,
-    windows: `& ([scriptblock]::Create((irm ${origin}/onboarding.ps1))) '${code}'`,
+    posix: `${curl} | bash -s -- '${code}'${sh}`,
+    posixInspect: `${curl} -o onboarding.sh && less onboarding.sh && bash onboarding.sh '${code}'${sh}`,
+    windows: `& ([scriptblock]::Create((irm ${origin}/onboarding.ps1))) '${code}'${ps}`,
     // -File under a process-scoped Bypass: the default Restricted policy blocks a plain `.\onboarding.ps1`.
-    windowsInspect: `irm ${origin}/onboarding.ps1 -OutFile onboarding.ps1; notepad onboarding.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File .\\onboarding.ps1 '${code}'`,
+    windowsInspect: `irm ${origin}/onboarding.ps1 -OutFile onboarding.ps1; notepad onboarding.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File .\\onboarding.ps1 '${code}'${ps}`,
   };
 }
 

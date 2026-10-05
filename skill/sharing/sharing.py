@@ -728,7 +728,8 @@ def open_sealed_dek(priv, link_pub: bytes, link_uuid: bytes, file_uuid: bytes, s
 
 # =========================================================== paths & guards (Task 15)
 
-SECRET_PATTERNS = (".env*", "*.pem", "*.key", "id_rsa*", "id_ed25519*", "*.p12", ".netrc", "credentials*")
+SECRET_PATTERNS = (".env*", "*.env", "*.pem", "*.key", "id_rsa*", "id_ed25519*", "id_ecdsa*", "id_dsa*", "*.p12", "*.pfx",
+                   "*.jks", "*.kdbx", ".netrc", ".npmrc", ".pgpass", "credentials*")
 MAX_UPLOAD = 209_715_200
 _NAME_BAD_RE = re.compile(r"[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")   # C0, C1, bidi controls
 
@@ -793,7 +794,7 @@ def is_secret_path(path: Path, repo_root: Path) -> bool:
 
 # =========================================================== config (Task 13)
 
-VERSION = "2.1.0"   # semver; bump on every skill change — the server's /skill/manifest.json reads it
+VERSION = "2.1.1"   # semver; bump on every skill change — the server's /skill/manifest.json reads it
 REPO_CONFIG = Path(".claude") / "skills" / "sharing" / "config.json"
 OLD_CONFIG = "config.json.old"   # the identity --force is replacing; lives beside config.json until the new one is approved
 TICKETS_SKILL_SRC = "tickets-SKILL.md"   # served beside SKILL.md; installed where Claude Code finds skills
@@ -3973,7 +3974,7 @@ _MSG_ID_RE = re.compile(r"msg_[0-9a-f]{32}", re.ASCII)
 def _msg_to(v: str) -> tuple[str, str]:
     m = _MSG_TO_RE.fullmatch(v or "")
     if not m:
-        raise UsageError(f"--to must be device:<id>, project:<name>, space:<id> or human, not {_clean(v)!r}")
+        raise UsageError(f"--to must be device:<id or name>, project:<name>, space:<id> or human, not {_clean(v)!r}")
     if v == "human":
         return "human", ""
     kind, ident = m.group(1), m.group(2)
@@ -4085,7 +4086,7 @@ def _reg_msg(sub, common):
     p = sub.add_parser("msg", parents=[common], help="messages between environments and to the human")
     msub = p.add_subparsers(dest="msg_cmd", required=True, metavar="COMMAND")
     s = msub.add_parser("send", parents=[common], help="send a sealed message")
-    s.add_argument("--to", required=True, metavar="TO", help="device:<id>, project:<name>, space:<id> or human")
+    s.add_argument("--to", required=True, metavar="TO", help="device:<id or name>, project:<name>, space:<id> or human")
     s.add_argument("-m", "--message", required=True, help="the text")
     s.add_argument("--attach", action="append", default=[], metavar="PATH",
                    help=f"attach a repo file as a FILE (repeatable, at most {MSG_MAX_FILES}; the share guards apply)")

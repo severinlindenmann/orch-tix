@@ -9,7 +9,7 @@ the source of truth. TIX is the phone side:
 - The `orch-tix` addon of Mission Control (`addons/orch-tix/`) mirrors the tickets that need you (a question,
   an approval, a verdict) into the workspace's TIX space, sealed. They appear as `TIX-42`.
 - The PWA shows them under **Needs you**.
-- **The phone writes decisions, never tickets.** An answer, an approval, a request for changes or a verdict is
+- **The phone writes decisions, never tickets.** It can also send short requests to your agents. An answer, an approval, a request for changes or a verdict is
   sealed and sent to the desktop.
 - **An approval covers exactly what the phone showed.** The ticket document names what each gate's hash binds
   (`gates.<g>.covers`: the gated sections, a non-empty Summary, and for requirements also size and type). The
@@ -43,7 +43,7 @@ The ticket document the addon mirrors is in `docs/ticket-format-example.md` (`or
 ## Upload links
 
 An upload link (`https://tix.severin.io/u/<token>#<key>`) lets someone without an account send
-**one** file (or a folder, zipped) into your share: `sharing upload-link create --label '…'`
+**one** file (or a folder, zipped in their browser) into your share: `sharing upload-link create --label '…'`
 prints the URL once. The sender needs no onboarding — `sharing upload-link put '<url>' PATH...`
 encrypts the file to that link's key and sends it, exactly like `open-link` on the receiving side.
 It becomes a normal FILE only once an owned device (or the web UI) adopts it, which `sharing list`,

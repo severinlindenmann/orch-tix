@@ -65,6 +65,14 @@ export const MSG = {
 class LinkGone extends Error {}
 // Exported for tests: failureMessage's mapping is otherwise only reachable through a live fetch/XHR
 // or an actual bad zip path.
+// File names that usually hold secrets (mirrors the CLI's `sharing share` guard); a folder pick can carry one
+// unnoticed, so the page warns before sending. A path counts when any of its parts matches.
+const SECRET_PART = [/^\.env/, /\.env$/, /\.(pem|key|p12|pfx|jks|kdbx)$/, /^id_(rsa|ed25519|ecdsa|dsa)/,
+  /^\.(netrc|npmrc|pgpass)$/, /^credentials/];
+export function secretPaths(paths) {
+  return paths.filter((p) => String(p).split("/").some((part) => SECRET_PART.some((re) => re.test(part.toLowerCase()))));
+}
+
 export class HttpError extends Error {
   constructor(status) {
     super(`HTTP ${status}`);
@@ -229,6 +237,8 @@ function renderForm(token, linkPub, pub, body) {
   const progress = el("progress", { class: "drop-progress", max: "100", value: "0", id: "drop-progress" });
   progress.hidden = true;
   const status = el("p", { class: "preview-msg", role: "status", id: "drop-status" });
+  const secretWarn = el("p", { class: "preview-msg", role: "status", id: "drop-secret-warn" });
+  secretWarn.hidden = true;
 
   send.disabled = true;
 
@@ -241,6 +251,12 @@ function renderForm(token, linkPub, pub, body) {
             el("span", { class: "upload-size" }, humanSize(it.file.size)))))));
     pick.classList.toggle("has-files", selected.length > 0);
     pick.querySelector(".upload-pick-text").textContent = selected.length ? "Choose other files" : "Choose files or drag them here";
+
+    const secrets = secretPaths(selected.map((it) => it.path));
+    secretWarn.hidden = secrets.length === 0;
+    secretWarn.textContent = secrets.length
+      ? `Careful: ${secrets.slice(0, 3).join(", ")}${secrets.length > 3 ? ` and ${secrets.length - 3} more` : ""} may contain passwords or keys. Remove ${secrets.length > 1 ? "them" : "it"} unless you mean to send ${secrets.length > 1 ? "them" : "it"}.`
+      : "";
 
     const plan = planUpload(selected.map((it) => ({ path: it.path, size: it.file.size })));
     if (plan.kind === "empty") {
@@ -307,6 +323,7 @@ function renderForm(token, linkPub, pub, body) {
     el("div", { class: "upload-pick-row" }, pick, pickFolder),
     list,
     hint,
+    secretWarn,
     el("label", { class: "field" },
       el("span", { class: "label" }, "Note ", el("span", { class: "label-opt" }, "optional")), note),
     send,

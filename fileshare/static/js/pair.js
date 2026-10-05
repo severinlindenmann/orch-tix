@@ -70,7 +70,7 @@ export async function confirmPairing(container, parsed, { onDone } = {}) {
     no.addEventListener("click", () => {
       parsed.rawKey.fill(0);
       container.replaceChildren(el("p", { class: "pair-status", role: "status" }, "Not paired. Nothing was stored."),
-        el("p", { class: "hint" }, "Start again on the desktop: Mission Control → Workspace & addons."));
+        el("p", { class: "hint" }, "Start again on the desktop: Mission Control → Workspace & addons → Phones → Pair a phone."));
       finish(false);
     });
     container.replaceChildren(
@@ -102,7 +102,7 @@ function notInApp(main, link) {
 
 function badLink(main) {
   main.replaceChildren(el("h1", { class: "pair-title" }, "This pairing link doesn't work"),
-    el("p", { class: "muted" }, "Copy it again from the desktop: Mission Control → Workspace & addons."),
+    el("p", { class: "muted" }, "Copy it again from the desktop: Mission Control → Workspace & addons → Phones → Pair a phone → Copy pairing link."),
     el("a", { class: "btn btn-big", href: "/settings#pair" }, "Open Settings"));
 }
 

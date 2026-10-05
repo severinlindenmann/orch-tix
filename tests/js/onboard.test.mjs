@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildCode, buildCommands, CODE_RE, defaultOs, nextState } from "../../fileshare/static/js/onboard-cmd.js";
+import { buildCode, buildCommands, deviceSlug, CODE_RE, defaultOs, nextState } from "../../fileshare/static/js/onboard-cmd.js";
 
 test("buildCode is shr1.<22-char lookup> and matches the installer's regex", () => {
   assert.equal(buildCode(new Uint8Array(16)), "shr1." + "A".repeat(22));
@@ -56,4 +56,14 @@ test("nextState: terminal phases are sticky", () => {
     assert.equal(nextState(s, { used_at: "x", device: dev("pending") }, T0), s);
     assert.equal(nextState(s, null, T0), s);
   }
+});
+
+test("buildCommands appends --device / -Device when a name is given, slugged like the installer", () => {
+  const c = buildCommands("https://tix.severin.io", "shr1.L", "My Repo!");
+  assert.ok(c.posix.endsWith("bash -s -- 'shr1.L' --device 'my-repo'"));
+  assert.ok(c.posixInspect.endsWith("bash onboarding.sh 'shr1.L' --device 'my-repo'"));
+  assert.ok(c.windows.endsWith("'shr1.L' -Device 'my-repo'"));
+  assert.ok(c.windowsInspect.endsWith(".\\onboarding.ps1 'shr1.L' -Device 'my-repo'"));
+  assert.equal(buildCommands("https://x", "shr1.L", "  ").posix, buildCommands("https://x", "shr1.L").posix);
+  assert.equal(deviceSlug("'; rm -rf /"), "rm--rf");
 });

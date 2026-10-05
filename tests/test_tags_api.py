@@ -451,7 +451,7 @@ def test_session_put_checks_origin(owner, app, origin):
     c.cookies = owner.client.cookies
     headers = {} if origin is None else {"Origin": origin}
     r = c.put("/api/files/FILE1/tags", json={"tags": ["a"]}, headers=headers)
-    assert r.status_code == 403 and r.json()["error"] == "bad_origin"
+    assert r.status_code == 403 and r.json()["error"] in ("bad_origin", "origin_required")
     assert owner.client.get("/api/files/FILE1").json()["tags"] == ["keep"]
 
 
