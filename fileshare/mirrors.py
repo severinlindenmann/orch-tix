@@ -363,8 +363,9 @@ class NeedsPushGate:
 
     MAX_TRACKED = 10_000
 
-    def __init__(self, every_s: int = NEEDS_PUSH_EVERY_S):
+    def __init__(self, every_s: int = NEEDS_PUSH_EVERY_S, store=None):
         self.every_s = every_s
+        self.store = store          # heldpush.HeldStore: what is held also lives in the database (QA N-08)
         self._last: dict[str, float] = {}
         self._held: dict[str, list[str]] = {}
         # (space, ticket) pairs the phone was told about / was NOT told about yet (held in a window): a clear for a
@@ -391,14 +392,18 @@ class NeedsPushGate:
                 self._held[space].remove(ticket)
             was_unshown = key in self._unshown
             self._unshown.discard(key)
-            return not (held and was_unshown)
+        if held and self.store is not None:
+            self.store.remove("needs", f"{space}|{ticket}")
+        return not (held and was_unshown)
 
     def due(self, space: str, ticket: str, flush) -> bool:
         """True: push this transition now. False: it is held; `flush(space, tickets)` runs when the window ends."""
         now = clock.now().timestamp()
+        holding = False
         with self._lock:
             last = self._last.get(space)
             if last is not None and now - last < self.every_s:
+                holding = True
                 held = self._held.get(space)
                 if held is None:
                     held = self._held[space] = []
@@ -410,28 +415,40 @@ class NeedsPushGate:
                     if len(self._unshown) >= self.MAX_TRACKED:
                         self._unshown.clear()
                     self._unshown.add((space, ticket))
-                return False
-            if len(self._last) >= self.MAX_TRACKED:
-                self._last = {k: v for k, v in self._last.items() if now - v < self.every_s}
-            self._last[space] = now
-            return True
+            else:
+                if len(self._last) >= self.MAX_TRACKED:
+                    self._last = {k: v for k, v in self._last.items() if now - v < self.every_s}
+                self._last[space] = now
+        if holding and self.store is not None:
+            self.store.put("needs", f"{space}|{ticket}", space=space, ticket=ticket)
+        return not holding
+
+    def opened(self, space: str) -> None:
+        """A push for `space` just went out (a summary sent after a restart): it opens the next window."""
+        with self._lock:
+            self._last[space] = clock.now().timestamp()
 
     def drop(self, space: str, ticket: str) -> None:
         with self._lock:
-            if ticket in self._held.get(space, []):
+            held = ticket in self._held.get(space, [])
+            if held:
                 self._held[space].remove(ticket)
+        if held and self.store is not None:
+            self.store.remove("needs", f"{space}|{ticket}")
 
     def _trail(self, space: str, flush) -> None:
         with self._lock:
             held = self._held.pop(space, None)
             if held:
                 self._last[space] = clock.now().timestamp()     # the summary opens the next window
-        if not held:
-            return
         try:
-            flush(space, held)
+            if held:
+                flush(space, held)
         except Exception as e:      # a push never fails anything
             log.warning("push: summary failed: %s", e)
+        finally:
+            if self.store is not None:
+                self.store.remove_space("needs", space)
 
 
 def _flush_held(app, space: str, held: list[str]) -> None:
@@ -462,6 +479,27 @@ def _flush_held(app, space: str, held: list[str]) -> None:
                           "cs": space_needs_total(c, space), "ts": [t for t, _, _ in live][-BATCH_TICKETS_MAX:]})
     finally:
         c.close()
+
+
+def recover_held(app) -> int:
+    """After a restart: send what the previous process held inside a workspace's window (QA N-08), as the summary it
+    would have sent, one per workspace. Returns how many tickets were found."""
+    store = getattr(app.state, "held_store", None)
+    if store is None:
+        return 0
+    rows = store.take("needs")
+    by_space: dict[str, list[str]] = {}
+    for r in rows:
+        by_space.setdefault(r["space_id"], []).append(r["ticket"])
+    gate = getattr(app.state, "needs_push_gate", None)
+    for space, tickets in by_space.items():
+        try:
+            _flush_held(app, space, tickets)
+            if gate is not None:
+                gate.opened(space)
+        except Exception as e:      # a push never fails anything
+            log.warning("push: recovering held pushes failed: %s", e)
+    return len(rows)
 
 
 def after_needs_change(conn, app, *, space, ticket, before, after, open_questions) -> None:

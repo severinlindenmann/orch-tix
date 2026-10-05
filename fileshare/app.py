@@ -16,6 +16,7 @@ from fileshare.blobs import BlobStore
 from fileshare.db import backfill_device_fingerprints, connect, migrate
 from fileshare.expiry import expire_files, expire_upload_links, sweep_forever
 from fileshare.headers import SecurityHeadersMiddleware
+from fileshare.heldpush import HeldStore
 from fileshare.push import SubprocessPusher
 from fileshare.routes import auth as auth_routes
 from fileshare.routes import decisions as decisions_routes
@@ -71,6 +72,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI):
+        # what the previous process still held inside a push window goes out now (QA N-08)
+        await asyncio.to_thread(mirrors_mod.recover_held, app)
+        await asyncio.to_thread(messages_mod.recover_held, app)
         # the hourly expiry sweep: one task, cancelled on shutdown
         task = asyncio.create_task(sweep_forever(settings.db_path, blobs, app.state.ticket_bus))
         try:
@@ -92,7 +96,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.decision_limiter = WindowLimiter(decisions_routes.DECISIONS_PER_HOUR, 3600)  # per session (TIX §4.2)
     app.state.message_limiter = WindowLimiter(messages_mod.MESSAGES_PER_HOUR, 3600)       # per sender
     app.state.message_push_gate = messages_mod.PushGate(messages_mod.HUMAN_PUSH_EVERY_S)  # per sending device
-    app.state.needs_push_gate = mirrors_mod.NeedsPushGate(mirrors_mod.NEEDS_PUSH_EVERY_S)  # per workspace (round B)
+    app.state.held_store = HeldStore(settings.db_path)           # pushes held in a window survive a restart (QA N-08)
+    app.state.needs_push_gate = mirrors_mod.NeedsPushGate(mirrors_mod.NEEDS_PUSH_EVERY_S,
+                                                          app.state.held_store)  # per workspace (round B)
     app.state.ticket_bus = Bus(last_seq)                        # long-poll wakeups (spec T6)
     app.state.inbox_bus = Bus(last_decision)                    # decision long-poll wakeups (TIX spec §9)
     app.state.message_bus = Bus(last_message)                   # message long-poll wakeups (TIX spec §8)
