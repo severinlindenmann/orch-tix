@@ -9,7 +9,7 @@ the source of truth. TIX is the phone side:
 - The `orch-tix` addon of Mission Control (`addons/orch-tix/`) mirrors the tickets that need you (a question,
   an approval, a verdict) into the workspace's TIX space, sealed. They appear as `TIX-42`.
 - The PWA shows them under **Needs you**.
-- **The phone writes decisions (and short requests to your agents), never tickets.** An answer, an approval, a request for changes or a verdict is
+- **The phone writes decisions, never tickets.** It can also send short requests to your agents. An answer, an approval, a request for changes or a verdict is
   sealed and sent to the desktop.
 - **An approval covers exactly what the phone showed.** The ticket document names what each gate's hash binds
   (`gates.<g>.covers`: the gated sections, a non-empty Summary, and for requirements also size and type). The
