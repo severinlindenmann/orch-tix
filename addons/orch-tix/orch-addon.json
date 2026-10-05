@@ -1,8 +1,8 @@
 {
-  "name": "orch-tix", "title": "TIX", "version": "0.3.0", "requires_api": "2", "kind": "in-process",
+  "name": "orch-tix", "title": "TIX", "version": "0.2.0", "requires_api": "2", "kind": "in-process",
   "description": "Mirror tickets that need you to the TIX phone app, bring phone decisions back, and share files.",
   "capabilities": ["provider", "page", "panel", "decisions", "settings", "events"],
-  "slots": ["today.summary", "today.from_addons", "ticket.sync", "workspace.settings", "guide.section"],
+  "slots": ["today.summary", "today.from_addons", "ticket.sync", "workspace.settings"],
   "binaries": ["setting:sharing_path"],
   "remote_humans": true,
   "menu": {"title": "Shared files", "icon": "share"},

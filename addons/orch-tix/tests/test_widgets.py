@@ -127,9 +127,15 @@ def test_ticket_panel_offers_no_send_at_key_only(tix_ws, tix, tmp_path):
     assert not [w for w in _walk(ws) if isinstance(w, Action) and w.action == "send_artifact"]
 
 
+def _core_knows_guide_section():
+    from orch.addons.manifest import SLOT_NAMES
+    return "guide.section" in SLOT_NAMES
+
+
 def test_guide_section_is_a_plain_card_that_core_accepts(tix_ws, tix):
     ws = tix.obj.widgets("guide.section", _view(tix_ws, tix, "guide.section"))
-    _check(tix, "guide.section", ws)
+    if _core_knows_guide_section():  # an older orch-core has no such slot to check against
+        _check(tix, "guide.section", ws)
     (card,) = ws
     assert isinstance(card, Card) and card.title == "Answer a blocked agent from your phone"
     text = " ".join(w.text for w in card.body if isinstance(w, Text))
@@ -138,6 +144,9 @@ def test_guide_section_is_a_plain_card_that_core_accepts(tix_ws, tix):
     assert not any(isinstance(w, (Table, Action)) for w in _walk(ws))  # an explanation, not a status page
 
 
-def test_guide_section_is_declared_and_other_slots_are_unchanged(tix_ws, tix):
-    assert "guide.section" in tix.manifest.slots
+def test_manifest_declares_no_slot_the_installed_core_does_not_know(tix_ws, tix):
+    """An orch-core rejects the whole manifest for one unknown slot, so the addon must not declare guide.section
+    before the orch-core that adds it is released (see the CHANGELOG, Unreleased)."""
+    from orch.addons.manifest import SLOT_NAMES
+    assert set(tix.manifest.slots) <= SLOT_NAMES
     assert tix.obj.widgets("no.such.slot", _view(tix_ws, tix, "today.summary")) == []

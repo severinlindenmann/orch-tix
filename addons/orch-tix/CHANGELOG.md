@@ -1,8 +1,8 @@
 # Changelog
 
-## 0.3.0
+## Unreleased
 
-- A TIX section on orch-core's How it works page (`guide.section`, needs the orch-core release that adds that slot; an older orch-core rejects the manifest, so this version needs it): answering a blocked agent from your phone, end-to-end encryption, pairing and signed decisions in the same ledger, and notifications that clear when you decided on the desktop. It shows only while the addon is enabled and replaces core's generic phone paragraph.
+- The code for a TIX section on orch-core's How it works page (`guide.section`) is in, but the manifest does not declare the slot yet: orch-core validates a manifest strictly and an orch-core without that slot rejects the whole addon, so declaring it now would break everyone who updates the addon before orch-core. To switch it on, once the orch-core release that adds `guide.section` is out: add `"guide.section"` to `slots` in `orch-addon.json` and bump the version to 0.3.0. Until then the section never shows and nothing changes.
 
 ## 0.2.0
 
