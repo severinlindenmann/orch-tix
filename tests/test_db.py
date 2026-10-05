@@ -414,3 +414,27 @@ def test_migration_numbers_are_unique():
     nums = _numbers()
     assert len(nums) == len(set(nums)), f"duplicate migration numbers: {nums}"
     assert nums[0] == 1
+
+
+def test_a_database_at_the_previous_version_gets_only_the_newer_migrations(tmp_path):
+    """The real upgrade: production sits at version N-1, the newest file must apply exactly once."""
+    import shutil
+    older = tmp_path / "older"
+    older.mkdir()
+    for p in db_mod.MIGRATIONS_DIR.glob("[0-9][0-9][0-9]_*.sql"):
+        if int(p.name[:3]) < LATEST:
+            shutil.copy(p, older / p.name)
+    real = db_mod.MIGRATIONS_DIR
+    try:
+        db_mod.MIGRATIONS_DIR = older
+        conn = connect(tmp_path / "x.db")
+        before = migrate(conn)
+        assert before == _numbers_in(older)[-1] and before < LATEST
+    finally:
+        db_mod.MIGRATIONS_DIR = real
+    assert migrate(conn) == LATEST
+    assert get_meta(conn, "schema_version") == str(LATEST)
+
+
+def _numbers_in(folder):
+    return sorted(int(p.name[:3]) for p in folder.glob("[0-9][0-9][0-9]_*.sql"))

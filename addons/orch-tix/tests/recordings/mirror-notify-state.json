@@ -1,0 +1,2 @@
+{"argv": ["/opt/sharing/sharing", "mirror", "notify-state", "--json"], "returncode": 0,
+ "stdout_json": {"messages": false, "mirrors": []}}

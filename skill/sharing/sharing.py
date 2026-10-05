@@ -794,7 +794,7 @@ def is_secret_path(path: Path, repo_root: Path) -> bool:
 
 # =========================================================== config (Task 13)
 
-VERSION = "2.2.1"   # semver; bump on every skill change — the server's /skill/manifest.json reads it
+VERSION = "2.3.0"   # semver; bump on every skill change — the server's /skill/manifest.json reads it
 REPO_CONFIG = Path(".claude") / "skills" / "sharing" / "config.json"
 OLD_CONFIG = "config.json.old"   # the identity --force is replacing; lives beside config.json until the new one is approved
 TICKETS_SKILL_SRC = "tickets-SKILL.md"   # served beside SKILL.md; installed where Claude Code finds skills
@@ -3635,7 +3635,8 @@ def cmd_space_show(args) -> int:
     label = local.get("label") if isinstance(local.get("label"), str) else ""
     owner = row.get("owner_device") == cfg.device_id
     d = {"space_id": local["space_id"], "label": _strip_unsafe(label), "owner": owner,
-         "last_seen_at": row.get("last_seen_at"), "server": cfg.server_url}
+         "last_seen_at": row.get("last_seen_at"), "server": cfg.server_url,
+         "notify_messages": row.get("notify_messages") is True}
     who = "this device owns it" if owner else f"owned by {_clean(row.get('owner_name') or '?')}"
     _out(args, d, f"space {local['space_id']} ({_clean(label)}): {who}")
     return 0
@@ -3719,6 +3720,10 @@ def _mirror_body(raw: str) -> dict:
         raise UsageError("mirror file: key must be non-empty, gen and rev at least 1")
     if body.get("needs") is not None and not isinstance(body["needs"], str):
         raise UsageError("mirror file: needs must be null or a string")
+    if body.get("notify") is not None and not isinstance(body["notify"], bool):
+        raise UsageError("mirror file: notify must be true or false")
+    if body.get("notify_seen") is not None and (type(body["notify_seen"]) is not int or body["notify_seen"] < 0):
+        raise UsageError("mirror file: notify_seen must be a whole number")
     if body.get("decided_via") not in (None, "phone"):
         raise UsageError("mirror file: decided_via must be absent or \"phone\"")
     return body
@@ -3769,6 +3774,8 @@ def cmd_mirror_push(args) -> int:
         req = {"space": space, "mirror_rev": rev, "schema_version": body["schema_version"],
                "status": body["status"], "priority": body["priority"], "needs": body.get("needs"),
                "open_questions": body["open_questions"], "event_uuid": mirror_event_uuid(space, key, gen, rev)}
+        if body.get("notify") is not None:       # cleartext: may this ticket notify the phone (the server default is off)
+            req["notify"], req["notify_seen"] = body["notify"], body.get("notify_seen") or 0
         if body.get("decided_via"):      # Mission Control applied a phone answer: the "handled" push says so (QA #55)
             req["decided_via"] = body["decided_via"]
         if existing is not None:         # reuse the stored DEK and key version (else 409 dek_mismatch)
@@ -3792,10 +3799,32 @@ def cmd_mirror_push(args) -> int:
                 raise
             status, tix = ("stale" if e.code == "stale_rev" else "duplicate"), (existing or {}).get("id")
         _out(args, {"status": status, "id": tix, "uuid": uuid, "server_rev": (existing or {}).get("mirror_rev"),
-                    "gen": gen, "rev": rev},
+                    "gen": gen, "rev": rev, **({"notify": r["notify"], "notify_rev": r["notify_rev"]}
+                                               if status == "pushed" and "notify" in r else {})},
              f"{_clean(key)}: {status}" + (f" as {tix}" if tix else ""))
         return 0
     raise Refused(f"{_clean(key)} was unlinked more than {MAX_LINK_GEN_BUMPS} times; refusing to go on")
+
+
+def cmd_mirror_notify_state(args) -> int:
+    """Per mirror of this space: its TIX id, whether the phone may be notified, and how many times the phone changed
+    that (no sealed data). The orch-tix addon merges the phone's changes from this."""
+    cfg = load_config(Path.cwd())
+    space = _load_space(cfg)["space_id"]
+    r = Api(cfg.server_url, cfg.device_token).get_json(f"/api/spaces/{space}/notify")
+    _out(args, {"messages": r.get("messages") is True, "mirrors": r.get("mirrors", [])},
+         "\n".join(f"{m.get('id')}: {'on' if m.get('notify') else 'off'}" for m in r.get("mirrors", [])) or "no mirrors")
+    return 0
+
+
+def cmd_space_notify(args) -> int:
+    """Phone notifications for agent messages that name no ticket (this space's owner only; default off)."""
+    cfg = load_config(Path.cwd())
+    space = _load_space(cfg)["space_id"]
+    on = args.messages == "on"
+    r = Api(cfg.server_url, cfg.device_token).send("PUT", f"/api/spaces/{space}/notify", {"messages": on})
+    _out(args, {"messages": r.get("notify_messages") is True}, f"messages without a ticket: {args.messages}")
+    return 0
 
 
 def cmd_mirror_unlink(args) -> int:
@@ -3994,6 +4023,9 @@ def _reg_space(sub, common):
     j.add_argument("space_id", metavar="SPACE_ID")
     j.add_argument("--label", help="the local name (default: the space's own)")
     j.set_defaults(func=cmd_space_join)
+    n = ssub.add_parser("notify", parents=[common], help="phone notifications for messages that name no ticket (owner; default off)")
+    n.add_argument("--messages", required=True, choices=("on", "off"))
+    n.set_defaults(func=cmd_space_notify)
 
 
 @command
@@ -4012,7 +4044,8 @@ def _reg_mirror(sub, common):
     msub = p.add_subparsers(dest="mirror_cmd", required=True, metavar="COMMAND")
     pu = msub.add_parser("push", parents=[common], help="seal and upload one ticket snapshot")
     pu.add_argument("--file", required=True, metavar="PATH",
-                    help="JSON {key, gen, rev, status, priority, needs, open_questions, schema_version, doc}")
+                    help="JSON {key, gen, rev, status, priority, needs, open_questions, schema_version, doc, "
+                         "notify?, notify_seen?} (a human's choice, written by the orch-tix addon; agents do not set notify)")
     pu.add_argument("--relink", action="store_true",
                     help="if the ticket was unlinked, link it again under the next generation (a new TIX id)")
     pu.set_defaults(func=cmd_mirror_push)
@@ -4022,6 +4055,8 @@ def _reg_mirror(sub, common):
     un.set_defaults(func=cmd_mirror_unlink)
     st = msub.add_parser("status", parents=[common], help="list this space's mirrors")
     st.set_defaults(func=cmd_mirror_status)
+    ns = msub.add_parser("notify-state", parents=[common], help="per mirror: may it notify the phone (used by the orch-tix addon)")
+    ns.set_defaults(func=cmd_mirror_notify_state)
 
 
 @command

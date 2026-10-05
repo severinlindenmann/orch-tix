@@ -149,6 +149,7 @@ These commands are run by the orch-tix addon of orch-core, not by you, unless th
 | Send a message | `sharing msg send --to project:ingest -m "nightly run finished" --json` returns `{"id": "msg_…", "files": []}`. `--to` is `device:<id>`, `project:<name>`, `space:<id>` or `human`. |
 | With files | add `--attach path/to/log.txt` (repeatable, at most 10). Same guards as `share`: never a secret, never outside this repo. Each becomes a FILE (7 days, tag `message`). |
 | About a ticket / a question | `--ticket TIX-42` (a mirror of this workspace's space), `--kind question` |
+| Phone notifications | A message to `human` appears in the TIX app either way, but only buzzes the owner's phone when its ticket has "Phone notifications" on (`--ticket`), or, with no ticket, when the workspace's "messages without a ticket" setting is on (`sharing space show --json` reads it as `notify_messages`). Both are off by default and the owner's choice: you cannot turn them on, so do not try to work around them (do not put `notify` in a `mirror push` file). |
 | Read messages | `sharing msg list --json` (`--all` for every page), `sharing msg wait --after N --timeout 30 --json` returns `{"messages": [{"id", "seq", "from", "to", "kind", "text", "files", "ticket", "created_at", "error"}], "cursor"}` |
 | Mark one read on this device | `sharing msg ack msg_… --json` (other devices of a project still see it until they ack it) |
 

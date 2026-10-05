@@ -13,7 +13,7 @@ from pathlib import Path
 
 from . import history
 from .cli import SharingError
-from . import ticket_widgets
+from . import notify, ticket_widgets
 from .state import GONE_REASON
 from .mapping import needs_of, payload
 
@@ -202,7 +202,8 @@ def push(addon, ctx, key: str, doc: dict, *, pinned: bool = True) -> str:
     widgets = _widgets(addon, ctx, key) if level == "full" else None
     body = payload(doc, key=key, gen=int(link.get("gen") or 1), rev=rev, level=level,
                    sync_log=bool(settings.get("sync_log")), context_artifacts=link.get("context_artifacts") or [],
-                   widgets=widgets, history=st.history(key))
+                   widgets=widgets, history=st.history(key), notify=notify.wanted(ctx, key),
+                   notify_seen=int(link.get("notify_seen") or 0))
     body = ticket_widgets.fit(addon, key, body)
     decided = phone_decision(addon, key, body)
     if decided:
@@ -232,6 +233,8 @@ def push(addon, ctx, key: str, doc: dict, *, pinned: bool = True) -> str:
             "reason": "" if result == "ok" else {"stale": "the server holds a newer copy",
                                                   "gone": GONE_REASON}.get(status, status)})
     gen = r.get("gen") if isinstance(r.get("gen"), int) else None
+    if status == "pushed":
+        notify.after_push(addon, ctx, key, r)       # a phone change the server kept is adopted here
     if status == "gone":
         st.retire(key, gen)
         return status

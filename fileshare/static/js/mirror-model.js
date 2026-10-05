@@ -504,3 +504,24 @@ export function isRollback(seen, doc) {
   if (![g0, r0, g1, r1].every(Number.isInteger)) return false;
   return g1 < g0 || (g1 === g0 && r1 < r0);
 }
+
+// Per-ticket phone notifications (default off). The switch is cleartext routing state the server enforces: a push for
+// this ticket goes out only while it is on. The phone sets it (PUT, browser session only); the desktop merges it.
+export const NOTIFY_LABEL = "Notify me about this ticket";
+export const NOTIFY_HELP = {
+  on: "This phone buzzes when the ticket needs you or an agent writes about it.",
+  off: "Off: the ticket still shows in Needs you, only the push notifications stay quiet.",
+};
+export const NOTIFY_FAILED = "Couldn't change it. Try again.";
+
+export function notifyOn(row) {
+  return Boolean(row) && row.notify === true;
+}
+
+export function notifyHelp(on) {
+  return on ? NOTIFY_HELP.on : NOTIFY_HELP.off;
+}
+
+export function notifyPath(n) {
+  return `/api/mirrors/TIX-${Number(n)}/notify`;
+}

@@ -46,7 +46,8 @@ def space_out(conn, row) -> dict:
                          " AND needs IS NOT NULL", (row["id"],)).fetchone()[0]
     return {"id": row["id"], "key_version": row["key_version"], "enc_label": row["enc_label"],
             "owner_device": row["owner_device"], "owner_name": owner["name"] if owner else "",
-            "last_seen_at": row["last_seen_at"], "needs": needs, "created_at": row["created_at"]}
+            "last_seen_at": row["last_seen_at"], "needs": needs, "created_at": row["created_at"],
+            "notify_messages": bool(row["notify_messages"])}
 
 
 def create_space(conn, app, *, device, space_id: str, key_version: int, enc_label: str) -> dict:
@@ -168,7 +169,8 @@ def mirror_out(row) -> dict:
             "status": row["status"], "priority": row["priority"], "needs": row["needs"],
             "open_questions": row["open_questions"], "schema_version": row["schema_version"],
             "mirror_rev": row["mirror_rev"], "key_version": row["key_version"], "wrapped_dek": row["wrapped_dek"],
-            "enc_content": row["enc_content"], "updated_at": row["updated_at"], "created_at": row["created_at"]}
+            "enc_content": row["enc_content"], "updated_at": row["updated_at"], "created_at": row["created_at"],
+            "notify": bool(row["notify"]), "notify_rev": row["notify_phone_rev"]}
 
 
 def writer_of(conn, row) -> dict:
@@ -260,10 +262,10 @@ def _upsert_in_tx(conn, device, space_id: str, uuid: str, body: dict, now: str, 
         cur = conn.execute(
             "INSERT INTO tickets (uuid, key_version, wrapped_dek, enc_content, status, project, priority,"
             " created_by_device, created_by_name, open_questions, created_at, updated_at, mode, space_id,"
-            " schema_version, mirror_rev, needs) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'mirror', ?, ?, ?, ?)",
+            " schema_version, mirror_rev, needs, notify) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'mirror', ?, ?, ?, ?, ?)",
             (uuid, body["key_version"], body["wrapped_dek"], body["enc_content"], body["status"], device["project"],
              body["priority"], device["id"], device["name"], body["open_questions"], now, now, space_id,
-             body["schema_version"], body["mirror_rev"], body["needs"]))
+             body["schema_version"], body["mirror_rev"], body["needs"], 1 if body.get("notify") is True else 0))
         n, before, created = cur.lastrowid, None, True
     else:
         if body["key_version"] != row["key_version"] or (body.get("wrapped_dek") is not None
@@ -280,9 +282,62 @@ def _upsert_in_tx(conn, device, space_id: str, uuid: str, body: dict, now: str, 
                      (body["enc_content"], body["status"], body["priority"], body["needs"], body["open_questions"],
                       body["schema_version"], body["mirror_rev"], now, row["n"]))
         n, before, created = row["n"], row["needs"], False
+        _merge_notify(conn, row, body)
     ev = _write_event(conn, n, uuid=ev_uuid, kind="mirror", actor=actor, status_from=None,
                       status_to=None, enc_body=None, now=now)
     return n, before, created, ev
+
+
+def _merge_notify(conn, row, body: dict) -> None:
+    """The desktop's switch, unless the phone changed it after the desktop last saw it: the desktop reports the phone
+    changes it has merged (`notify_seen`); a push built before that keeps the phone's choice (it adopts it on its next
+    look). A push without `notify` (an older addon) leaves the switch alone."""
+    want = body.get("notify")
+    if want is None or int(body.get("notify_seen") or 0) < row["notify_phone_rev"]:
+        return
+    if int(want) != row["notify"]:
+        conn.execute("UPDATE tickets SET notify = ? WHERE n = ?", (int(want), row["n"]))
+
+
+def set_notify(conn, app, *, ref_n: int, on: bool, actor_name: str) -> dict:
+    """The phone (a browser session) turns notifications for one mirrored ticket on or off. Counts as a phone change
+    (notify_phone_rev) until the desktop has merged it. Turning it off withdraws a notification already shown."""
+    now = clock.now_iso()
+    with _tx(conn):
+        row = conn.execute("SELECT * FROM tickets WHERE n = ? AND mode = 'mirror' AND deleted_at IS NULL",
+                           (ref_n,)).fetchone()
+        if row is None:
+            raise api_error(404, "not_found", f"no mirror {format_ticket_id(ref_n)}")
+        if int(on) != row["notify"]:
+            conn.execute("UPDATE tickets SET notify = ?, notify_phone_rev = notify_phone_rev + 1, updated_at = ?"
+                         " WHERE n = ?", (int(on), now, ref_n))
+            ev = _write_event(conn, ref_n, uuid=secrets.token_hex(16), kind="notify", actor=Actor("web", None, actor_name),
+                              status_from=None, status_to=None, enc_body=None, now=now)
+        else:
+            ev = None
+        out = mirror_out(conn.execute("SELECT * FROM tickets WHERE n = ?", (ref_n,)).fetchone())
+    if ev is not None:
+        app.state.ticket_bus.bump(ev["seq"])
+        if not on and row["needs"] is not None:       # the notification already on the phone goes away
+            push_v2(app, {"v": 2, "s": row["space_id"], "t": format_ticket_id(ref_n), "k": "clear", "n": 0,
+                          "c": attention_total(conn), "cs": space_needs_total(conn, row["space_id"])})
+    return out
+
+
+def set_space_notify(conn, *, device, space_id: str, messages: bool) -> dict:
+    """The owner device sets "phone notifications for messages without a ticket" (default off)."""
+    with _tx(conn):
+        owner_space(conn, space_id, device)
+        conn.execute("UPDATE spaces SET notify_messages = ? WHERE id = ?", (int(messages), space_id))
+    return space_out(conn, space_row(conn, space_id))
+
+
+def notify_state(conn, space_id: str) -> list[dict]:
+    """Cheap listing for the desktop: per live mirror its TIX id, switch and phone-change counter (no sealed data)."""
+    return [{"id": format_ticket_id(r["n"]), "uuid": r["uuid"], "notify": bool(r["notify"]),
+             "notify_rev": r["notify_phone_rev"]}
+            for r in conn.execute("SELECT n, uuid, notify, notify_phone_rev FROM tickets WHERE mode = 'mirror'"
+                                  " AND space_id = ? AND deleted_at IS NULL", (space_id,)).fetchall()]
 
 
 def unlink_mirror(conn, app, *, device, space_id: str, uuid: str) -> tuple[int, str | None]:
@@ -468,7 +523,7 @@ def _flush_held(app, space: str, held: list[str]) -> None:
         for t in held:
             n = int(t.removeprefix("TIX-"))
             row = c.execute("SELECT needs, open_questions FROM tickets WHERE n = ? AND space_id = ? AND mode = 'mirror'"
-                            " AND deleted_at IS NULL AND needs IS NOT NULL", (n, space)).fetchone()
+                            " AND deleted_at IS NULL AND needs IS NOT NULL AND notify = 1", (n, space)).fetchone()
             if row is not None:
                 live.append((t, row["needs"], row["open_questions"]))
         if not live:
@@ -536,6 +591,9 @@ def after_needs_change(conn, app, *, space, ticket, before, after, open_question
     are coalesced per workspace (NeedsPushGate); a clear goes out at once."""
     if before == after:
         return
+    from fileshare.notify import mirror_notifies
+    if not mirror_notifies(conn, space, ticket):
+        return          # phone notifications are per ticket and off by default; turning one off already withdrew its push
     gate = getattr(app.state, "needs_push_gate", None)
     if after is None:
         if gate is not None and not gate.clear_wanted(space, ticket):
