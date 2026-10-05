@@ -135,6 +135,16 @@ What TIX protects, what it does not, and exactly which fields the server can rea
   navigate its own frame to an arbitrary URL (there's no `allow-top-navigation`, so it can't escape
   the frame, but a `location` change is itself a request). Either way it can only leak the
   attachment's own content, never tix's.
+- **The remote dashboard frame runs in an isolated sandbox** (`/sandbox/dash`, [bridge-frame.md](bridge-frame.md)):
+  an opaque origin with no network at all (`connect-src`, `frame-src` and `form-action` are `'none'`, files only as
+  `blob:` and `data:`), scripts only with a per-load nonce, and its only way out a `postMessage` to the TIX page.
+  The page that runs in it is a host's dashboard, so it is untrusted: every message is accepted only from that
+  iframe's window with the opaque origin, a one-time token proven once and a session id, under per-frame size and
+  rate caps; every request is validated against a scope table and goes to the transport, never to the network. A
+  load the app did not start destroys the frame. A compromised TIX site could still act as a paired device (see the
+  bridge threat model); the frame limits what a compromised *host* page can do to the TIX origin, which is nothing.
+  Only a response the host tagged as a dashboard page is written into the frame; artifacts, widgets, addon files and
+  other types go to the viewer or a download. Host-supplied strings are drawn as text.
 
 ## Remote bridge (Orch Remote)
 

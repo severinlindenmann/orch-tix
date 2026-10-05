@@ -200,8 +200,10 @@ def _caddy_header_blocks() -> dict[str, dict[str, str]]:
 def test_caddyfile_frames_only_the_sandbox_same_origin():
     # tix frames /sandbox/html itself; DENY there would blank every HTML preview.
     code = _caddy_code()
-    assert "@sandbox path /sandbox/html" in code
-    assert "@notsandbox not path /sandbox/html" in code
+    from fileshare.headers import FRAME_CSP
+    paths = " ".join(sorted(FRAME_CSP))          # derived: a frame policy added without its Caddy line fails here
+    assert f"@sandbox path {paths}" in [" ".join(c.split()[:2] + sorted(c.split()[2:])) for c in code]
+    assert f"@notsandbox not path {paths}" in [" ".join(c.split()[:3] + sorted(c.split()[3:])) for c in code]
     blocks = _caddy_header_blocks()
     assert set(blocks) == {"@sandbox", "@notsandbox"}, blocks
     assert blocks["@sandbox"]["X-Frame-Options"] == '"SAMEORIGIN"'

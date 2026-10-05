@@ -186,6 +186,15 @@ test("bypassed: non-GET, cross-origin, /api/, /p/, /u/, /skill/, /onboarding* an
   }
 });
 
+test("/sandbox/dash is never handled by the worker: its nonce and token belong to one load", () => {
+  const w = load();
+  for (const opts of [{ mode: "navigate" }, {}]) {
+    const ev = fetchEvent("/sandbox/dash?tok=abcdefghijklmnopqrstuv", opts);
+    w.listeners.fetch(ev);
+    assert.equal(ev.responded, null, "the dashboard frame must reach the network every time");
+  }
+});
+
 test("assets are cache first, ignoring ?v=", async () => {
   const w = load();
   (await w.caches.api.open("shell-abc")).put("/static/js/a.js", res("cached"));

@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import secrets
 from pathlib import Path
 
 from starlette.datastructures import Headers, MutableHeaders
@@ -45,7 +46,21 @@ WIDGET_CSP = (
 )
 
 WIDGET_PATH = "/sandbox/widget"
-FRAME_CSP = {SANDBOX_PATH: SANDBOX_CSP, WIDGET_PATH: WIDGET_CSP}
+
+# The frame a remote dashboard page is drawn in (docs/bridge-frame.md; js/frame-shim.js, js/frame-host.js). Its
+# one script, the shim, is inline and carries this load's nonce; `{nonce}` is replaced per response by
+# SecurityHeadersMiddleware and the route puts the same value on the shim. Scripts of the dashboard page are
+# re-created by the shim with the nonce; nothing else can run (no 'unsafe-inline' for scripts, no 'self'). Styles
+# are inline; images, fonts and media only from blob: and data: (the shim turns the page's files into blobs).
+# Nothing leaves (connect-src, frame-src, form-action 'none'); `sandbox` without allow-same-origin gives an opaque origin.
+DASH_CSP = (
+    "sandbox allow-scripts; default-src 'none'; script-src 'nonce-{nonce}'; style-src 'unsafe-inline'; "
+    "img-src blob: data:; font-src blob: data:; media-src blob: data:; connect-src 'none'; frame-src 'none'; "
+    "form-action 'none'; base-uri 'none'; frame-ancestors 'self'"
+)
+
+DASH_PATH = "/sandbox/dash"
+FRAME_CSP = {SANDBOX_PATH: SANDBOX_CSP, WIDGET_PATH: WIDGET_CSP, DASH_PATH: DASH_CSP}
 
 
 class SecurityHeadersMiddleware:
@@ -61,6 +76,11 @@ class SecurityHeadersMiddleware:
             return
         is_api = scope["path"].startswith("/api/")
         csp_value = FRAME_CSP.get(scope["path"], self._csp)
+        if "{nonce}" in csp_value:
+            # a fresh nonce for this response only; the route reads the same value from request.state
+            nonce = secrets.token_urlsafe(18)
+            scope.setdefault("state", {})["frame_nonce"] = nonce
+            csp_value = csp_value.replace("{nonce}", nonce)
 
         async def send_with_headers(message):
             if message["type"] == "http.response.start":

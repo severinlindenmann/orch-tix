@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en" data-tok="{{TOK}}">
+<head>
+<meta charset="utf-8">
+<title>dashboard frame</title>
+<!-- The /sandbox/dash frame a remote dashboard page is drawn in (js/frame-host.js on the TIX page; docs/bridge-frame.md).
+Built by routes/pages.py sandbox_dash: {{TOK}}, {{NONCE}} and {{SHIM}} are filled per load, the shim being the
+source of /static/js/frame-shim.js. The shim is inline on purpose: the frame's CSP has only this load's nonce in
+script-src, so no file of this origin can run here. It removes data-tok from this element as its first act. -->
+<script nonce="{{NONCE}}">{{SHIM}}</script>
+</head>
+<body></body>
+</html>
