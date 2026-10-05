@@ -50,3 +50,21 @@ test("a row whose space is not the sealed doc's is refused before any mark is re
   assert.equal(r.doc, null);
   assert.equal(r.error, "binding");
 });
+
+test("a row without uuid or space is not openable: no mark is read or written", async () => {
+  for (const bad of [{ uuid: undefined }, { space: undefined }, { uuid: "" }]) {
+    stores.seen = new Map();
+    const r = await openRow(mk, { ...row, ...bad });
+    assert.equal(r.doc, null);
+    assert.ok(r.error);
+    assert.equal(stores.seen.size, 0);
+  }
+});
+
+test("the mark is read and written under the same key: reopening the same copy is no rollback and moves nothing", async () => {
+  stores.seen = new Map();
+  assert.ok((await openRow(mk, row)).doc);
+  const again = await openRow(mk, row);
+  assert.ok(again.doc && !again.rollback);
+  assert.deepEqual([...stores.seen.keys()], [seenKey(VEC.space_id, m.obj)]);
+});
