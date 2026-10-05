@@ -1,6 +1,7 @@
 """Host presence (Remote, R9): what a workspace's host says about itself in the clear. The server keeps the
-last heartbeat time, the goodbye time, three counts, a Factory state code and three integers; names (workspace,
-machine, device label) never come here. State is derived on read from the clock, so nothing ticks in the
+last heartbeat time, the goodbye time, three counts, a Factory state code and three integers. The presence
+table holds no name. GET /api/presence also returns the space row, which carries the sealed workspace label
+and the owner device's name (owner_name, plaintext on the server today). State is derived on read from the clock, so nothing ticks in the
 background and a server restart loses nothing."""
 import sqlite3
 
@@ -73,6 +74,8 @@ def read(conn: sqlite3.Connection, now: float) -> list[dict]:
     out = []
     for s in mirrors.list_spaces(conn):
         p = conn.execute("SELECT * FROM presence WHERE space_id = ?", (s["id"],)).fetchone()
+        if p is not None and p["device_id"] != s["owner_device"]:
+            p = None        # a heartbeat from a device that no longer owns the space (after a takeover) does not count
         out.append({**s, "state": derive_state(p, now),
                     "last_seen": None if p is None else p["hb_at"],
                     "goodbye_at": None if p is None else p["bye_at"],

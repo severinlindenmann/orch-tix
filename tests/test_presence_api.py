@@ -206,6 +206,19 @@ def test_the_listing_covers_every_space(host, session_client):
     assert got[SPACE2]["sessions"] is None                          # never reported: unknown, not zero
 
 
+def test_a_former_owners_heartbeat_does_not_count_after_a_takeover(host, session_client, settings, other_device):
+    hb(host)
+    assert listing(session_client)[SPACE]["state"] == "online"
+    conn = sqlite3.connect(settings.db_path)
+    try:
+        conn.execute("UPDATE spaces SET owner_device = ? WHERE id = ?", (other_device.id, SPACE))
+        conn.commit()
+    finally:
+        conn.close()
+    s = listing(session_client)[SPACE]
+    assert s["state"] == "never_started" and s["sessions"] is None
+
+
 def test_the_migration_is_idempotent(settings):
     from fileshare.db import connect
     sql = (__import__("pathlib").Path(pr.__file__).parent / "migrations" / "010_presence.sql").read_text()
