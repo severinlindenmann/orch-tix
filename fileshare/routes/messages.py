@@ -63,9 +63,9 @@ async def list_messages(request: Request, after: str = "0", wait: str = "0"):
 
 
 @router.post("/api/messages/{message_id}/ack", status_code=204)
-def ack_message(message_id: str, principal: Principal = Depends(require_any), conn: sqlite3.Connection = Depends(get_db)):
+def ack_message(message_id: str, request: Request, principal: Principal = Depends(require_any), conn: sqlite3.Connection = Depends(get_db)):
     raw = message_id.removeprefix("msg_")
     if not UUID_RE.fullmatch(raw):
         raise api_error(400, "bad_request", "message id must be msg_ and 32 lowercase hex characters")
-    messages.ack_message(conn, principal, raw)
+    messages.ack_message(conn, principal, raw, request.app)
     return Response(status_code=204)

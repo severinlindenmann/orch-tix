@@ -81,8 +81,8 @@ def test_count_includes_open_human_messages(device_client, session_client, pushe
     _put(device_client, new_uuid(), 1, "question", 1)
     assert pushes[-1]["c"] == 2
     session_client.post(f"/api/messages/{mid}/ack")
+    assert pushes[-1] == {"v": 2, "s": "", "t": "", "k": "clear", "w": "message", "n": 0, "c": 1}   # read: withdrawn
     _put(device_client, new_uuid(), 1, "approval")
-    assert pushes[-1]["c"] == 2                             # two mirrors need you, the message was read
 
 
 def test_message_push_names_space_and_ticket_only(device_client, pushes):
@@ -106,12 +106,13 @@ def test_a_failing_pusher_never_fails_a_mirror_write(app, device_client):
 def test_subprocess_pusher_sends_the_v2_payload_compact(app, settings, monkeypatch):
     from fileshare import push as push_module
     sent = []
-    monkeypatch.setattr(push_module.SubprocessPusher, "_deliver_payload", lambda self, p: sent.append(p))
-    monkeypatch.setattr(push_module.threading, "Thread",
-                        lambda target, args, daemon: type("T", (), {"start": lambda s: target(*args)})())
+    monkeypatch.setattr(push_module.SubprocessPusher, "_deliver_payload", lambda self, p, topic=None: sent.append((p, topic)))
+    monkeypatch.setattr(push_module.SubprocessPusher, "_submit", lambda self, fn, *a: fn(*a))
     push_module.SubprocessPusher(settings, settings.db_path).notify_payload(
         {"v": 2, "s": SPACE, "t": "TIX-1", "k": "question", "n": 1, "c": 1})
-    assert sent == ['{"v":2,"s":"' + SPACE + '","t":"TIX-1","k":"question","n":1,"c":1}']
+    assert sent == [('{"v":2,"s":"' + SPACE + '","t":"TIX-1","k":"question","n":1,"c":1}', push_module.topic_for(
+        {"v": 2, "s": SPACE, "t": "TIX-1", "k": "question"}))]
+    assert len(sent[0][1]) <= 32
 
 
 def test_null_pusher_has_notify_payload():
@@ -276,8 +277,8 @@ def test_a_held_ticket_handled_meanwhile_leaves_the_summary(frozen_clock, app, d
     _put(device_client, u1, 1, "question", 1)
     t2 = _put(device_client, u2, 1, "approval").json()["id"]
     _put(device_client, u3, 1, "question", 1)
-    _put(device_client, u3, 2, None)                          # handled on the desktop: a clear goes out at once
-    assert [p["k"] for p in pushes] == ["question", "clear"]
+    _put(device_client, u3, 2, None)                          # handled on the desktop while still held: the phone
+    assert [p["k"] for p in pushes] == ["question"]           # never saw it, so no "Handled on desktop" either
     frozen_clock(t0 + timedelta(seconds=60))
     timers[0][1]()
     # one held ticket left: its own push, not a summary

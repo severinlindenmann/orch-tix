@@ -763,3 +763,38 @@ test("push v2: a batch joins the workspace grouping: past three workspaces it go
   const after = await push(w, { v: 2, s: S4, t: "TIX-7", k: "clear", n: 0, c: 5 });
   assert.deepEqual(after.options.data.ts[S4], ["TIX-8"]);                      // the clear updates the group
 });
+
+test("push v2: a message clear replaces the message notification, but never a needs notification that shares the tag", async () => {
+  const w = load({ idb: LABELS });
+  await push(w, { v: 2, s: S1, t: "", k: "message", n: 2, c: 2 });
+  const got = await push(w, { v: 2, s: S1, t: "", k: "clear", w: "message", n: 0, c: 0 });
+  assert.equal(got.options.tag, `tix:${S1}`);
+  assert.equal(got.options.silent, true);
+  assert.equal(got.options.body, "Read on desktop · Acme Energy");
+  const w2 = load({ idb: LABELS });
+  await push(w2, { v: 2, s: S1, t: "TIX-42", k: "question", n: 1, c: 1 });
+  const kept = await push(w2, { v: 2, s: S1, t: "", k: "clear", w: "message", n: 0, c: 1 });
+  assert.equal(kept.options.body, "Acme Energy · 1 question");
+});
+
+test("push v2: the app badge follows c, and a clear to 0 removes it", async () => {
+  const w = load({ idb: LABELS });
+  const badge = [];
+  w.self.navigator = { setAppBadge: async (n) => badge.push(n), clearAppBadge: async () => badge.push(0) };
+  await push(w, { v: 2, s: S1, t: "TIX-42", k: "question", n: 1, c: 3 });
+  await push(w, { v: 2, s: S1, t: "TIX-42", k: "clear", n: 0, c: 0 });
+  assert.deepEqual(badge, [3, 0]);
+});
+
+test("pushsubscriptionchange subscribes again and replaces the server row", async () => {
+  const calls = [];
+  const w = load({ net: async (url, init) => {
+    calls.push([init?.method || "GET", url]);
+    return url === "/api/push/vapid" ? res(JSON.stringify({ public_key: "BAAA" })) : res("");
+  } });
+  const sub = { toJSON: () => ({ endpoint: "https://push/new", keys: { p256dh: "p", auth: "a" } }) };
+  const ev = { newSubscription: sub, oldSubscription: { endpoint: "https://push/old" }, waits: [], waitUntil(p) { this.waits.push(p); } };
+  w.listeners.pushsubscriptionchange(ev);
+  await Promise.all(ev.waits);
+  assert.deepEqual(calls.map((c) => c.join(" ")), ["GET /api/push/vapid", "POST /api/push/subscribe", "DELETE /api/push/subscribe"]);
+});

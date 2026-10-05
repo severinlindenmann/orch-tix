@@ -359,8 +359,31 @@ class NeedsPushGate:
         self.every_s = every_s
         self._last: dict[str, float] = {}
         self._held: dict[str, list[str]] = {}
+        # (space, ticket) pairs the phone was told about / was NOT told about yet (held in a window): a clear for a
+        # ticket in the second set is pointless and would show "Handled on desktop" for something never shown.
+        self._shown: set[tuple[str, str]] = set()
+        self._unshown: set[tuple[str, str]] = set()
         self._lock = threading.Lock()
         self.timer = _daemon_timer
+
+    def mark_shown(self, space: str, ticket: str) -> None:
+        with self._lock:
+            if len(self._shown) >= self.MAX_TRACKED:
+                self._shown.clear()
+            self._shown.add((space, ticket))
+            self._unshown.discard((space, ticket))
+
+    def clear_wanted(self, space: str, ticket: str) -> bool:
+        """The ticket stopped needing you: False only when its needs push is still held (the phone never saw it)."""
+        with self._lock:
+            key = (space, ticket)
+            self._shown.discard(key)
+            held = ticket in self._held.get(space, [])
+            if held:
+                self._held[space].remove(ticket)
+            was_unshown = key in self._unshown
+            self._unshown.discard(key)
+            return not (held and was_unshown)
 
     def due(self, space: str, ticket: str, flush) -> bool:
         """True: push this transition now. False: it is held; `flush(space, tickets)` runs when the window ends."""
@@ -375,6 +398,10 @@ class NeedsPushGate:
                 if ticket in held:
                     held.remove(ticket)
                 held.append(ticket)
+                if (space, ticket) not in self._shown:
+                    if len(self._unshown) >= self.MAX_TRACKED:
+                        self._unshown.clear()
+                    self._unshown.add((space, ticket))
                 return False
             if len(self._last) >= self.MAX_TRACKED:
                 self._last = {k: v for k, v in self._last.items() if now - v < self.every_s}
@@ -414,6 +441,10 @@ def _flush_held(app, space: str, held: list[str]) -> None:
         if not live:
             return
         total = attention_total(c)
+        gate = getattr(app.state, "needs_push_gate", None)
+        for t, _, _ in live:
+            if gate is not None:
+                gate.mark_shown(space, t)
         if len(live) == 1:
             t, needs, oq = live[0]
             push_v2(app, {"v": 2, "s": space, "t": t, "k": needs, "n": oq if needs == "question" else 0, "c": total})
@@ -432,11 +463,13 @@ def after_needs_change(conn, app, *, space, ticket, before, after, open_question
         return
     gate = getattr(app.state, "needs_push_gate", None)
     if after is None:
-        if gate is not None:
-            gate.drop(space, ticket)
+        if gate is not None and not gate.clear_wanted(space, ticket):
+            return          # its "needs you" never left the server (held in the window): nothing to withdraw
         push_v2(app, {"v": 2, "s": space, "t": ticket, "k": "clear", "n": 0, "c": attention_total(conn)})
         return
     if gate is not None and not gate.due(space, ticket, lambda sp, held: _flush_held(app, sp, held)):
         return
+    if gate is not None:
+        gate.mark_shown(space, ticket)
     push_v2(app, {"v": 2, "s": space, "t": ticket, "k": after, "n": open_questions,
                   "c": attention_total(conn)})

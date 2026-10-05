@@ -6,7 +6,10 @@ import json
 import logging
 import subprocess
 import sys
+import collections
 import threading
+import hashlib
+import base64
 
 from fileshare.db import connect, get_meta, set_meta
 
@@ -44,6 +47,17 @@ def ensure_vapid(conn) -> str:
     return keys["public"]
 
 
+def topic_for(payload: dict) -> str | None:
+    """Web Push `Topic` (RFC 8030 5.4, max 32 chars): a push the phone has not received yet is REPLACED by a newer
+    one with the same topic at the push service. One topic per (workspace, ticket) so a queued "needs you" for a
+    phone that is offline is replaced by the "clear" that follows it; non-ticket kinds get a topic per kind and
+    workspace."""
+    if payload.get("v") != 2:
+        return None
+    key = f"{payload.get('s', '')}|{payload.get('t') or payload.get('k', '')}"
+    return base64.urlsafe_b64encode(hashlib.sha256(key.encode()).digest()[:18]).decode().rstrip("=")   # 24 chars
+
+
 class SubprocessPusher:
     """app.state.pusher: runs `pushworker send` in a daemon thread for every subscription, then
     prunes the ones the push service says are gone (spec T7)."""
@@ -51,15 +65,39 @@ class SubprocessPusher:
     def __init__(self, settings, db_path):
         self.settings = settings
         self.db_path = db_path
+        # One worker: pushes leave in the order they were raised, so a "clear" can never overtake the "needs you"
+        # it withdraws (QA N-03). Each push is still a subprocess; the queue only serialises them.
+        self._q: collections.deque = collections.deque()
+        self._running = False
+        self._lock = threading.Lock()
+
+    def _submit(self, fn, *args) -> None:
+        with self._lock:
+            self._q.append((fn, args))
+            if self._running:
+                return
+            self._running = True
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _run(self) -> None:
+        while True:
+            with self._lock:
+                if not self._q:
+                    self._running = False
+                    return
+                fn, args = self._q.popleft()
+            try:
+                fn(*args)
+            except Exception as e:      # a push never fails anything
+                log.warning("push: delivery crashed: %s", type(e).__name__)
 
     def notify(self, ticket: dict, event: dict) -> None:
-        threading.Thread(target=self._deliver, args=(ticket, event), daemon=True).start()
+        self._submit(self._deliver, ticket, event)
 
     def notify_payload(self, payload: dict) -> None:
         """Push v2 (TIX spec §7): one ready cleartext payload to every subscription. The caller builds it
         from cleartext routing only (space id, TIX id, kind, counts), never a title or text."""
-        threading.Thread(target=self._deliver_payload, args=(json.dumps(payload, separators=(",", ":")),),
-                         daemon=True).start()
+        self._submit(self._deliver_payload, json.dumps(payload, separators=(",", ":")), topic_for(payload))
 
     def _deliver(self, ticket: dict, event: dict) -> None:
         """Push v1 for a legacy ticket: build the fields, then hand the payload on."""
@@ -69,7 +107,7 @@ class SubprocessPusher:
             fields["m"] = True        # a manual test: nothing ran, so not "tests passed"
         self._deliver_payload(json.dumps(fields))
 
-    def _deliver_payload(self, payload: str) -> None:
+    def _deliver_payload(self, payload: str, topic: str | None = None) -> None:
         conn = connect(self.db_path)
         try:
             subs = conn.execute("SELECT id, endpoint, p256dh, auth FROM push_subs").fetchall()
@@ -94,6 +132,7 @@ class SubprocessPusher:
                       "keys": {"p256dh": r["p256dh"], "auth": r["auth"]}} for r in subs],
             "payload": payload,
             "ttl": TTL_S,
+            "topic": topic,
         }
         try:
             proc = subprocess.run([sys.executable, "-m", "fileshare.pushworker", "send"],
@@ -104,9 +143,15 @@ class SubprocessPusher:
             log.warning("push: worker failed: %s", e)
             return
         failed = result.get("failed", [])
+        gone = result.get("gone", [])
+        try:
+            kind = json.loads(payload).get("k")
+        except (ValueError, AttributeError):
+            kind = None
+        # one line per push, no ids or text: the owner can see "was a push sent, to how many, did they fail"
+        log.info("push: k=%s sent=%d failed=%d gone=%d", kind, len(subs) - len(failed) - len(gone), len(failed), len(gone))
         if failed:
             log.warning("push: %d failed", len(failed))
-        gone = result.get("gone", [])
         if gone:
             conn = connect(self.db_path)
             try:
