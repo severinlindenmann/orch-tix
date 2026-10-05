@@ -30,7 +30,9 @@ def _db(settings) -> sqlite3.Connection:
 def test_migration_creates_the_ticket_tables(app, settings):
     conn = _db(settings)
     try:
-        assert conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == "9"
+        from fileshare import db as db_mod
+        latest = max(int(p.name[:3]) for p in db_mod.MIGRATIONS_DIR.glob("[0-9][0-9][0-9]_*.sql"))   # follows the directory
+        assert conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == str(latest)
         names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     finally:
         conn.close()

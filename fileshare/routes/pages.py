@@ -4,7 +4,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -102,6 +102,12 @@ def index(request: Request, conn=Depends(get_db)):
     if "f" in request.query_params or "tag" in request.query_params:
         return RedirectResponse("/files?" + request.url.query, status_code=301)
     return _gated(request, conn, "index", "/")
+
+
+@router.get("/workspaces")
+def workspaces_page(request: Request, conn=Depends(get_db)):
+    """The status page (Remote R9): every workspace with its state. ?open=<space> is the snapshot placeholder."""
+    return _gated(request, conn, "workspaces", "/workspaces")
 
 
 @router.get("/files")
@@ -220,10 +226,21 @@ def service_worker():
                     headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
 
 
+IMMUTABLE = "public, max-age=31536000, immutable"
+
+
 class _RevalidatingStatic(StaticFiles):
+    """Revalidated (ETag/304) static files. A file requested as `?v=<build>` is immutable: the page that names it
+    is stamped with the same build, so its bytes never change under that URL. Unstamped URLs (dynamic imports,
+    fonts), another build's stamp and a checkout without FS_BUILD ("dev", or a git sha that stays put while
+    the files are edited) stay `no-cache`."""
+
     async def get_response(self, path, scope):
         response = await super().get_response(path, scope)
-        response.headers["Cache-Control"] = "no-cache"
+        stamp = parse_qs(scope.get("query_string", b"").decode("latin-1")).get("v", [""])[0]
+        deployed = os.environ.get("FS_BUILD", "").strip()      # set by infra/sync.sh on a deploy, never on a checkout
+        stamped = stamp == deployed != "dev" and bool(_STAMP_RE.fullmatch(stamp))
+        response.headers["Cache-Control"] = IMMUTABLE if stamped and response.status_code == 200 else "no-cache"
         return response
 
 

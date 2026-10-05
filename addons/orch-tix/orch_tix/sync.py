@@ -40,6 +40,21 @@ def on_event(event, outbox) -> None:
     outbox.put(item)
 
 
+def watch_item(event) -> dict | None:
+    """The outbox item the immediate watcher (watch.py) syncs for an event, or None when it is no ticket event.
+    Unlike on_event this does not skip our own writes (via addon:orch-tix): a phone decision applied through the
+    addon changes the ticket's needs, and the phone should hear that at once; only the addon's own log events skip."""
+    if not event.ticket or event.kind in SKIP:
+        return None
+    item = {"op": "sync", "ticket": event.ticket, "seq": event.seq, "kind": event.kind}
+    ev = history.entry(event)
+    if ev:
+        item["ev"] = ev
+    if event.kind == "artifact.added":
+        item.update(artifact=str((event.data or {}).get("name") or ""), context=(event.data or {}).get("context") is True)
+    return item
+
+
 def should_link(link_mode: str, doc: dict, link: dict | None) -> bool:
     """Push this ticket? An active link always; a retired one (by hand, done cleanup or gone) never — only the
     explicit link action re-links it. A ticket never linked follows the link mode."""
@@ -152,6 +167,32 @@ def share_pinned(addon, ctx, key: str, doc: dict) -> int:
     return shared
 
 
+PHONE_KINDS = ("answer", "approve", "request_changes", "verdict")
+PHONE_WINDOW = timedelta(minutes=30)
+
+
+def phone_decision(addon, key: str, body: dict) -> str | None:
+    """The id of the phone decision this push reports, when the ticket stopped needing you because Mission Control
+    applied a phone answer for it (QA #55): an unannounced decision of the phone for `key`, being applied or applied,
+    received in the last 30 minutes. Only a push with `needs` null qualifies. The server uses the answer to word the
+    "handled" push and to skip the phone that decided."""
+    if body.get("needs") is not None:
+        return None
+    now = datetime.now(timezone.utc)
+    for did, rec in addon.state.decisions().items():
+        if rec.get("ticket") != key or rec.get("kind") not in PHONE_KINDS or rec.get("via_sent"):
+            continue
+        if rec.get("outcome") not in ("applying", "applied"):
+            continue
+        try:
+            at = datetime.fromisoformat(str(rec.get("received_at")))
+        except ValueError:
+            continue
+        if at.tzinfo is not None and now - at <= PHONE_WINDOW:
+            return did
+    return None
+
+
 def push(addon, ctx, key: str, doc: dict, *, pinned: bool = True) -> str:
     """Push one snapshot of `key`. Returns the CLI status: pushed | stale | duplicate | gone."""
     st, settings = addon.state, ctx.settings
@@ -163,6 +204,9 @@ def push(addon, ctx, key: str, doc: dict, *, pinned: bool = True) -> str:
                    sync_log=bool(settings.get("sync_log")), context_artifacts=link.get("context_artifacts") or [],
                    widgets=widgets, history=st.history(key))
     body = ticket_widgets.fit(addon, key, body)
+    decided = phone_decision(addon, key, body)
+    if decided:
+        body["decided_via"] = "phone"
     ticket_widgets.prune(addon, addon.sharing(ctx), key, body["doc"].get("widgets"))
     path = out_dir(ctx) / f"mirror-{secrets.token_hex(8)}.json"
     raw = json.dumps(body, ensure_ascii=False)
@@ -181,6 +225,8 @@ def push(addon, ctx, key: str, doc: dict, *, pinned: bool = True) -> str:
     finally:
         path.unlink(missing_ok=True)
     status = str(r.get("status") or "")
+    if decided and status in ("pushed", "duplicate"):
+        addon.state.update_decision(decided, via_sent=True)          # said once; the next push of the ticket does not
     result = {"pushed": "ok", "duplicate": "ok"}.get(status, "refused")
     st.log({**entry, "tix": r.get("id") or link.get("n"), "result": result,
             "reason": "" if result == "ok" else {"stale": "the server holds a newer copy",

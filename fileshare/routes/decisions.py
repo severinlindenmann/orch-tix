@@ -50,7 +50,7 @@ async def post_decision(request: Request, principal: Principal = Depends(require
                    f"at most {DECISIONS_PER_HOUR} decisions per hour"):       # a failed post spends no slot
         return decisions.create_decision(conn, request.app,
                                          session_name=session_name(conn, principal.session_hash) or "browser",
-                                         body=body)
+                                         body=body, session_hash=principal.session_hash)
 
 
 @router.get("/api/decisions")

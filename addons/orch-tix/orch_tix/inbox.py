@@ -140,6 +140,13 @@ def log_decision(addon, rec: dict, outcome, message) -> None:
 
 
 def receive(addon, pctx, items, *, now) -> None:
+    # One at a time with the immediate watcher (watch.py): it must not sync the ticket between core applying a phone
+    # answer and the decision being recorded here, or the push would not say the phone decided (QA #55).
+    with addon.sync_lock:
+        _receive(addon, pctx, items, now=now)
+
+
+def _receive(addon, pctx, items, *, now) -> None:
     st = addon.state
     known = st.decisions()
     for item in items or []:

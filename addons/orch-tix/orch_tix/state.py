@@ -284,3 +284,20 @@ class State:
         def fn(d):
             d["attached"] = list(dict.fromkeys([*(d.get("attached") or []), entry]))[-1000:]
         self._update("inbox.json", fn)
+
+    # -- the immediate watcher (watch.py): where it read the event log up to, and what it already synced -----
+    def watch(self) -> dict:
+        d = self._read("watch.json")
+        return {"cursor": d.get("cursor") if isinstance(d.get("cursor"), int) else None,
+                "done": d.get("done") if isinstance(d.get("done"), dict) else {}}
+
+    def set_watch(self, cursor: int, done: dict, reset: bool = False) -> None:
+        """`done`: ticket ref -> the newest event seq the watcher synced (or knowingly skipped) for it. Capped."""
+        def fn(d):
+            merged = {} if reset else {**(d.get("done") or {})}
+            for ref, seq in done.items():
+                merged[ref] = max(int(merged.get(ref) or 0), int(seq))
+            if len(merged) > 2000:
+                merged = dict(sorted(merged.items(), key=lambda kv: kv[1])[-1000:])
+            d.update(cursor=int(cursor), done=merged)
+        self._update("watch.json", fn)

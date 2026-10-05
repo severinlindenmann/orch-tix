@@ -123,7 +123,7 @@ def test_paired_decision_carries_a_mac(phone_page, mirror_with_question, sim):
     page.get_by_role("radio", name="ISO 8601").check()
     page.get_by_role("button", name="Send answer").click()
     page.get_by_text("Sent · applying on your desktop").wait_for()          # paired: no desktop Apply (round A)
-    assert page.get_by_text("isn't paired with the desktop").count() == 0
+    assert page.get_by_text("Pair this phone so answers apply directly").count() == 0
     d = sim.s.open_inbox_item(sim.mk, mirror_with_question.inbox_items()[0])
     assert d["pair"] == "ph_0123456789ab" and len(d["mac"]) == 43
     # The MAC is orch-core's mac_of over the canonical JSON of the rest, with the all-zero test key.

@@ -18,7 +18,10 @@ STAGE=fileshare-staging
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 # The box gets no .git, so the page build stamp (?v=, Task 17) comes from FS_BUILD.
-BUILD="$(git rev-parse --short HEAD 2>/dev/null || date -u +%Y%m%d%H%M%S)"
+# The stamp also names the files for the browser's immutable cache (`?v=<build>` is cached for a year, fileshare/routes/
+# pages.py): it must change whenever a shipped file changes, including an uncommitted edit on top of the same commit, so it
+# carries a digest of fileshare/static next to the commit.
+BUILD="$(git rev-parse --short HEAD 2>/dev/null || echo nogit)-$(find fileshare/static -type f -print0 | sort -z | xargs -0 shasum -a 256 | shasum -a 256 | cut -c1-10)"
 fail() { echo "   FAILED: $1" >&2; exit 1; }
 
 # Refuse to ship too little. A server without its vendored JS or its skill files

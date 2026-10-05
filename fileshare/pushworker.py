@@ -7,7 +7,8 @@ stays green.
 Commands (see `fileshare/push.py` for the exact request/response shapes):
   genkeys   Prints {"private": b64u DER, "public": b64u uncompressed point} on stdout.
   send      Reads {"private", "sub", "subs": [{"id", "endpoint", "keys"}], "payload", "ttl"} on
-            stdin, POSTs each with `webpush()`, and prints {"gone": [ids], "failed": [ids]}.
+            stdin, POSTs each with `webpush()`, and prints {"gone": [ids], "failed": [ids], "ok": [ids],
+            "errors": {id: HTTP status or exception name}} (ok and errors: QA N-06, the server counts failures).
 """
 import json
 import os
@@ -48,10 +49,13 @@ def _endpoint_allowed(endpoint: str) -> bool:
 def send(req: dict) -> dict:
     gone: list[str] = []
     failed: list[str] = []
+    ok: list[str] = []
+    errors: dict[str, str] = {}
     for sub in req.get("subs", []):
         endpoint = sub["endpoint"]
         if not _endpoint_allowed(endpoint):
             failed.append(sub["id"])
+            errors[sub["id"]] = "endpoint_not_https"
             continue
         try:
             webpush(
@@ -69,9 +73,13 @@ def send(req: dict) -> dict:
                 gone.append(sub["id"])
             else:
                 failed.append(sub["id"])
-        except Exception:
+                errors[sub["id"]] = str(status) if status is not None else "no_response"
+        except Exception as e:
             failed.append(sub["id"])
-    return {"gone": gone, "failed": failed}
+            errors[sub["id"]] = type(e).__name__
+        else:
+            ok.append(sub["id"])
+    return {"gone": gone, "failed": failed, "ok": ok, "errors": errors}
 
 
 def main(argv=None) -> int:
