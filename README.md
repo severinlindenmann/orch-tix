@@ -25,7 +25,7 @@ Your browser and your onboarded devices do the encryption. The server is a caref
 | Which device uploaded it, and its project name | File names and notes |
 | Timestamps, expiry, acknowledged / deleted | Your passphrase or recovery key |
 | File tags (`weekly-report`, `notes`, so it can filter) | The master key, or any key that opens a file |
-| For tickets: ids, status, counts | Ticket titles, questions, answers and gate text |
+| For tickets: ids, status, counts, and whether this ticket may notify your phone (a yes/no you chose, off by default) | Ticket titles, questions, answers and gate text |
 
 How that works, in short:
 
@@ -62,7 +62,7 @@ The full, honest version, including every cleartext column, is in
 - **Public links.** Share one file with anyone. The decryption key sits after the `#` and never
   reaches the server; links can expire, cap downloads and be revoked.
 - **Upload links.** Let someone without an account send you one file, encrypted to that link.
-- **Push notifications** that carry only ids and counts, never titles or text.
+- **Push notifications** that carry only ids and counts, never titles or text, and only for the tickets you switch on (off by default; per ticket, in Mission Control or in the app).
 
 <p>
   <img src="docs/images/transcript-desktop.png" alt="A voice note with its transcript" width="64%">

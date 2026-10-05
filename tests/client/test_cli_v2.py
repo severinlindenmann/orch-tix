@@ -354,3 +354,34 @@ def test_whoami_no_longer_shows_a_deepgram_line(cli, dev_repo):
     assert h.code == 0 and j.code == 0
     assert "deepgram" not in h.out
     assert "deepgram" not in j.json()
+
+
+def test_get_again_reuses_an_identical_copy_and_reports_fresh_ack_metadata(cli, dev_repo, sim):
+    """QA TF-19: no FILE7-name pile-up, no refusal on the third get, acked_at agrees with acked."""
+    fid = sim.upload("a.txt", b"same bytes")["id"]
+    first = cli(dev_repo.root, "get", fid, "--no-ack", "--json")
+    assert first.code == 0, first.err
+    second = cli(dev_repo.root, "get", fid, "--json")
+    third = cli(dev_repo.root, "get", fid, "--json")
+    assert second.code == third.code == 0, (second.err, third.err)
+    assert second.json()["path"] == first.json()["path"] == third.json()["path"]
+    assert second.json()["acked"] is True and second.json()["acked_at"]
+    share = Path(first.json()["path"]).parent
+    assert sorted(p.name for p in share.iterdir() if not p.name.startswith(".")) == ["a.txt"]
+
+
+def test_get_again_with_different_content_still_keeps_both(cli, dev_repo, sim):
+    fid = sim.upload("a.txt", b"one")["id"]
+    p = cli(dev_repo.root, "get", fid, "--no-ack", "--json").json()["path"]
+    Path(p).write_bytes(b"edited locally")                       # same name, other content: never overwritten
+    again = cli(dev_repo.root, "get", fid, "--no-ack", "--json")
+    assert again.code == 0 and Path(again.json()["path"]).name == f"{fid}-a.txt"
+    assert Path(p).read_bytes() == b"edited locally"
+
+
+def test_the_copy_comparison_hashes_in_chunks(sharing, tmp_path):
+    """The reuse check hashes in chunks (a big file would otherwise be held in memory twice)."""
+    import hashlib
+    big = tmp_path / "big.bin"
+    big.write_bytes(b"x" * (3 * (1 << 20) + 5))
+    assert sharing._sha256_of(big) == hashlib.sha256(big.read_bytes()).digest()

@@ -86,6 +86,8 @@ def describe(kind: str, data: dict) -> tuple[str, str]:
         if any(d.get(k) for k in ("branch", "worktree", "pr", "external")):
             return "linked code", ""
         return "edited the ticket", ""
+    if kind == "ticket.option":
+        return "changed an addon option", ""
     if kind == "log.added":
         return "logged a note", _text(d.get("text"))
     if kind == "state.updated":

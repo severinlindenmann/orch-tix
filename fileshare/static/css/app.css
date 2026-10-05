@@ -186,6 +186,9 @@ code.cmd { padding: 1px 6px; border-radius: 5px; background: var(--sunken); colo
 .chip { flex: none; display: inline-flex; align-items: center; height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid var(--border);
   background: var(--surface); color: var(--text); font: 500 13px/1 var(--font); cursor: pointer; white-space: nowrap; }
 .chip:hover { border-color: var(--border-strong); }
+/* "Done" is a visibility toggle, not a type: set apart from the type chips so both never look like one choice (QA TF-07) */
+.chip-toggle { margin-left: 10px; border-style: dashed; }
+.chip-toggle[aria-pressed="true"] { border-style: solid; }
 .chip[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--on-ink); }
 .list-body { display: flex; flex-direction: column; gap: 12px; padding: 0 16px 16px; }
 .list-msg { padding: 8px 4px; }
@@ -338,7 +341,7 @@ dialog.onboard { width: min(600px, calc(100vw - 32px)); }
 .sheet-lock .icon { width: 14px; height: 14px; }
 .sheet-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .seg-field legend { margin-bottom: 6px; }
-.upload-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 14px; max-height: 40vh; overflow: auto; flex-shrink: 0; }
+.upload-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 14px; flex-shrink: 0; /* the sheet scrolls as a whole (QA TF-10), never a nested scroll area */ }
 .upload-list:empty { display: none; }
 .upload-item { display: flex; flex-direction: column; gap: 12px; }
 .upload-card { display: flex; align-items: center; gap: 12px; padding: 10px; background: var(--ground); border-radius: var(--radius-lg); min-width: 0; }
@@ -1033,6 +1036,9 @@ dialog.sheet-confirm[open] { display: flex; flex-direction: column; gap: 12px; }
   .decision-bar { position: sticky; bottom: 0; max-width: 640px; margin: 0 32px; border: 1px solid var(--line); border-radius: 14px 14px 0 0; }
 }
 
+/* Per-ticket phone notifications: the switch row on a ticket (reuses the transcribe switch). */
+.notify-card { display: grid; gap: 4px; padding: 4px 14px 12px; }
+.notify-card .transcribe-hint { margin: 0; }
 /* ---- QA tix-pwa: opaque safe-area band, update prompt, folds, compact devices, labelled dock ---- */
 .update-prompt { position: fixed; left: 12px; right: 12px; bottom: calc(var(--tabbar-h) + var(--safe-b) + 12px); z-index: 70; display: flex;
   align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px 10px 16px; border-radius: var(--r-lg);

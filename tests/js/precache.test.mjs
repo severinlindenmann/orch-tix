@@ -40,6 +40,11 @@ test("nothing precached is ever a bypassed path", () => {
   }
 });
 
+// The bridge's device module (R10a, docs/bridge-protocol.md) ships before the page that uses it (R10b, #25). It is
+// precached and tested (tests/js/bridge-*.test.mjs, tests/browser/test_bridge_module.py), but no page imports its
+// entry point yet. Nothing else may be listed here.
+const NOT_YET_LOADED = ["bridge-session.js"];
+
 test("every precached script is loaded by a page or imported by another module (no dead code)", () => {
   const html = readdirSync(STATIC).filter((n) => n.endsWith(".html")).map((n) => readFileSync(join(STATIC, n), "utf8"));
   const js = walk(join(STATIC, "js")).filter((p) => p.endsWith(".js"));
@@ -51,5 +56,7 @@ test("every precached script is loaded by a page or imported by another module (
     for (const m of readFileSync(p, "utf8").matchAll(/(?:from |import ?\(?)\s*"\.\/([a-z0-9-]+\.js)"/g)) used.add(m[1]);
   }
   const listed = list.assets.filter((a) => a.startsWith("/static/js/")).map((a) => a.slice("/static/js/".length));
-  assert.deepEqual(listed.filter((n) => !used.has(n)), []);
+  assert.deepEqual(listed.filter((n) => !used.has(n) && !NOT_YET_LOADED.includes(n)), []);
+  // The exception ends itself: once a page or module loads it, this fails until the name is removed above.
+  assert.deepEqual(NOT_YET_LOADED.filter((n) => used.has(n)), [], "remove from NOT_YET_LOADED: it is loaded now");
 });

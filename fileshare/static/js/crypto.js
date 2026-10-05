@@ -446,7 +446,7 @@ export function validTranscript(t) {
 const ECDH = { name: "ECDH", namedCurve: "P-256" };
 const B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
-function base32(bytes) {                        // RFC 4648, upper case, no padding
+export function base32(bytes) {                 // RFC 4648, upper case, no padding
   let bits = 0, value = 0, out = "";
   for (const b of bytes) {
     value = (value << 8) | b; bits += 8;

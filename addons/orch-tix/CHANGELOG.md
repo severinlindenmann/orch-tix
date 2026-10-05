@@ -1,11 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
+- **Behaviour change: phone notifications are off by default, per ticket.** Tickets still sync to TIX and show under Needs you; only the push notifications are suppressed. After updating the addon and the TIX server, every existing ticket starts off (and so does "messages without a ticket"), so no push arrives until the owner turns it on.
+- A per-ticket **"Notify my phone about this ticket"** switch (`ticket_options`, needs an orch-core with ticket options): on the new-ticket form, the approve card for the requirements or plan gate, and the ticket page. Human-only (Mission Control, `orch addon ticket-option set`, or the phone); agents can read it. It is synced into the mirror as the cleartext field `notify`; the server pushes only while it is on.
+- The phone's "Notify me about this ticket" switch is merged back into orch-core within one inbox cycle (recorded as `addon:orch-tix`). A push built before the desktop saw the phone's change cannot undo it (`notify_seen`).
+- New setting `notify_unticketed` (default off): phone notifications for agent messages that name no ticket. Messages with `--ticket` follow that ticket's switch. Workspace join requests always notify.
+- Needs the sharing CLI and TIX server of this release (`mirror notify-state`, `space notify`).
+- The TIX section on orch-core's How it works page (`guide.section`) is now declared in the manifest (it was held back until an orch-core with the slot shipped; orch-core's guide page has).
+- **Needs orch-core with `ticket_options` and `guide.section`:** orch-core validates a manifest strictly, so an older orch-core rejects this version. Update orch-core first.
 - Shared files page: done files are listed too (the provider now calls `sharing list --all`), hidden by default behind a "Done N" chip; a share with only done files says "All caught up: N done files hidden" instead of "No files on the share yet" (QA TF-04).
 - An unset sharing CLI path reports health `never_fetched` ("not set up") instead of `auth_required` ("Login needed"): nothing needs a login (QA TF-02).
 - "Sync to TIX" and "Sync now" confirmations say what leaves the machine (QA TF-16); on an orch-core that supports it "Sync now" asks nothing, and phone decisions carry `origin: phone` in the event log (QA TF-20). The "TIX does this outside orch" body line is orch-core's.
-- The code for a TIX section on orch-core's How it works page (`guide.section`) is in, but the manifest does not declare the slot yet: orch-core validates a manifest strictly and an orch-core without that slot rejects the whole addon, so declaring it now would break everyone who updates the addon before orch-core. To switch it on, once the orch-core release that adds `guide.section` is out: add `"guide.section"` to `slots` in `orch-addon.json` and bump the version to 0.3.0. Until then the section never shows and nothing changes.
 
 ## 0.2.0
 

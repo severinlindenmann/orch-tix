@@ -20,7 +20,12 @@ class Recorder:
 
 
 @pytest.fixture
-def pushes(app):
+def pushes(app, monkeypatch):
+    # These tests are about delivery (windows, counts, clears), so every ticket and message may notify here; the
+    # switches themselves are tested in test_notify_api.py.
+    from fileshare import messages
+    monkeypatch.setattr(messages, "message_push_allowed", lambda *a, **k: True)
+    monkeypatch.setattr(messages, "message_clear_wanted", lambda *a, **k: True)
     app.state.pusher = Recorder()
     return app.state.pusher.payloads
 
@@ -28,7 +33,7 @@ def pushes(app):
 def _put(dc, u, rev, needs, oq=0):
     return dc.put(f"/api/mirrors/{u}", json={
         "space": SPACE, "mirror_rev": rev, "schema_version": "1.0.0", "status": "waiting", "priority": "normal",
-        "needs": needs, "open_questions": oq, "key_version": 1, "wrapped_dek": DEK, "enc_content": fake_env(90),
+        "needs": needs, "notify": True, "open_questions": oq, "key_version": 1, "wrapped_dek": DEK, "enc_content": fake_env(90),
         "event_uuid": hashlib.sha256(f"{u}{rev}".encode()).hexdigest()[:32]})
 
 
@@ -292,7 +297,7 @@ def test_the_window_is_per_workspace(frozen_clock, app, device_client, pushes):
     _put(device_client, new_uuid(), 1, "question", 1)
     r = device_client.put(f"/api/mirrors/{new_uuid()}", json={
         "space": other, "mirror_rev": 1, "schema_version": "1.0.0", "status": "waiting", "priority": "normal",
-        "needs": "question", "open_questions": 1, "key_version": 1, "wrapped_dek": DEK, "enc_content": fake_env(90),
+        "needs": "question", "notify": True, "open_questions": 1, "key_version": 1, "wrapped_dek": DEK, "enc_content": fake_env(90),
         "event_uuid": "f" * 32})
     assert r.status_code in (200, 201)
     assert [p["s"] for p in pushes] == [SPACE, other]

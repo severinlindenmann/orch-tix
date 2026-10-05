@@ -216,7 +216,9 @@ export function tagInput({
   const box = el("div", { class: "tag-box" }, chips, input);
   const wrap = el("div", { class: "field tag-field" },
     el("label", { class: "label", for: id }, label, optional ? " " : null, optional ? el("span", { class: "label-opt" }, "optional") : null),
-    el("div", { class: "tag-anchor" }, box, list), error);
+    el("div", { class: "tag-anchor" }, box, list), error,
+    // file tags are routing data: the server reads them (README, SKILL.md); never put a secret in one
+    own ? null : el("p", { class: "hint tag-hint" }, "Tags are not encrypted: the server can read them."));
   box.addEventListener("click", (e) => { if (e.target === box) input.focus(); });
 
   const showError = (msg) => {
