@@ -8,7 +8,7 @@ import logging
 import sqlite3
 from datetime import datetime, timedelta
 
-from fileshare import clock
+from fileshare import bridge, clock
 from fileshare.blobs import BlobStore
 from fileshare.db import connect
 
@@ -148,6 +148,7 @@ def _sweep_once(db_path, blobs: BlobStore, bus=None) -> None:
         expire_files(conn, blobs)
         expire_upload_links(conn, blobs)
         expire_legacy_tickets(conn, bus=bus)
+        bridge.purge(conn, bridge.now_ts())
     finally:
         conn.close()
 
