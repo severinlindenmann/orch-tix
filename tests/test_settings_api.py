@@ -140,7 +140,7 @@ def test_put_checks_origin(owner, sharing):
     enc = _enc(sharing, owner.mk)
     for origin in ("https://evil.example", ""):
         r = _put(owner.client, enc, 0, headers={"Origin": origin})
-        assert r.status_code == 403 and r.json()["error"] == "bad_origin"
+        assert r.status_code == 403 and r.json()["error"] in ("bad_origin", "origin_required")
     assert owner.client.get("/api/settings").json()["rev"] == 0
 
 

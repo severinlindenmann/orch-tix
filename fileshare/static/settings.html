@@ -76,12 +76,12 @@
           <h3 class="settings-sub" id="browsers-title">Browsers</h3>
           <div class="device-row browser-row">
             <div class="device-main"><span class="device mono" id="this-browser">…</span><span class="project">this browser</span></div>
-            <button class="btn btn-danger" type="button" id="signout-all">Sign out everywhere</button>
+            <button class="btn btn-danger-line" type="button" id="signout-all">Sign out everywhere</button>
           </div>
           <p class="hint">Signs out every browser and phone, this one included. Onboarded devices keep their access.</p>
         </section>
       </section>
-      <section class="card settings-card" id="join-card" aria-labelledby="join-title">
+      <section class="card settings-card" id="join-card" aria-labelledby="join-title" hidden>
         <div class="settings-head">
           <h2 class="settings-title" id="join-title"><a id="join" class="anchor" aria-hidden="true" tabindex="-1"></a>Workspace requests</h2>
           <span class="settings-status" id="join-status" aria-live="polite"></span>
@@ -89,11 +89,13 @@
         <p class="hint">A desktop asks to take over syncing a workspace. Approve only a request you started with <code>sharing space join</code>.</p>
         <div id="join-list" class="join-list" aria-live="polite"><p class="muted">Loading…</p></div>
       </section>
+      <details class="adv" id="advanced">
+        <summary><span>Advanced</span><span class="muted">Pairing, transcription, archive</span></summary>
       <section class="card settings-card" id="pair-card" aria-labelledby="pair-title">
         <div class="settings-head">
           <h2 class="settings-title" id="pair-title"><a id="pair" class="anchor" aria-hidden="true" tabindex="-1"></a>Pair with a desktop</h2>
         </div>
-        <p class="hint" id="pair-hint">Pairing lets this phone apply answers on your desktop without a click there. On the desktop: Mission Control → Workspace &amp; addons → Copy pairing link. Paste it here, then compare the code.</p>
+        <p class="hint" id="pair-hint">Pairing lets this phone apply answers on your desktop without a click there. On the desktop: Mission Control → Workspace &amp; addons → Phones → Pair a phone → Copy pairing link. Paste it here, then compare the code.</p>
         <form class="settings-form" id="pair-form" novalidate>
           <label class="label" for="pair-link">Pairing link</label>
           <div class="settings-row">
@@ -149,13 +151,14 @@
         <p class="settings-msg" id="transcription-msg" role="status" hidden></p>
         <p class="notice">Audio you upload is sent to Deepgram for transcription (unencrypted, over HTTPS).</p>
       </section>
-      <section class="card settings-card" id="archive-card" aria-labelledby="archive-title">
+      <section class="card settings-card" id="archive-card" aria-labelledby="archive-title" hidden>
         <div class="settings-head">
           <h2 class="settings-title" id="archive-title"><a id="archive" class="anchor" aria-hidden="true" tabindex="-1"></a>Archive</h2>
         </div>
         <p class="hint">Tickets from the old board stay readable here for 90 days. New tickets live in your workspaces.</p>
         <div id="archive-list" class="archive-list"><p class="muted">No archived tickets.</p></div>
       </section>
+      </details>
       <section class="card settings-card m-only" aria-labelledby="this-browser-title">
         <div class="settings-head">
           <h2 class="settings-title" id="this-browser-title">This browser</h2>

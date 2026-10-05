@@ -528,13 +528,15 @@ dialog.onboard > .btn-accent { margin-top: 16px; }
   .files-layout { display: grid; grid-template-columns: minmax(320px, 408px) minmax(0, 1fr); min-height: 0; }
   .list-col { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); overflow-y: auto; }
   .list-head { position: sticky; top: 0; z-index: 5; gap: 12px; padding: 20px 16px 12px; background: var(--ground); }
-  .list-title-row { align-items: center; gap: 8px; }
+  /* the 408px list column cannot hold title, count, four dock buttons and two icons on one line (QA TF-03):
+     the count never wraps, and the dock takes its own row below */
+  .list-title-row { align-items: center; flex-wrap: wrap; gap: 8px; }
   .list-title-row .page-title { margin-right: auto; }
-  .list-count { font-size: 12px; }
-  .dock { order: 3; gap: 6px; }
+  .list-count { font-size: 12px; white-space: nowrap; }
+  .dock { order: 5; flex: 1 0 100%; gap: 6px; }
   .dock-btn { width: 36px; height: 36px; border-radius: 9px; }
   .dock-btn .icon { width: 17px; height: 17px; }
-  .dock-primary { order: 3; width: auto; padding: 0 14px; font-size: 13.5px; }
+  .dock-primary { width: auto; padding: 0 14px; font-size: 13.5px; }
   .dock-primary .icon { width: 16px; height: 16px; }
   .list-menu-wrap { order: 4; }
   .list-menu-wrap .icon-btn { width: 36px; height: 36px; border: 1px solid var(--border); background: var(--surface); border-radius: 9px; }
@@ -1034,6 +1036,61 @@ dialog.sheet-confirm[open] { display: flex; flex-direction: column; gap: 12px; }
 /* Per-ticket phone notifications: the switch row on a ticket (reuses the transcribe switch). */
 .notify-card { display: grid; gap: 4px; padding: 4px 14px 12px; }
 .notify-card .transcribe-hint { margin: 0; }
+/* ---- QA tix-pwa: opaque safe-area band, update prompt, folds, compact devices, labelled dock ---- */
+.update-prompt { position: fixed; left: 12px; right: 12px; bottom: calc(var(--tabbar-h) + var(--safe-b) + 12px); z-index: 70; display: flex;
+  align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px 10px 16px; border-radius: var(--r-lg);
+  background: var(--ink); color: var(--on-ink); font-weight: 600; box-shadow: var(--shadow-pop); }
+.update-prompt .btn-primary { background: var(--on-ink); border-color: var(--on-ink); color: var(--ink); min-height: 40px; }
+@media (min-width: 900px) { .update-prompt { left: auto; right: 24px; bottom: 24px; max-width: 360px; } }
+.bmore { margin-top: 2px; }
+.req-fold .req-card { border: 0; box-shadow: none; padding: 0 0 14px; background: transparent; }
+
+/* #57: in the installed PWA the page scrolled under the iOS status bar. An opaque band the height of the top inset, in
+   the page colour, sits over the scrolling content (below banners, dialogs and toasts); the page starts under it. */
+@media (max-width: 899px) {
+  body.app::before { content: ""; position: fixed; top: 0; left: 0; right: 0; z-index: 55; pointer-events: none;
+    height: env(safe-area-inset-top, 0px); background: var(--bg); }
+  .page, .files-layout { padding-top: env(safe-area-inset-top, 0px); }
+  .page-needs .page-body { padding-top: 20px; }
+  /* a banner already pads for the inset */
+  #banner:not(:empty) ~ .shell .page, #banner:not(:empty) ~ .shell .files-layout { padding-top: 0; }
+}
+
+/* T05 Settings: compact device rows, an outline Revoke (not a big filled red button beside a status), the Advanced fold */
+.btn-danger-line { background: transparent; border-color: var(--danger); color: var(--danger); font-weight: 600; min-height: 44px; }
+.btn-danger-line:hover { background: var(--danger-soft); color: var(--danger); border-color: var(--danger); }
+.device-row-active { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; }
+.device-row-active .device-main .badge { align-self: flex-start; margin-top: 4px; }
+.device-row-active > .device-more { grid-column: 1 / -1; }
+.device-more > summary { cursor: pointer; color: var(--text-2); font-size: 13px; min-height: 36px; display: flex; align-items: center; }
+.device-more[open] { display: flex; flex-direction: column; gap: 4px; }
+.device-row-active > .fp-mismatch { grid-column: 1 / -1; }
+.adv { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); padding: 0 16px; }
+.adv > summary { display: flex; flex-direction: column; justify-content: center; gap: 2px; min-height: var(--tap); padding: 8px 0; cursor: pointer; list-style: none; font-weight: 700; }
+.adv > summary::-webkit-details-marker { display: none; }
+.adv > summary .muted { font-weight: 500; font-size: 12.5px; }
+.adv[open] { display: flex; flex-direction: column; gap: 14px; padding-bottom: 16px; }
+.adv[open] > summary { padding-bottom: 0; }
+.adv > .settings-card { border: 0; box-shadow: none; padding: 0; background: transparent; }
+.adv > .settings-card + .settings-card { border-top: 1px solid var(--line); padding-top: 14px; }
+
+/* T07 Files: the dock buttons and the header actions say what they do (text next to the icon on a phone) */
+.dock-label-m, .btn-label-m { display: none; }
+@media (max-width: 899px) {
+  .dock-btn:not(.dock-primary) { flex: 1 1 0; width: auto; min-width: 0; padding: 0 6px; font-size: 13px; font-weight: 600; gap: 6px; }
+  .dock-primary { flex: 1.3 1 0; }
+  .dock-label-m { display: inline; }
+  .icon-btn-label, .round-btn-label { width: auto; padding: 0 12px; gap: 6px; border-radius: 24px; font: 600 13px var(--font); border-color: var(--border); background: var(--surface); }
+  .btn-label-m { display: inline; }
+}
+
+/* T13: the dark brand tile keeps its container; the phone's chip row says it scrolls; the desktop Needs column is centred */
+.brand-icon { box-shadow: 0 0 0 1px var(--line2); }      /* themed token: invisible-ish in light, the tile's container in dark */
+@media (max-width: 899px) {
+  .chips { padding-right: 32px; -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
+}
+@media (min-width: 900px) { .phone-page .page-body { margin-inline: auto; width: 100%; } }
+
 /* ---- the status page: workspaces by machine. Desktop: one grid row each; phone: a card ---- */
 .ws-list { display: flex; flex-direction: column; gap: 20px; }
 .wgroup { display: flex; flex-direction: column; gap: 8px; }

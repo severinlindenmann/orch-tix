@@ -82,17 +82,27 @@ def log_tab(addon) -> list:
 
 def files_tab(addon, view, files: list[dict]) -> list:
     q, tag = view.params.get("q", "").strip(), view.params.get("tag", "").strip()
-    shown = [f for f in files if _matches(f, q, tag)]
-    all_tags = sorted({t for f in files for t in _tags(f)})
-    chips = (Link("All tags", _url(q=q), current=not tag),
-             *(Link(t, _url(q=q, tag=t), current=t == tag) for t in all_tags[:30]))
+    done = "1" if view.params.get("done") == "1" else ""
+    n_done = sum(1 for f in files if f.get("done"))
+    pool = files if done else [f for f in files if not f.get("done")]     # done files stay hidden until asked for
+    shown = [f for f in pool if _matches(f, q, tag)]
+    all_tags = sorted({t for f in pool for t in _tags(f)})
+    chips = (Link("All tags", _url(q=q, done=done), current=not tag),
+             *(Link(t, _url(q=q, tag=t, done=done), current=t == tag) for t in all_tags[:30]))
+    if n_done:
+        chips += (Link(f"Done {n_done}", _url(q=q, tag=tag, done="" if done else "1"), current=bool(done)),)
     find = Card("Find", (Text(INTRO), Search("q", q, "Name, device or project"), Chips(chips, label="Filter by tag")))
-    rows = tuple((Link(_s(f.get("label")) or _s(f.get("id")), _url(q=q, tag=tag, f=_s(f.get("id")))),
-                  _s(f.get("from")) or None, ", ".join(_tags(f)) or None, _s(f.get("expires")) or None,
+    rows = tuple((Link(_s(f.get("label")) or _s(f.get("id")), _url(q=q, tag=tag, f=_s(f.get("id")), done=done)),
+                  _s(f.get("from")) or None, ", ".join(_tags(f)) or None,
+                  (f"done · {_s(f.get('expires'))}" if f.get("done") else _s(f.get("expires"))) or None,
                   Action("download", "Download", _s(f.get("id"))))
                  for f in shown[:200] if _s(f.get("id")))
-    empty = ("No files match this search; clear the filter to see all." if (q or tag) and files
-             else "No files on the share yet; upload one below.")
+    if (q or tag) and pool:
+        empty = "No files match this search; clear the filter to see all."
+    elif n_done and not done:
+        empty = f"All caught up: {n_done} done file{'s' if n_done != 1 else ''} hidden. Choose Done above to list {'them' if n_done != 1 else 'it'}."
+    else:
+        empty = "No files on the share yet; upload one below."
     out = [find, Card("Files", (Table(("File", "From", "Tags", "Expires", ""), rows, empty=empty),))]
     selected = next((f for f in files if f.get("id") == view.params.get("f")), None)
     if selected:

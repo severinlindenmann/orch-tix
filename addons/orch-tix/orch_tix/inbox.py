@@ -9,6 +9,7 @@ from orch.addons.api import Intent, PendingDecision, Snapshot
 
 from . import notify
 from .cli import SharingError
+from .widgets import supports_origin
 
 MAX_AGE = timedelta(days=14)
 APPLYING_TIMEOUT = timedelta(minutes=10)
@@ -314,8 +315,9 @@ def pending_decisions(addon, view) -> list:
             body = f"{body}\nRequirements and plan together: approve them on the ticket page."
         else:
             choices = (("apply", "Apply"), ("ignore", "Ignore"))
+        extra = {"origin": "phone"} if supports_origin() else {}   # TF-20
         out.append(PendingDecision(did, title[:200], body[:2000], None if request else rec.get("ticket"), stale,
-                                   choices, "info", anchor))
+                                   choices, "info", anchor, **extra))
     return out
 
 
@@ -403,7 +405,8 @@ class InboxProvider:
             notify.merge_phone_changes(self.addon, ctx)      # the phone's per-ticket switch, adopted here
             notify.push_message_setting(self.addon, ctx)
         except SharingError as e:
-            health = "auth_required" if e.code in _AUTH else "offline"
+            # nothing needs a login when the CLI path is unset: say "not set up", not "Login needed" (QA TF-02)
+            health = "never_fetched" if e.code == "not_configured" else "auth_required" if e.code in _AUTH else "offline"
             return Snapshot(self.id, scope, now, health=health, message=e.detail[:200])
         return self._snapshot(scope, now)
 

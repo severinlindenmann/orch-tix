@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  readDropToken, readDropKey, zipName, planUpload, failureMessage, MSG, HttpError, PayloadError,
+  readDropToken, readDropKey, zipName, planUpload, failureMessage, MSG, HttpError, PayloadError, secretPaths,
 } from "../../fileshare/static/js/drop.js";
 
 const TOKEN = "a".repeat(43);
@@ -65,4 +65,10 @@ test("failureMessage maps a failed build/encrypt/POST to the right on-page text"
   assert.equal(failureMessage(new HttpError(500)), MSG.failed);
   assert.equal(failureMessage(new HttpError(503)), MSG.failed);
   assert.equal(failureMessage(new Error("boom")), MSG.failed);
+});
+
+test("secretPaths flags secret-looking names anywhere in a picked folder", () => {
+  assert.deepEqual(secretPaths(["QA/.env", "QA/readme.md", "prod.env", "a/id_ecdsa", "k.kdbx", "notes.txt"]),
+    ["QA/.env", "prod.env", "a/id_ecdsa", "k.kdbx"]);
+  assert.deepEqual(secretPaths(["env.md", "keynote.txt", "report.pdf"]), []);
 });

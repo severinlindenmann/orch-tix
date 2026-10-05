@@ -4,7 +4,8 @@ import json
 from pathlib import Path
 
 STATIC = Path(__file__).resolve().parents[1] / "fileshare" / "static"
-SHELL_BUDGET = 1_000_000           # bytes, uncompressed: the whole offline shell (fonts, scripts, styles, icons)
+SHELL_BUDGET = 1_020_000           # bytes, uncompressed: the whole offline shell (fonts, scripts, styles, icons); was 1_000_000,
+                                   # raised by 20 kB for the phone UI round (#71: update prompt, offline cards, settings folds, labels)
 PHONE_JS_BUDGET = 160_000          # bytes, uncompressed: Needs you, Board and ticket modules
 
 

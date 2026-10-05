@@ -20,9 +20,9 @@
     {"key": "sync_widget_docs", "label": "Send agent-HTML widgets (their HTML and data, as files)", "type": "select", "options": ["never", "always"], "default": "never"}
   ],
   "actions": [
-    {"id": "link", "label": "Sync to TIX"},
+    {"id": "link", "label": "Sync to TIX", "confirm": "Send this ticket's title, questions and gate texts to your TIX server (sealed, only you can read them)?"},
     {"id": "unlink", "label": "Stop syncing", "confirm": "Remove this ticket from the phone?"},
-    {"id": "push_now", "label": "Sync now"},
+    {"id": "push_now", "label": "Sync now", "confirm": "Send this ticket's latest state to your TIX server (sealed, only you can read it)?"},
     {"id": "send_artifact", "label": "Send to phone"},
     {"id": "redaction", "label": "Change what the phone shows", "confirm": "Change what this ticket shows on the phone?"},
     {"id": "download", "label": "Download"},

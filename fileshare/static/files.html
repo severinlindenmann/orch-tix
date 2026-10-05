@@ -50,7 +50,7 @@
     <section class="list-col" aria-label="Files">
       <header class="m-head">
         <a class="brand" href="/"><span class="brand-icon" aria-hidden="true"></span><span class="brand-main">tix</span></a>
-        <button class="round-btn" type="button" data-action="onboard" aria-label="Onboard device"><span data-icon="plus"></span></button>
+        <button class="round-btn round-btn-label" type="button" data-action="onboard" aria-label="Onboard device"><span data-icon="plus"></span><span class="btn-label-m" aria-hidden="true">Onboard</span></button>
       </header>
       <div class="list-head">
         <div class="list-title-row">
@@ -58,9 +58,9 @@
           <span class="list-count" id="count"></span>
           <div class="dock" id="dock" role="group" aria-label="Share">
             <button class="dock-btn dock-primary" id="upload-btn" type="button" data-action="upload"><span data-icon="upload"></span><span class="dock-label">Upload</span></button>
-            <button class="dock-btn" id="paste-btn" type="button" data-action="paste" aria-label="Paste from clipboard" title="Paste (⌘V)"><span data-icon="paste"></span></button>
-            <button class="dock-btn" id="record-btn" type="button" data-action="record" aria-label="Record audio" title="Record"><span data-icon="mic"></span></button>
-            <button class="dock-btn" id="note-btn" type="button" data-action="note" aria-label="New note" title="Note"><span data-icon="note"></span></button>
+            <button class="dock-btn" id="paste-btn" type="button" data-action="paste" aria-label="Paste from clipboard" title="Paste (⌘V)"><span data-icon="paste"></span><span class="dock-label dock-label-m" aria-hidden="true">Paste</span></button>
+            <button class="dock-btn" id="record-btn" type="button" data-action="record" aria-label="Record audio" title="Record"><span data-icon="mic"></span><span class="dock-label dock-label-m" aria-hidden="true">Record</span></button>
+            <button class="dock-btn" id="note-btn" type="button" data-action="note" aria-label="New note" title="Note"><span data-icon="note"></span><span class="dock-label dock-label-m" aria-hidden="true">Note</span></button>
           </div>
           <div class="list-menu-wrap" id="list-menu-wrap" hidden>
             <button class="icon-btn" type="button" id="list-menu-btn" aria-label="Filter by device or project" aria-haspopup="true" aria-expanded="false" aria-controls="list-menu"><span data-icon="filter"></span></button>
@@ -69,7 +69,7 @@
               <label class="chip-select"><span class="label">Project</span><select class="input" id="filter-project"></select></label>
             </div>
           </div>
-          <button class="icon-btn" type="button" id="droplink-btn" aria-label="Upload links" title="Upload links"><span data-icon="link"></span></button>
+          <button class="icon-btn icon-btn-label" type="button" id="droplink-btn" aria-label="Upload links" title="Upload links"><span data-icon="link"></span><span class="btn-label-m" aria-hidden="true">Links</span></button>
         </div>
         <div id="pending-banner" class="banner banner-info" role="status" hidden>
           <span data-icon="devices"></span><span class="pending-text"></span><a href="/settings#devices">Review</a>
@@ -104,6 +104,12 @@
           <h2>No files yet</h2>
           <p>Onboard a device or upload a file to get started.</p>
           <button class="btn btn-accent" type="button" data-action="onboard">Onboard device</button>
+        </section>
+
+        <section class="empty" id="all-done" hidden>
+          <h2>All caught up</h2>
+          <p id="all-done-count"></p>
+          <button class="btn" type="button" id="show-done">Show done files</button>
         </section>
 
         <div id="results" hidden>

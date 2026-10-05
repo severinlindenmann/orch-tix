@@ -148,7 +148,7 @@ def test_a_join_request_is_approved_in_settings(phone_page, live_server, sim, mi
     row = page.locator(".join-row").filter(has_text="mac-mini wants to sync Acme Energy")
     row.get_by_role("button", name="Approve").click()
     page.get_by_role("dialog").get_by_role("button", name="Approve").click()
-    page.locator("#join-list").get_by_text("No requests.").wait_for()
+    page.locator("#join-card").wait_for(state="hidden")   # an empty block is not shown
     spaces = {x["id"]: x for x in sim.request("GET", "/api/spaces").json()["spaces"]}
     assert spaces[mirror_with_question.space]["owner_name"] == "mac-mini"
     assert other_space in spaces
@@ -160,7 +160,7 @@ def test_a_join_request_can_be_denied(phone_page, live_server, sim, mirror_with_
     page = phone_page("light")
     page.goto(live_server.url + "/settings#join")
     page.locator(".join-row").filter(has_text="ci-runner").get_by_role("button", name="Deny").click()
-    page.locator("#join-list").get_by_text("No requests.").wait_for()
+    page.locator("#join-card").wait_for(state="hidden")   # an empty block is not shown
     spaces = {x["id"]: x for x in sim.request("GET", "/api/spaces").json()["spaces"]}
     assert spaces[mirror_with_question.space]["owner_name"] == "macbook-pro"
 
@@ -464,7 +464,7 @@ def test_at_full_the_approval_card_shows_the_plan_and_the_other_sections(phone_p
     page.goto(f"{mirror_with_question.base}/t/{mirror_with_question.n}")
     card = page.locator("#decision")
     card.get_by_text("1. Inventory").wait_for()                            # sections.Plan
-    assert "Review on desktop" not in card.inner_text()
+    assert "shows only titles" not in card.inner_text()
     assert card.locator(".gate-text").count() == 1                         # the Plan, not repeated in a chapter
     assert page.locator(".chap .section-name", has_text="Plan").count() == 0
     asked = page.locator('.chap[data-chapter="1"]')
@@ -491,7 +491,7 @@ def test_at_title_the_plan_stays_on_the_desktop_and_approve_is_not_offered(phone
     mirror_with_question.push(_approval_doc(EXAMPLE_DOC), rev=2, needs="approval", open_questions=0)
     page = phone_page("light")
     page.goto(f"{mirror_with_question.base}/t/{mirror_with_question.n}")
-    page.locator("#decision").get_by_text("Review on desktop").wait_for()
+    page.locator("#decision").get_by_text("shows only titles").wait_for()
     assert page.get_by_role("button", name="Approve plan").count() == 0
     page.get_by_role("button", name="Request changes").wait_for()
 
@@ -518,7 +518,7 @@ def test_a_message_to_the_human_shows_as_text_and_ack_clears_it(phone_page, mirr
     text = card.locator(".msg-text")
     assert text.inner_text() == "Nightly run finished.\n<b>not bold</b> javascript:alert(1)"   # data, never markup
     assert text.locator("b, a").count() == 0
-    card.get_by_role("button", name="Ack").click()
+    card.get_by_role("button", name="Mark as read").click()
     card.wait_for(state="detached")
     assert mirror_with_question.sim.request("GET", "/api/messages?after=0&wait=0").json()["messages"] == []
 
@@ -526,6 +526,7 @@ def test_a_message_to_the_human_shows_as_text_and_ack_clears_it(phone_page, mirr
 def test_a_ticket_request_is_sealed_for_its_space_with_value_title_and_body(phone_page, mirror_with_question):
     page = phone_page("light")
     page.goto(f"{mirror_with_question.base}/?view=tickets")
+    page.get_by_text("New ticket request").click()
     page.get_by_label("Title").fill("Rotate the API key")
     page.get_by_label("Details").fill("before Friday")
     page.get_by_role("button", name="Send request").click()
@@ -556,16 +557,16 @@ def test_a_needs_you_card_answers_its_question_in_place(phone_page, mirror_with_
     page = phone_page("light")
     page.on("dialog", lambda d: pytest.fail(f"browser popup: {d.message}"))
     card = page.locator(f'.ncard[data-n="{mirror_with_question.n}"]')
-    opt = card.get_by_role("button", name="1 · ISO 8601")
+    opt = card.get_by_role("button", name="A · ISO 8601")
     opt.wait_for()
     assert opt.locator(".qa-rec").inner_text().strip() == "recommended"
-    assert card.get_by_role("button", name="2 · Local time").locator(".qa-rec").count() == 0
+    assert card.get_by_role("button", name="B · Local time").locator(".qa-rec").count() == 0
     for h in card.locator(".qa-opt").evaluate_all("els => els.map(e => e.getBoundingClientRect().height)"):
         assert h >= 48
     assert not card.get_by_role("button", name="Send answer").is_visible()
     opt.click()
     assert opt.get_attribute("aria-pressed") == "true"
-    card.get_by_text("Answer Q1 with 1 · ISO 8601?").wait_for()
+    card.get_by_text("Answer Q1 with A · ISO 8601?").wait_for()
     assert mirror_with_question.decisions() == []                         # the first tap never commits
     card.get_by_role("button", name="Cancel").click()
     assert opt.get_attribute("aria-pressed") == "false"
@@ -581,7 +582,7 @@ def test_a_needs_you_card_answers_its_question_in_place(phone_page, mirror_with_
     # after a reload the card says the answer is on its way instead of offering the options again
     page.reload()
     card.get_by_text("Sent · waiting for the desktop").wait_for()
-    assert card.get_by_role("button", name="1 · ISO 8601").is_disabled()
+    assert card.get_by_role("button", name="A · ISO 8601").is_disabled()
 
 
 def test_an_approval_card_opens_the_read_and_approve_view(phone_page, mirror_with_question):
@@ -644,19 +645,19 @@ def test_a_queued_answer_shows_queued_after_a_reload(phone_page, mirror_with_que
     page = phone_page("light")
     _block_decision_posts(page)
     card = page.locator(f'.ncard[data-n="{mirror_with_question.n}"]')
-    card.get_by_role("button", name="1 · ISO 8601").click()
+    card.get_by_role("button", name="A · ISO 8601").click()
     card.get_by_role("button", name="Send answer").click()
     card.get_by_text("Queued · sends when you're online").wait_for()
     page.reload()
     card.get_by_text("Queued · sends when you're online").wait_for()
-    assert card.get_by_role("button", name="1 · ISO 8601").is_disabled()
+    assert card.get_by_role("button", name="A · ISO 8601").is_disabled()
 
 
 def test_a_queued_answer_to_q1_never_hides_q2(phone_page, mirror_with_question):
     page = phone_page("light")
     _block_decision_posts(page)
     card = page.locator(f'.ncard[data-n="{mirror_with_question.n}"]')
-    card.get_by_role("button", name="1 · ISO 8601").click()
+    card.get_by_role("button", name="A · ISO 8601").click()
     card.get_by_role("button", name="Send answer").click()
     card.get_by_text("Queued · sends when you're online").wait_for()
     q1 = EXAMPLE_DOC["questions"][0]
@@ -666,7 +667,7 @@ def test_a_queued_answer_to_q1_never_hides_q2(phone_page, mirror_with_question):
     mirror_with_question.push({**EXAMPLE_DOC, "questions": [{**q1, "answer": "A"}, q2],
                                "needs": [{"kind": "answer", "qids": ["Q2"]}]}, rev=2, needs="question", open_questions=1)
     page.reload()
-    opt = card.get_by_role("button", name="2 · Semicolon")
+    opt = card.get_by_role("button", name="S · Semicolon")
     opt.wait_for()
     assert opt.is_enabled()
     assert card.get_by_text("Queued · sends when you're online").count() == 0
@@ -674,7 +675,7 @@ def test_a_queued_answer_to_q1_never_hides_q2(phone_page, mirror_with_question):
 
 def test_arming_keeps_focus_on_the_option(phone_page, mirror_with_question):
     page = phone_page("light")
-    opt = page.locator(f'.ncard[data-n="{mirror_with_question.n}"]').get_by_role("button", name="2 · Local time")
+    opt = page.locator(f'.ncard[data-n="{mirror_with_question.n}"]').get_by_role("button", name="B · Local time")
     opt.click()
     assert page.evaluate("() => document.activeElement.dataset.key") == "B"
 
@@ -683,6 +684,7 @@ def test_typing_a_ticket_request_survives_a_list_refresh(phone_page, mirror_with
     page = phone_page("light")
     page.goto(f"{mirror_with_question.base}/?view=tickets")
     page.locator('#needs-list[data-from="server"]').wait_for(state="attached")
+    page.get_by_text("New ticket request").click()
     title = page.get_by_label("Title")
     title.fill("Rotate the API")
     page.evaluate("() => { window.__card = document.querySelector('.req-card'); }")

@@ -2,11 +2,12 @@
 import { b64u } from "./crypto.js";
 import { api, ApiError } from "./api.js";
 import { el, toast } from "./ui.js";
-import { buildCode, buildCommands, defaultOs, nextState, TERMINAL, TOKEN_TTL_MS } from "./onboard-cmd.js";
+import { buildCode, buildCommands, defaultOs, deviceSlug, nextState, TERMINAL, TOKEN_TTL_MS } from "./onboard-cmd.js";
 import { approveDevice, rejectDevice, localFingerprint, whileBusy } from "./approve.js";
 import { installPendingIndicator } from "./pending.js";
 
 let state = null;
+const NAME_HINT = "Leave empty to use the computer's hostname. Give each repo or machine its own name, or two devices end up with the same one.";
 
 function stopTimers(s) {
   s.timers.forEach(clearInterval);
@@ -37,7 +38,8 @@ function panel(kind, main, inspect) {
 }
 
 function showCommand(s, code) {
-  const c = buildCommands(location.origin, code);
+  s.code = code;
+  const c = buildCommands(location.origin, code, s.name.value);
   const panels = { posix: panel("posix", c.posix, c.posixInspect), windows: panel("windows", c.windows, c.windowsInspect) };
   const tabs = {
     posix: el("button", { type: "button", role: "tab", class: "tab", "aria-controls": "onboard-panel-posix" }, "macOS / Linux"),
@@ -58,7 +60,9 @@ function showCommand(s, code) {
     panels.windows,
     el("p", { class: "hint" }, "Expires in ", s.countdown, " · single use · the device then waits for your approval"),
   );
-  select(defaultOs(navigator.userAgent));
+  select(s.os || defaultOs(navigator.userAgent));
+  tabs.posix.addEventListener("click", () => { s.os = "posix"; });
+  tabs.windows.addEventListener("click", () => { s.os = "windows"; });
   s.result.hidden = false;
   s.gen.hidden = true;
 }
@@ -207,23 +211,35 @@ export function openOnboardModal() {
   const result = el("div", { class: "onboard-result", hidden: "" });
   const pending = el("div", { class: "onboard-pending", hidden: "", "aria-live": "polite" });
   const gen = el("button", { class: "btn btn-accent", type: "button" }, "Generate");
+  const name = el("input", {
+    class: "input", type: "text", id: "onboard-device-name", maxlength: "64", autocomplete: "off",
+    autocapitalize: "off", spellcheck: "false", placeholder: "Device name (optional)",
+  });
+  const nameNote = el("p", { class: "hint", id: "onboard-name-note" }, NAME_HINT);
   const close = el("button", { class: "icon-btn", type: "button", "aria-label": "Close" }, "×");
   const dlg = el(
     "dialog",
     { class: "onboard", "aria-labelledby": "onboard-title" },
     el("div", { class: "modal-head" }, el("h2", { id: "onboard-title" }, "Onboard a new device"), close),
     el("p", { class: "hint" }, "Creates a one-time link, valid for 15 minutes. The device then shows a fingerprint; it gets the key only after you approve that fingerprint here."),
+    el("label", { class: "field" }, el("span", { class: "label" }, "Device name ", el("span", { class: "label-opt" }, "optional")), name),
+    nameNote,
     gen,
     result,
     pending,
     status,
   );
   const s = {
-    dlg, result, pending, status, countdown, gen,
+    dlg, result, pending, status, countdown, gen, name, nameNote, code: null, os: null,
     tokenId: null, timers: [], rendered: null,
     fsm: { phase: "idle", expiresAt: 0, device: null },
   };
   state = s;
+  name.addEventListener("input", () => {
+    const slug = deviceSlug(name.value);
+    nameNote.textContent = name.value && slug !== name.value ? `The device will be called "${slug}".` : NAME_HINT;
+    if (s.code && s.fsm.phase === "waiting") showCommand(s, s.code);   // same one-time link, new --device
+  });
   gen.addEventListener("click", () => generate(s).catch((e) => onError(s, e)));
   close.addEventListener("click", closeOnboardModal);
   dlg.addEventListener("cancel", (e) => {

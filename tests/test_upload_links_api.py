@@ -154,7 +154,7 @@ def test_session_write_checks_origin(owner, app):
     c.cookies = owner.client.cookies
     r = c.post("/api/upload-links", json={"uuid": os.urandom(16).hex(), "key_version": 1,
                                           "wrapped_lpriv": _wlp(), "ttl": "1d"})
-    assert r.status_code == 403 and r.json()["error"] == "bad_origin"
+    assert r.status_code == 403 and r.json()["error"] in ("bad_origin", "origin_required")
 
 
 # --- list ---------------------------------------------------------------------------------

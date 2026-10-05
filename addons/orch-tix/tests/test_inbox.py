@@ -343,6 +343,16 @@ def test_health_without_a_space_says_how(tix_ws):
     assert snap.health == "auth_required" and "sharing space create" in snap.message
 
 
+def test_unset_cli_path_is_not_a_login_problem(tix_ws):
+    """QA TF-02: with no sharing path nothing needs a login; the health and inbox providers say so quietly."""
+    tix_ws.enable("orch-tix", {"sharing_path": ""})
+    tix = tix_ws.load(ADDON, runner=CapturingRunner.from_dir(REC, strict=True))
+    for pid, scope in (("health", "default"), ("inbox", "space")):
+        snap = next(p for p in tix.obj.providers if p.id == pid).fetch(tix.ctx.provider_context(), scope, None)
+        assert snap.health == "never_fetched", pid
+        assert "sharing CLI path" in snap.message
+
+
 def test_done_ticket_unlinks_after_7_days(tix_ws, tix, runner):
     tid = Ops(tix_ws.ws, AGENT).new("Export").id
     tix.obj.state.link(tid, by="you", auto=False)

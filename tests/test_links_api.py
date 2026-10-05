@@ -141,7 +141,7 @@ def test_session_writes_check_origin(owner, app, method, path, origin):
     c.cookies = owner.client.cookies
     headers = {} if origin is None else {"Origin": origin}
     r = c.request(method, path, json={"wrapped_dek_link": _wdl(), "ttl": "7d"}, headers=headers)
-    assert r.status_code == 403 and r.json()["error"] == "bad_origin"
+    assert r.status_code == 403 and r.json()["error"] in ("bad_origin", "origin_required")
 
 
 @pytest.mark.parametrize("method,path", OWNER_ROUTES)

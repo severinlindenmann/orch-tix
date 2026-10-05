@@ -54,8 +54,7 @@ The full, honest version, including every cleartext column, is in
 ## Features
 
 - **Short IDs.** Every file is `FILE7`, never reused, case-insensitive. Easy to say to an agent.
-- **Web app and installable PWA.** Upload, paste a screenshot, drop a folder (zipped in the
-  browser), record a voice note, preview images, Markdown, JSON and text in place, mark files done.
+- **Web app and installable PWA.** Upload, paste a screenshot, record a voice note, preview images, Markdown, JSON and text in place, mark files done.
   Offline uploads wait in an encrypted outbox until you are back online.
 - **Transcripts.** Optional automatic transcription of voice notes (see the exception above).
 - **Expiry.** Files expire after 1, 7 or 30 days, or never.
@@ -100,7 +99,7 @@ workflow for agents. The `orch-tix` addon
 ([addons/orch-tix](addons/orch-tix)) mirrors the tickets that need you (a question, an approval, a
 verdict) into TIX, sealed under your master key. The PWA lists them under **Needs you**.
 
-The phone writes decisions, never tickets. An answer or approval is sealed, sent to your desktop
+The phone writes decisions, never tickets. It can also send short requests to your agents. An answer or approval is sealed, sent to your desktop
 and applied there. An approval binds a hash of exactly the text the phone showed, so if the plan
 changed in the meantime, nothing is approved.
 

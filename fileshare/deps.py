@@ -105,8 +105,12 @@ def client_ip(request: Request) -> str:
 
 
 def check_origin(request: Request) -> None:
-    if request.headers.get("Origin", "") != request.app.state.settings.public_url:
-        raise api_error(403, "bad_origin")
+    public_url = request.app.state.settings.public_url
+    origin = request.headers.get("Origin")
+    if not origin:
+        raise api_error(403, "origin_required", f"send the header `Origin: {public_url}`")
+    if origin != public_url:
+        raise api_error(403, "bad_origin", f"the Origin header must be exactly {public_url}")
 
 
 @dataclass

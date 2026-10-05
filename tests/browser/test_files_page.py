@@ -110,3 +110,39 @@ def test_hostile_name_and_note_render_as_text(ui_page, sim):
         assert item.locator("img").count() == 0
     assert ui_page.locator("img").count() == 0
     assert ui_page.evaluate("window.__pwned") is None
+
+
+def test_only_done_files_say_all_caught_up_not_no_files_yet(ui_page, sim):
+    """QA TF-04: with the Done chip off and only done files, the page must not claim there are no files."""
+    for i in range(2):
+        f = sim.upload(f"done{i}.txt", b"x")
+        assert sim.request("POST", f"/api/files/{f['id']}/ack").status_code == 204
+    ui_page.evaluate("localStorage.removeItem('fileshare.showAcked')")
+    ui_page.reload()
+    expect(ui_page.locator("#all-done")).to_be_visible()
+    expect(ui_page.locator("#all-done-count")).to_have_text("2 done files are hidden.")
+    expect(ui_page.locator("#empty")).to_be_hidden()
+    ui_page.get_by_role("button", name="Show done files").click()
+    expect(rows(ui_page)).to_have_count(2)
+    expect(ui_page.locator("#all-done")).to_be_hidden()
+
+
+def test_list_header_stays_on_two_rows_with_a_file_open(ui_page, sim):
+    """QA TF-03: in the 408px list column the count must not wrap and the filter icon is not clipped."""
+    for i in range(9):
+        sim.upload(f"open{i}.txt", b"x")
+    for i in range(28):
+        f = sim.upload(f"done{i}.txt", b"x")
+        sim.request("POST", f"/api/files/{f['id']}/ack")
+    ui_page.set_viewport_size({"width": 1280, "height": 800})
+    ui_page.evaluate("localStorage.setItem('fileshare.showAcked', '1')")
+    ui_page.reload()
+    rows(ui_page).first.click()
+    count = ui_page.locator("#count")
+    expect(count).to_contain_text("done")
+    assert count.bounding_box()["height"] < 24, "the count wrapped onto several lines"
+    col = ui_page.locator(".list-col").bounding_box()
+    for sel in ("#droplink-btn", "#upload-btn", "#paste-btn", "#note-btn"):
+        box = ui_page.locator(sel).bounding_box()
+        assert box["x"] >= col["x"] and box["x"] + box["width"] <= col["x"] + col["width"] + 1, sel
+    assert ui_page.locator("#upload-btn").bounding_box()["y"] > count.bounding_box()["y"] + 10, "dock shares the title row"

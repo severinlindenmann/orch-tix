@@ -60,10 +60,14 @@ export async function loadJoins() {
     ({ requests = [] } = await api("GET", "/api/join-requests"));
   } catch {
     list.replaceChildren(el("p", { class: "muted" }, "Couldn't load requests."));
+    if ($("join-card")) $("join-card").hidden = false;
     return;
   }
   const status = $("join-status");
   if (status) status.textContent = requests.length ? `${requests.length} waiting` : "";
+  // an empty block is not shown on every visit; a request (or a load error above) is
+  const card = $("join-card");
+  if (card) card.hidden = !requests.length;
   if (!requests.length) {
     list.replaceChildren(el("p", { class: "muted" }, "No requests."));
     return;
@@ -109,6 +113,7 @@ export async function loadArchive() {
     list.replaceChildren(el("p", { class: "muted" }, "No archived tickets."));
     return;
   }
+  if ($("archive-card")) $("archive-card").hidden = false;
   list.replaceChildren(...rows.map(({ t, title, body }) => el("details", { class: "archive-row", dataset: { n: String(t.n) } },
     el("summary", {}, el("b", {}, t.id), " ", title ?? "Couldn't decrypt this ticket",
       el("span", { class: "muted archive-when" }, archivedLine(t.archived_at))),
@@ -138,10 +143,14 @@ export async function mountTitlesSwitch() {
 function scrollToAnchor() {
   const id = location.hash.slice(1);
   if (!/^(devices|join|pair|notifications|archive)$/.test(id)) return;
+  const adv = $(id)?.closest("details.adv");
+  if (adv) adv.open = true;                      // pairing and the archive live in the Advanced fold
   $(id)?.closest("section")?.scrollIntoView({ block: "start" });
 }
 
 if (typeof document !== "undefined" && document.body?.classList.contains("page-settings")) {
+  // Advanced is folded on a phone; a desktop has the room.
+  if (globalThis.matchMedia?.("(min-width: 900px)").matches && $("advanced")) $("advanced").open = true;
   loadJoins();
   loadArchive();
   mountTitlesSwitch();

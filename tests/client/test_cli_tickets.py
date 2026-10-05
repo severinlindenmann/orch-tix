@@ -59,7 +59,7 @@ def test_409_codes_exit_7(sharing, code):
 # ---------------------------------------------------------------- read-only since 2.0.0
 
 def test_version_is_2(sharing):
-    assert sharing.VERSION == "2.1.0"
+    assert sharing.VERSION == "2.1.1"
 
 
 @pytest.mark.parametrize("cmd", ["new", "claim", "release", "update", "ask", "test", "edit", "move"])

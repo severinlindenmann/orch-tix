@@ -246,4 +246,4 @@ def test_dock_sits_in_the_list_header_on_desktop(ui_page):
         expect(b).to_be_visible()
         box = b.bounding_box()
         assert head["y"] <= box["y"] and box["y"] + box["height"] <= head["y"] + head["height"], sel
-    expect(ui_page.locator("#dock .dock-label")).to_have_text("Upload")
+    expect(ui_page.locator("#upload-btn .dock-label")).to_have_text("Upload")

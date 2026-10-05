@@ -35,7 +35,7 @@ orch addon enable orch-tix          # in the workspace
 
 Then, in this workspace:
 
-1. Install the `sharing` skill (TIX → Settings → Add a device).
+1. Install the `sharing` skill (in TIX, Settings → Devices → **Onboard device**; the command is `sharing`).
 2. Run `sharing space create --label "<workspace>"` once.
 3. On Workspace & addons → TIX, save the **absolute** path of the CLI:
    `<workspace>/.claude/skills/sharing/sharing`.

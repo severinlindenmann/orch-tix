@@ -34,7 +34,7 @@ export async function loadMessages(mk) {
 }
 
 function messageCard({ row, view }, onAck) {
-  const ack = el("button", { type: "button", class: "btn", dataset: { fkey: `ack:${row.id}` } }, "Ack");
+  const ack = el("button", { type: "button", class: "btn", dataset: { fkey: `ack:${row.id}` }, "aria-label": "Mark as read" }, "Mark as read");
   ack.addEventListener("click", async () => {
     ack.disabled = true;
     try {
