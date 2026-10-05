@@ -319,3 +319,17 @@ def test_rows_left_out_of_the_cached_list_are_counted_offline(phone_page, mirror
         expect(page.locator("#needs-loading")).to_be_hidden()
     finally:
         context.set_offline(False)
+
+
+def test_offline_a_ticket_the_phone_has_opens_from_the_last_known_list(phone_page, mirror_with_question, context):
+    """QA T08: 'Review and approve' offline used to end in 'You're offline'; the ticket now opens from the cached list."""
+    page = phone_page("light")
+    card(page, mirror_with_question).get_by_text("Acme Energy").wait_for()
+    context.set_offline(True)
+    try:
+        page.goto(f"{mirror_with_question.base}/t/{mirror_with_question.n}")
+        expect(page.locator("#ticket-error")).to_contain_text("This is the copy from")
+        expect(page.locator("#ticket")).not_to_contain_text("No such ticket")
+        expect(page.locator("#ticket h1, #ticket h2").first).to_be_visible()
+    finally:
+        context.set_offline(False)

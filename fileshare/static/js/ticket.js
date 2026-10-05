@@ -16,7 +16,7 @@ import { openRecorder } from "./recorder.js";
 import { maxUpload, uploadFiles } from "./upload.js";
 import { sendDecisions } from "./decision-send.js";
 import { pairingFor } from "./pairing.js";
-import { cacheLabels, keysOrLogin, loadCachedLists, loadDecisions, loadSpaces, openRow, signInAgain, watchMirrors } from "./mirrors-data.js";
+import { cacheLabels, cachedRow, keysOrLogin, loadCachedLists, loadDecisions, loadSpaces, openRow, signInAgain, watchMirrors } from "./mirrors-data.js";
 import {
   NEEDS_LABEL, QUEUED_TEXT, SENT_PAIRED_TEXT, SENT_TEXT, UNKNOWN_SPACE, VERDICT_VALUE, VOICE_TTL, approvalGate, canApproveOnPhone,
   approveTogether, gateCovers, normalizedGateText, history, verdictCanonical, verdictHash, verdictView, decisionValue, notSentText, splitQueued, canSendAnswer, cardTitle,
@@ -729,9 +729,19 @@ async function refreshDecisions() {
 }
 
 async function load() {
-  const r = await api("GET", `/api/mirrors/TIX-${state.n}`);
+  let r, row;
+  state.cachedAt = null;
+  try {
+    r = await api("GET", `/api/mirrors/TIX-${state.n}`);
+    row = await openRow(state.keys.mk, r);
+  } catch (e) {
+    // No network (QA T08): a ticket the phone already has opens from the last-known list, marked as such.
+    const c = e?.status === 0 && !state.row ? await cachedRow(state.keys.mk, state.n) : null;
+    if (!c) throw e;
+    row = c.row;
+    state.cachedAt = c.at;
+  }
   const prevHash = JSON.stringify(state.doc?.questions?.map((q) => q.hash) ?? null) + JSON.stringify(state.doc?.gates ?? null);
-  const row = await openRow(state.keys.mk, r);
   // An older snapshot than the one on screen, or than the newest this browser opened (openRow's
   // high-water mark): keep the newer one on screen, or show none.
   state.rollback = Boolean(row.rollback || (state.doc && row.doc && isRollback(state.doc, row.doc)));
@@ -776,7 +786,9 @@ export async function start() {
         try {
           await load();
           retries = 0;
-          document.getElementById("ticket-error").hidden = true;
+          const err = document.getElementById("ticket-error");
+          err.hidden = !state.cachedAt;
+          if (state.cachedAt) err.querySelector("span").textContent = `You're offline. This is the copy from ${new Date(state.cachedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`;
           render();
         } catch (e) {
           // The service worker answers with the cached shell, so a gone session shows here: sign in again.

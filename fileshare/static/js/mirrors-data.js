@@ -97,6 +97,22 @@ export async function loadCachedLists(mk) {
   return { spaces: await openSpaces(mk, s), rows, skipped: opened.length - rows.length, at: Math.min(spaces.at, mirrors.at) };
 }
 
+// One ticket from the last-known list, for a phone with no network (QA T08): {row, at} or null when the list has
+// no such ticket, was never stored, or the copy is older than the newest this browser opened. Opened like any cached row.
+export async function cachedRow(mk, n) {
+  let mirrors;
+  try {
+    mirrors = await getValue(LISTS, "mirrors");
+  } catch {
+    return null;
+  }
+  const list = listOf(mirrors, "mirrors");
+  const m = list && list.find((x) => x && (x.n === n || x.id === `TIX-${n}`));
+  if (!m) return null;
+  const row = await openRow(mk, m, { cached: true });
+  return row && row.doc ? { row, at: mirrors.at } : null;
+}
+
 // A row whose doc is older than the newest this browser opened for that ticket (the "seen" high-water
 // mark) keeps doc null and rollback true; otherwise the mark moves forward. Best effort without IndexedDB.
 // cached: the row comes from the last-known list (loadCachedLists), not the server just now. Such a row
