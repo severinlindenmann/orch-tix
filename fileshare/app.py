@@ -11,6 +11,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from fileshare import messages as messages_mod
 from fileshare import mirrors as mirrors_mod
+from fileshare.bridge import Bridge
 from fileshare.blobs import BlobStore
 from fileshare.db import backfill_device_fingerprints, connect, migrate
 from fileshare.expiry import expire_files, expire_upload_links, sweep_forever
@@ -18,6 +19,7 @@ from fileshare.headers import SecurityHeadersMiddleware
 from fileshare.push import SubprocessPusher
 from fileshare.routes import auth as auth_routes
 from fileshare.routes import decisions as decisions_routes
+from fileshare.routes import bridge as bridge_routes
 from fileshare.routes import devices, files, links, messages, mirrors, onboarding, uploadlinks
 from fileshare.routes import push as push_routes
 from fileshare.routes import tickets as tickets_routes
@@ -59,6 +61,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # (global-constraints.md Review Focus 1).
         live |= {r["file_uuid"] for r in conn.execute(
             "SELECT file_uuid FROM upload_links WHERE file_uuid IS NOT NULL AND file_n IS NULL")}
+        conn.execute("DELETE FROM bridge_msgs")    # the bridge's routes live in memory: rows from before a restart are orphans
         last_seq = conn.execute("SELECT COALESCE(MAX(seq), 0) FROM ticket_events").fetchone()[0]
         last_decision = conn.execute("SELECT COALESCE(MAX(seq), 0) FROM decisions").fetchone()[0]
         last_message = conn.execute("SELECT COALESCE(MAX(seq), 0) FROM messages").fetchone()[0]
@@ -93,6 +96,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.ticket_bus = Bus(last_seq)                        # long-poll wakeups (spec T6)
     app.state.inbox_bus = Bus(last_decision)                    # decision long-poll wakeups (TIX spec §9)
     app.state.message_bus = Bus(last_message)                   # message long-poll wakeups (TIX spec §8)
+    app.state.bridge = Bridge()                                 # remote bridge mailboxes (R8)
     app.state.pusher = SubprocessPusher(settings, settings.db_path)  # Web Push through a subprocess (spec T7)
     links.install_log_redaction()        # access lines carry /p/<token> and /api/public/<token>
     app.add_middleware(CookieRefreshMiddleware)
@@ -125,6 +129,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(mirrors.router)          # before tickets_routes.router (TIX spec §9)
     app.include_router(decisions_routes.router)
     app.include_router(messages.router)
+    app.include_router(bridge_routes.router)
     app.include_router(tickets_routes.router)
     app.include_router(push_routes.router)
     app.include_router(pages_routes.router)

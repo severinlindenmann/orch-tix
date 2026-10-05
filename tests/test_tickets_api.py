@@ -30,7 +30,7 @@ def _db(settings) -> sqlite3.Connection:
 def test_migration_creates_the_ticket_tables(app, settings):
     conn = _db(settings)
     try:
-        assert conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == "8"
+        assert conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == "9"
         names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     finally:
         conn.close()
