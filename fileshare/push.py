@@ -119,11 +119,11 @@ class SubprocessPusher:
     def notify(self, ticket: dict, event: dict) -> None:
         self._submit(self._deliver, ticket, event)
 
-    def notify_payload(self, payload: dict) -> None:
+    def notify_payload(self, payload: dict, exclude_sessions: frozenset | None = None) -> None:
         """Push v2 (TIX spec §7): one ready cleartext payload to every subscription. The caller builds it
         from cleartext routing only (space id, TIX id, kind, counts), never a title or text."""
         self._submit(self._deliver_payload, json.dumps(payload, separators=(",", ":")), topic_for(payload),
-                     ttl_for(payload), payload.get("k") == "clear")
+                     ttl_for(payload), payload.get("k") == "clear", frozenset(exclude_sessions or ()))
 
     def _deliver(self, ticket: dict, event: dict) -> None:
         """Push v1 for a legacy ticket: build the fields, then hand the payload on."""
@@ -133,10 +133,13 @@ class SubprocessPusher:
             fields["m"] = True        # a manual test: nothing ran, so not "tests passed"
         self._deliver_payload(json.dumps(fields))
 
-    def _deliver_payload(self, payload: str, topic: str | None = None, ttl: int = TTL_S, is_clear: bool = False) -> None:
+    def _deliver_payload(self, payload: str, topic: str | None = None, ttl: int = TTL_S, is_clear: bool = False,
+                         exclude_sessions: frozenset = frozenset()) -> None:
         conn = connect(self.db_path)
         try:
-            subs = conn.execute("SELECT id, endpoint, p256dh, auth FROM push_subs").fetchall()
+            subs = conn.execute("SELECT id, endpoint, p256dh, auth, session_hash FROM push_subs").fetchall()
+            if exclude_sessions:        # the phone that made the decision needs no note about it (QA #55)
+                subs = [r for r in subs if r["session_hash"] not in exclude_sessions]
             if is_clear:        # iOS cannot replace a notification by tag: a clear would only add one (see replaces_by_tag)
                 subs = [r for r in subs if replaces_by_tag(r["endpoint"])]
             if not subs:

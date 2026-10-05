@@ -15,7 +15,7 @@ class Recorder:
     def notify(self, ticket, event):
         raise AssertionError("v1 push for a mirror")
 
-    def notify_payload(self, payload):
+    def notify_payload(self, payload, exclude_sessions=None):
         self.payloads.append(payload)
 
 
@@ -95,7 +95,7 @@ def test_message_push_names_space_and_ticket_only(device_client, pushes):
 
 def test_a_failing_pusher_never_fails_a_mirror_write(app, device_client):
     class Boom:
-        def notify_payload(self, payload):
+        def notify_payload(self, payload, exclude_sessions=None):
             raise RuntimeError("push down")
 
     app.state.pusher = Boom()

@@ -882,3 +882,26 @@ test("needs-spaces never closes what the list cannot know yet: a notification ne
   await ask({ spaces: [], tickets: [], messages: 0, at: 3000 });                 // now both are older than the request
   assert.equal(w.notifications.length, 0);
 });
+
+test("push v2: a clear that says it was decided on a phone is worded so, join clears name the outcome", async () => {
+  const w = load({ idb: LABELS });
+  await push(w, { v: 2, s: S1, t: "TIX-1", k: "question", n: 1, c: 1, cs: 1 });
+  const phone = await push(w, { v: 2, s: S1, t: "TIX-1", k: "clear", via: "phone", n: 0, c: 0, cs: 0 });
+  assert.equal(phone.title, "Decided on a phone");
+  assert.equal(phone.options.body, "Decided on a phone · Acme Energy");
+  const ok = await push(w, { v: 2, s: S1, t: "", k: "clear", w: "join", r: "approved", n: 0, c: 0 });
+  assert.equal(ok.title, "Workspace request approved");
+  assert.equal(ok.options.tag, `tix:join:${S1}`);
+  const no = await push(w, { v: 2, s: S1, t: "", k: "clear", w: "join", r: "denied", n: 0, c: 0 });
+  assert.equal(no.title, "Workspace request denied");
+});
+
+test("needs-spaces closes a join notification whose request is no longer pending", async () => {
+  const w = load({ idb: LABELS });
+  await push(w, { v: 2, s: S1, t: "", k: "join", n: 1, c: 1 });
+  assert.equal(w.notifications.length, 1);
+  const ev = { data: { type: "needs-spaces", spaces: [], tickets: [], messages: 0, joins: [] }, waits: [], waitUntil(p) { this.waits.push(p); } };
+  w.listeners.message(ev);
+  await Promise.all(ev.waits);
+  assert.equal(w.notifications.length, 0);
+});

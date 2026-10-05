@@ -93,7 +93,8 @@ def get_join_request(space_id: str, req_id: str, principal: Principal = Depends(
 def _decide(request: Request, space_id: str, req_id: str, principal: Principal, conn, decision: str) -> dict:
     return mirrors.decide_join(conn, request.app, space_id=_space_id(space_id), req_id=_join_id(req_id),
                                decision=decision,
-                               decided_by=session_name(conn, principal.session_hash) or "browser")
+                               decided_by=session_name(conn, principal.session_hash) or "browser",
+                               session_hash=principal.session_hash)
 
 
 @router.post("/api/spaces/{space_id}/join-requests/{req_id}/approve")

@@ -41,7 +41,7 @@ class Recorder:
     def notify(self, ticket, event):
         raise AssertionError("v1 push for a space")
 
-    def notify_payload(self, payload):
+    def notify_payload(self, payload, exclude_sessions=None):
         self.payloads.append(payload)
 
 
