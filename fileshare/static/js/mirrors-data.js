@@ -115,6 +115,7 @@ export async function cachedRow(mk, n) {
   if (!m) return null;
   const row = await openRow(mk, m, { cached: true });
   return row && row.doc ? { row, at: mirrors.at } : null;
+}
 
 // The last-known spaces alone, opened with MK (the labels for an offline ticket page): a Map like loadSpaces, or null.
 export async function loadCachedSpaces(mk) {
