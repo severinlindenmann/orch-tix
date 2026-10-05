@@ -393,7 +393,7 @@ def test_v1_keys_survive_the_upgrade_to_the_outbox_db(page, live_server, sim):
     page.wait_for_load_state("networkidle")
     assert page.url == live_server.url + "/files"          # still signed in: no bounce to /login
     expect(page.locator(f'.frow[data-id="{f["id"]}"]')).to_contain_text("before-upgrade.txt")  # MK decrypts
-    assert page.evaluate(DB_STATE) == {"version": 6, "stores": ["keys", "labels", "lists", "outbox", "pairs", "prefs", "seen"]}
+    assert page.evaluate(DB_STATE) == {"version": 7, "stores": ["keys", "labels", "lists", "outbox", "pairs", "prefs", "seen", "tickets"]}
     keys = page.evaluate("async () => { const k = await (await import('/static/js/keystore.js')).loadKeys();"
                          " return k && { mk: k.mk.extractable, kek: k.kek.extractable, v: k.keyVersion }; }")
     assert keys == {"mk": False, "kek": False, "v": sim.key_version}

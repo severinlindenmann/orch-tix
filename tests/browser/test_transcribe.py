@@ -322,7 +322,7 @@ def test_a_recording_made_offline_is_transcribed_after_it_uploads(page, live_ser
       const q = indexedDB.open("fileshare");
       q.onsuccess = () => { const names = [...q.result.objectStoreNames]; q.result.close(); res(names); };
     })""")
-    assert sorted(stores) == ["keys", "labels", "lists", "outbox", "pairs", "prefs", "seen"]
+    assert sorted(stores) == ["keys", "labels", "lists", "outbox", "pairs", "prefs", "seen", "tickets"]
 
 
 def test_settings_language_and_toggle_survive_a_reload_and_keep_unknown_keys(page, live_server, sim):
