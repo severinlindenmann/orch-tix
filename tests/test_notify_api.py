@@ -204,22 +204,25 @@ def test_a_join_request_always_notifies(space, other_device_client, pushes):
 
 # --- migration -------------------------------------------------------------------------------------------------
 
+NOTIFY_MIGRATION = 12   # 010 push health (#61) and 011 decision origin (#66) come first
+
+
 def test_the_migration_turns_existing_mirrors_and_spaces_off(tmp_path, monkeypatch):
     import fileshare.db as db
     old = tmp_path / "m"
     old.mkdir()
     for p in sorted(db.MIGRATIONS_DIR.glob("[0-9][0-9][0-9]_*.sql")):
-        if int(p.name[:3]) < 10:
+        if int(p.name[:3]) < NOTIFY_MIGRATION:      # every migration before the notify one (others may sit between)
             (old / p.name).write_text(p.read_text())
     conn = db.connect(tmp_path / "old.db")
     monkeypatch.setattr(db, "MIGRATIONS_DIR", old)
-    assert db.migrate(conn) == 9
+    assert db.migrate(conn) < NOTIFY_MIGRATION
     conn.execute("PRAGMA foreign_keys=OFF")        # the device a real row points at is not what this test is about
     conn.execute("INSERT INTO spaces (id, owner_device, key_version, enc_label, created_at) VALUES ('s1','d1',1,'x','2026-01-01')")
     conn.execute("INSERT INTO tickets (uuid, key_version, status, project, created_by_name, created_at, updated_at, mode, space_id)"
                  " VALUES ('u1', 1, 'waiting', 'p', 'n', '2026-01-01', '2026-01-01', 'mirror', 's1')")
     monkeypatch.undo()
-    assert db.migrate(conn) == 10
+    assert db.migrate(conn) >= NOTIFY_MIGRATION
     row = conn.execute("SELECT notify, notify_phone_rev FROM tickets").fetchone()
     assert (row["notify"], row["notify_phone_rev"]) == (0, 0)
     assert conn.execute("SELECT notify_messages FROM spaces").fetchone()[0] == 0
