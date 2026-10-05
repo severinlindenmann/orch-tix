@@ -104,6 +104,12 @@ def index(request: Request, conn=Depends(get_db)):
     return _gated(request, conn, "index", "/")
 
 
+@router.get("/workspaces")
+def workspaces_page(request: Request, conn=Depends(get_db)):
+    """The status page (Remote R9): every workspace with its state. ?open=<space> is the snapshot placeholder."""
+    return _gated(request, conn, "workspaces", "/workspaces")
+
+
 @router.get("/files")
 def files_page(request: Request, conn=Depends(get_db)):
     # As "/" was before Task 9: the shell needs setup only; files.js sends a signed-out browser to login.
