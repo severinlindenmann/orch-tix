@@ -576,13 +576,13 @@ test("push v2: with the switch on, a copy older than this phone's high-water mar
   assert.ok(Number.isInteger(m.obj.mirror_rev) && Number.isInteger(m.obj.gen), "the vector doc carries gen and mirror_rev");
   const mk = await globalThis.crypto.subtle.importKey("raw", Buffer.from(VEC.mk, "hex"), "AES-GCM", false, ["encrypt", "decrypt"]);
   const row = { uuid: m.ticket_uuid, space: VEC.space_id, wrapped_dek: VEC.wrapped_dek.env, enc_content: m.env };
-  const seen = { "TIX-42": { gen: m.obj.gen, mirror_rev: m.obj.mirror_rev + 1 } };
+  const seen = { [`${VEC.space_id}|${m.obj.id}`]: { gen: m.obj.gen, mirror_rev: m.obj.mirror_rev + 1 } };
   const w = load({ idb: { labels: { [VEC.space_id]: { label: "Acme Energy", titles: true } }, prefs: { show_titles: true },
     keys: { current: { mk } }, seen },
     net: async () => res(JSON.stringify(row)) });
   const got = await push(w, { v: 2, s: VEC.space_id, t: "TIX-42", k: "question", n: 1, c: 1 });
   assert.equal(got.options.body, "Acme Energy · 1 question");
-  assert.ok(w.reads.some(([store, key]) => store === "seen" && key === "TIX-42"));
+  assert.ok(w.reads.some(([store, key]) => store === "seen" && key === `${VEC.space_id}|${m.obj.id}`));
 });
 
 test("push v2: a title only after the routing binding check; else the space-only text", async () => {

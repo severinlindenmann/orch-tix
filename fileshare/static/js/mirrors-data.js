@@ -7,7 +7,7 @@
 // once and offline; a cached row is opened on every load through the same checks as a fresh one.
 import { api, ApiError } from "./api.js";
 import { LABELS, LISTS, SEEN, clearLists, getValue, putValue } from "./db.js";
-import { highWater, isRollback, openQuestionCount, phoneNeed } from "./mirror-model.js";
+import { highWater, isRollback, openQuestionCount, phoneNeed, seenKey } from "./mirror-model.js";
 import { mapLimit } from "./format.js";
 import { clearKeys, loadKeys } from "./keystore.js";
 import { boundToRow, openDecision, openMirror, openSpaceLabel } from "./mirror-crypto.js";
@@ -115,9 +115,11 @@ export async function openRow(mk, m, { cached = false } = {}) {
   if (!(await boundToRow(m, doc))) return { ...m, doc: null, dek: null, error: "binding" };
   const sealed = { needs: phoneNeed(doc), open_questions: openQuestionCount(doc),
     status: typeof doc.status === "string" ? doc.status : m.status };
+  // Keyed by what boundToRow just proved, not by m.id: the server reuses TIX numbers after a reset.
+  const mark = seenKey(m.space, doc);
   let seen = null;
   try {
-    seen = await getValue(SEEN, m.id);
+    seen = await getValue(SEEN, mark);
   } catch {
     seen = null;
   }
@@ -125,7 +127,7 @@ export async function openRow(mk, m, { cached = false } = {}) {
   const next = highWater(seen, doc);
   if (!cached && next && (!seen || next.gen !== seen.gen || next.mirror_rev !== seen.mirror_rev)) {
     try {
-      await putValue(SEEN, m.id, next);
+      await putValue(SEEN, mark, next);
     } catch {
       /* no IndexedDB: the page still compares within its own lifetime */
     }

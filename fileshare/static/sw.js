@@ -314,7 +314,7 @@ async function ticketTitle(t, space) {
     if (doc.redaction && doc.redaction !== "full" && doc.redaction !== "title") return null;
     if (!(await boundTitleRow(m, doc, space))) return null;
     // An older copy than the newest this phone opened (db.js "seen"): no title from it.
-    const seen = await idbGet("seen", t);
+    const seen = await idbGet("seen", `${m.space}|${doc.id}`);
     const g0 = seen?.gen, r0 = seen?.mirror_rev, g1 = doc.gen, r1 = doc.mirror_rev;
     if ([g0, r0, g1, r1].every(Number.isInteger) && (g1 < g0 || (g1 === g0 && r1 < r0))) return null;
     return typeof doc.title === "string" && doc.title.trim() ? doc.title.trim().slice(0, 120) : null;

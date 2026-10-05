@@ -147,7 +147,7 @@ def test_a_cached_copy_older_than_seen_is_left_out_never_a_rollback_and_never_lo
     mirror_with_question.push(EXAMPLE_DOC, rev=2)
     page.goto(f"{base}/t/{mirror_with_question.n}")  # this phone opens rev 2: seen moves to 2
     page.get_by_role("radio", name="ISO 8601").wait_for()
-    assert page.evaluate(READ_SEEN, mirror_with_question.id) == {"gen": 1, "mirror_rev": 2}
+    assert page.evaluate(READ_SEEN, f"{mirror_with_question.space}|{EXAMPLE_DOC['id']}") == {"gen": 1, "mirror_rev": 2}
     hold = Hold(context, base + "/api/mirrors")
     page.goto(base + "/")
     page.locator('#needs-list[data-from="cache"]').wait_for(state="attached")
@@ -156,11 +156,11 @@ def test_a_cached_copy_older_than_seen_is_left_out_never_a_rollback_and_never_lo
     expect(page.get_by_text("The server sent an older copy")).to_have_count(0)
     expect(card(page, mirror_with_question)).to_have_count(0)
     expect(page.get_by_text("Nothing needs you right now")).to_have_count(0)
-    assert page.evaluate(READ_SEEN, mirror_with_question.id) == {"gen": 1, "mirror_rev": 2}
+    assert page.evaluate(READ_SEEN, f"{mirror_with_question.space}|{EXAMPLE_DOC['id']}") == {"gen": 1, "mirror_rev": 2}
     hold.release()
     card(page, mirror_with_question).get_by_text("Acme Energy").wait_for()
     expect(page.get_by_text("The server sent an older copy")).to_have_count(0)
-    assert page.evaluate(READ_SEEN, mirror_with_question.id) == {"gen": 1, "mirror_rev": 2}
+    assert page.evaluate(READ_SEEN, f"{mirror_with_question.space}|{EXAMPLE_DOC['id']}") == {"gen": 1, "mirror_rev": 2}
 
 
 def test_sign_out_clears_the_cached_lists_and_a_signed_out_open_ends_on_login(page, live_server, sim, mirror_with_question):
