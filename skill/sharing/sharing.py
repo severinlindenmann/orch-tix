@@ -794,7 +794,7 @@ def is_secret_path(path: Path, repo_root: Path) -> bool:
 
 # =========================================================== config (Task 13)
 
-VERSION = "2.1.1"   # semver; bump on every skill change — the server's /skill/manifest.json reads it
+VERSION = "2.2.0"   # semver; bump on every skill change — the server's /skill/manifest.json reads it
 REPO_CONFIG = Path(".claude") / "skills" / "sharing" / "config.json"
 OLD_CONFIG = "config.json.old"   # the identity --force is replacing; lives beside config.json until the new one is approved
 TICKETS_SKILL_SRC = "tickets-SKILL.md"   # served beside SKILL.md; installed where Claude Code finds skills
@@ -3929,6 +3929,45 @@ def _int_arg(v: str) -> int:
         raise argparse.ArgumentTypeError("must be a whole number") from None
 
 
+BRIDGE_WS_INFO = b"sharing/bridge/ws/v1|"   # docs/bridge-protocol.md §2.2
+
+
+def bridge_key(mk: bytes, workspace: str) -> bytes:
+    """K_ws = HKDF-SHA-256(IKM = MK, salt = empty, info = "sharing/bridge/ws/v1|" || workspace_hex, L = 32)."""
+    return _hkdf(mk, BRIDGE_WS_INFO + workspace.encode("ascii"), 32, b"")
+
+
+def _stdout_is_tty() -> bool:
+    """Tests replace this."""
+    try:
+        return sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
+def cmd_bridge_key(args) -> int:
+    """Hand the bridge workspace key K_ws (never the master key) to the host. A guarded command: the orch
+    command guard refuses agents, and that guard is the only barrier (docs/bridge-protocol.md §2.7)."""
+    workspace = _space_arg(args.workspace)
+    if _stdout_is_tty() and not args.allow_terminal:
+        raise Refused("the key is a secret and stdout is a terminal, so it would stay in scrollback; "
+                      "pipe it to the host, or add --allow-terminal if you really want it printed here")
+    cfg = load_config(Path.cwd())   # pending (not approved) -> exit 3 `pending`
+    mk = cfg.mk
+    _remember_secret(b64u(mk))      # the master key is redacted from any message, in both spellings
+    _remember_secret(mk.hex())
+    row = _find_space(Api(cfg.server_url, cfg.device_token), workspace)   # a revoked device gets 401 here
+    if row is None:
+        raise ApiError(404, "no_space", "the server has no such space")
+    if row.get("owner_device") != cfg.device_id:
+        raise ApiError(403, "not_owner", "this device does not own that space, so it does not hand out its key "
+                                         "(the host is the owner device)")
+    key = bridge_key(mk, workspace).hex()
+    # Printed raw on purpose: _out would run it through the redaction. It is not a registered secret.
+    print(json.dumps({"key": key}) if args.json else key)
+    return 0
+
+
 @command
 def _reg_space(sub, common):
     p = sub.add_parser("space", parents=[common], help="this workspace's space (used by the orch-tix addon)")
@@ -3946,6 +3985,16 @@ def _reg_space(sub, common):
     n = ssub.add_parser("notify", parents=[common], help="phone notifications for messages that name no ticket (owner; default off)")
     n.add_argument("--messages", required=True, choices=("on", "off"))
     n.set_defaults(func=cmd_space_notify)
+
+
+@command
+def _reg_bridge_key(sub, common):
+    p = sub.add_parser("bridge-key", parents=[common],
+                       help="(for the orch host) print the bridge workspace key K_ws of a space this device owns")
+    p.add_argument("--workspace", required=True, metavar="SPACE_ID", help="the space id (32 hex characters)")
+    p.add_argument("--allow-terminal", action="store_true",
+                   help="print even though stdout is a terminal (the key then stays in scrollback)")
+    p.set_defaults(func=cmd_bridge_key)
 
 
 @command
