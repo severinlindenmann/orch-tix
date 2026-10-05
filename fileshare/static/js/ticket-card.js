@@ -16,6 +16,24 @@ const ROLE = { done: "ok", doing: "info", you: "you", todo: "neu", warn: "warn" 
 
 const GATE_NAME = { requirements: "requirements", plan: "plan" };
 
+// "Approve" or, when the gate was approved before and changed since, "Re-approve" (the desktop's own word): the
+// Needs you pill, the card and the decision button all use it, so one gate never has two names (QA TF-14).
+export function approveVerb(doc) {
+  const again = (Array.isArray(doc?.needs) ? doc.needs : []).some((n) => n?.kind === "re-approve") || doc?.move?.kind === "re-approve";
+  return again ? "Re-approve" : "Approve";
+}
+
+// Why a phone at "Show on the phone: title" can't approve: the gate text never reaches it, so nothing could be
+// checked against the hash. Said once, with the way out (QA TF-14).
+export const TITLE_APPROVE_WHY = "This phone shows only titles, so it can't show you the text to approve. To approve here, set \u201cShow on the phone\u201d to full in Mission Control (Workspace & addons \u2192 TIX), or approve on the desktop. You can still request changes.";
+
+// The option's label on a card: its own key (A, B, C), the same letters the ticket page and Mission Control's
+// ticket page use. The position number it used to show differed from Mission Control's Today list (QA TF-13).
+export function optionTag(o) {
+  const tag = String(o?.key ?? o?.n ?? "");
+  return tag.toLowerCase() === String(o?.label ?? "").toLowerCase() ? "" : tag;   // Yes / No need no "yes · Yes"
+}
+
 // ---- the move chip
 
 // {role, icon, text}: whose move it is. You: a question, an approval or a verdict (pink). Otherwise the status;
@@ -247,7 +265,7 @@ export function cardLine(row, doc) {
     const gate = approvalGate(doc) || "plan";
     const steps = gate === "plan" ? planSteps(doc) : 0;
     const agent = text(doc?.claim?.harness);
-    const parts = [steps ? `${steps} step${steps === 1 ? "" : "s"}` : doc?.redaction === "full" ? "" : "Read it on the desktop",
+    const parts = [steps ? `${steps} step${steps === 1 ? "" : "s"}` : doc?.redaction === "full" ? "" : "Approve on the desktop (phone shows titles only)",
       agent ? `${agent} waits` : ""].filter(Boolean);
     return parts.join(" · ");
   }

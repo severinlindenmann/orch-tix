@@ -3,7 +3,7 @@
 // cleartext `needs` is set, newest first, and the desktop's last-seen line. Tickets: every linked
 // ticket by workspace, each with the shared move chip and progress strip (ticket-card.js). A card opens
 // /t/<n>#answer. A Needs you card is a decision card: one open single-choice question is answered in place
-// (numbered 48 px options, the recommended one marked; a tap arms, Send answer sends, nothing commits on the
+// (lettered 48 px options, the recommended one marked; a tap arms, Send answer sends, nothing commits on the
 // first tap); an approval or a verdict opens the ticket's read-and-decide view. Nothing needs you: a calm
 // inbox-zero card. Pending join requests show as a banner to Settings.
 // The last-known lists (mirrors-data.js) render at once, then the network's answer replaces them;
@@ -18,7 +18,7 @@ import {
   lastSeenText, needsYou, questionCount, targetFor,
 } from "./mirror-model.js";
 import {
-  blockingCount, cardAction, cardLine, gateImage, moveChip, progressStrip, proofImage, quickAnswer, taskBar, taskChip,
+  approveVerb, blockingCount, cardAction, cardLine, optionTag, gateImage, moveChip, progressStrip, proofImage, quickAnswer, taskBar, taskChip,
 } from "./ticket-card.js";
 
 // " · idle 40d" after a board row's title: an open or backlog ticket nobody touched for a while (schema 1.7)
@@ -66,7 +66,7 @@ export function stripEl(doc) {
 
 // The Needs you card's chip: the verb of your move.
 function needsChip(row, doc) {
-  if (row.needs === "approval") return pill("you", "dot", `Approve ${approvalGate(doc) || "plan"}`);
+  if (row.needs === "approval") return pill("you", "dot", `${approveVerb(doc)} ${approvalGate(doc) || "plan"}`);
   if (row.needs === "verdict") return pill("you", "dot", "Verdict");
   if (row.needs === "question") return pill("you", "dot", row.open_questions > 1 ? `Answer · ${row.open_questions}` : "Answer");
   return needsPill(row);
@@ -84,7 +84,7 @@ function quickAnswerEl(row, doc, qa) {
   // the recommended option first (v4), each keeping its own number
   const ordered = [...qa.options.filter((o) => o.rec), ...qa.options.filter((o) => !o.rec)];
   const opts = ordered.map((o) => el("button", { type: "button", class: "btn qa-opt", "aria-pressed": String(st.armed === o.key),
-    dataset: { key: o.key, fkey: `qa:${slot}:${o.key}` } }, el("span", { class: "qa-label" }, `${o.n} · `, shown(o.label)),
+    dataset: { key: o.key, fkey: `qa:${slot}:${o.key}` } }, el("span", { class: "qa-label" }, optionTag(o) ? `${optionTag(o)} · ` : "", shown(o.label)),
     o.rec ? el("span", { class: "pill r-ok qa-rec" }, icon("check"), el("span", {}, "recommended")) : null,
     o.cost ? el("span", { class: "dq-cost" }, String(o.cost)) : null));
   const sendBtn = el("button", { type: "button", class: "btn btn-primary btn-big", dataset: { fkey: `qa-send:${slot}` } }, "Send answer");
@@ -100,7 +100,7 @@ function quickAnswerEl(row, doc, qa) {
     }
     const o = qa.options.find((x) => x.key === st.armed);
     confirmRow.hidden = !o || done;
-    armedLine.textContent = o && !done ? `Answer ${q.id} with ${o.n} · ${o.label}?` : "";
+    armedLine.textContent = o && !done ? `Answer ${q.id} with ${optionTag(o) ? `${optionTag(o)} · ` : ""}${o.label}?` : "";
     sendBtn.disabled = st.busy;
     // sent and no ack known: "applying" (paired) or "waiting", "Not applied yet" after two minutes; a waiting ack says why
     if (st.sent) {
