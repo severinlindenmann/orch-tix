@@ -936,3 +936,25 @@ test("needs-spaces closes a read message notification: spaceless, new tag and th
   assert.deepEqual(w.notifications.map((n) => n.tag), ["tix"]);                          // only the generic one stays
   assert.equal(w.notifications[0].title, "TIX");
 });
+
+test("push v2 while a TIX window is focused and visible: still shown, but silent and without renotify (N-01, #40)", async () => {
+  const windows = [{ url: `${ORIGIN}/`, focused: true, visibilityState: "visible", postMessage() {} }];
+  const w = load({ idb: LABELS, windows });
+  const push = async () => {
+    const ev = { data: { json: () => ({ v: 2, s: S1, t: "TIX-42", k: "question", n: 1, c: 1 }) }, waits: [], waitUntil(p) { this.waits.push(p); } };
+    w.listeners.push(ev);
+    await Promise.all(ev.waits);
+  };
+  await push();
+  assert.equal(w.shown.length, 1);
+  assert.equal(w.shown[0].options.silent, true);
+  assert.equal(w.shown[0].options.renotify, false);
+  windows[0].focused = false;           // in the background: the normal, audible banner
+  await push();
+  assert.equal(w.shown.length, 2);
+  assert.notEqual(w.shown[1].options.silent, true);
+  assert.equal(w.shown[1].options.renotify, true);
+  windows[0].focused = true; windows[0].visibilityState = "hidden";
+  await push();
+  assert.notEqual(w.shown[2].options.silent, true);
+});
