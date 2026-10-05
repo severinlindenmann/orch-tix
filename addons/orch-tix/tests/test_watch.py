@@ -110,3 +110,38 @@ def test_the_push_after_an_applied_phone_decision_says_phone_once_and_only_witho
     ops.ask(t.id, [{"text": "Which format?", "options": ["A", "B"]}])
     tix.obj.act("push_now", t.id, pctx)
     assert "decided_via" not in runner.files[-1]                # needs something again, or not decided: never
+
+
+def test_a_reset_event_log_forgets_the_done_marks(tix_ws, tix, runner):
+    """A log that starts over numbers from 1 again: marks left from the old numbering would make the periodic pass
+    acknowledge every new event as 'already synced' and the phone would never hear of them."""
+    prov = _setup(tix_ws, tix)
+    ops = Ops(tix_ws.ws, AGENT)
+    t = ops.new("Export")
+    ops.ask(t.id, [{"text": "Which format?", "options": ["A", "B"]}])
+    tix.obj.state.set_watch(10_000, {t.id: 10_000})            # the log was longer once
+    prov.fetch(tix.ctx.provider_context(), "space", None)
+    assert tix.obj.state.watch()["done"] == {}
+    assert tix.obj.state.watch()["cursor"] < 10_000
+
+
+def test_only_the_end_of_a_long_log_is_read(tmp_path, monkeypatch):
+    import json
+    log = tmp_path / "events.jsonl"
+    log.write_text("".join(json.dumps({"seq": i, "ticket": "T-1", "kind": "note.added", "data": {"text": "x" * 80}}) + "\n"
+                           for i in range(1, 501)))
+    monkeypatch.setattr(watch, "TAIL_BYTES", 300)
+    opened = []
+    real = type(log).open
+
+    def spy(self, *a, **k):
+        f = real(self, *a, **k)
+        orig = f.read
+        f.read = lambda *x: (lambda b: (opened.append(len(b)), b)[1])(orig(*x))
+        return f
+    monkeypatch.setattr(type(log), "open", spy)
+    events, newest = watch._read(log, 497)
+    assert [e.seq for e in events] == [498, 499, 500] and newest == 500
+    assert max(opened) < log.stat().st_size // 4                 # not the whole file
+    assert watch._read(log, 1 << 62) == ([], 500)
+    assert [e.seq for e in watch._read(log, 0)[0]][:2] == [1, 2]  # a cursor at the start still gets everything
