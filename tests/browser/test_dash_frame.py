@@ -144,7 +144,7 @@ SCOPES = {"rules": [
     {"methods": ["GET"], "pattern": "/events", "stream": True}, {"methods": ["POST"], "pattern": "/new"},
 ]}
 
-HARNESS_HTML = """<!doctype html><html><head><link rel="stylesheet" href="/static/css/app.css"></head><body><div id="mount"></div><script type="module">
+HARNESS_HTML = """<!doctype html><html><head></head><body><div id="mount"></div><script type="module">
 import { createFrameHost } from "/static/js/frame-host.js";
 import { fakeTransport } from "/static/js/bridge-transport.js";
 const site = window.__site;
@@ -239,8 +239,16 @@ def dash(page, live_server):
         def title(self):
             return self.frame().evaluate("document.querySelector('h1') && document.querySelector('h1').textContent")
 
-        def wait_title(self, text):
-            self.frame().wait_for_function(f"() => document.querySelector('h1') && document.querySelector('h1').textContent === {json.dumps(text)}")
+        def wait_title(self, text, seconds=30):
+            """poll the current frame (it may be rebuilt meanwhile, which detaches the one being asked)"""
+            for _ in range(int(seconds * 10)):
+                try:
+                    if self.frame().evaluate("document.querySelector('h1') && document.querySelector('h1').textContent") == text:
+                        return
+                except Exception:
+                    pass
+                page.wait_for_timeout(100)
+            raise AssertionError(f"no page titled {text!r}")
 
         def port_event(self, **msg):
             """a message as the frame would send it on the channel (the host's port receives it)"""

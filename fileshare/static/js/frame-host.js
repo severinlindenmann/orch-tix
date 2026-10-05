@@ -69,6 +69,7 @@ export function createFrameHost(opts) {
     external: opts.external || ((url) => { window.open(url, "_blank", "noopener,noreferrer"); }),
     copy: opts.copy || ((t) => navigator.clipboard.writeText(t)),
   };
+  if (!document.querySelector('link[href^="/static/css/frame.css"]')) document.head.append(el("link", { rel: "stylesheet", href: "/static/css/frame.css" }));
   const line = el("p", { class: "frame-notice", role: "status", hidden: true });
   const notice = opts.notice || ((n) => { line.textContent = n.text; line.hidden = !n.text; });   // text only, never markup
   const wrap = el("div", { class: "frame-host" }, line);

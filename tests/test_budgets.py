@@ -15,12 +15,13 @@ BRIDGE_JS = ["bridge-crypto.js", "bridge-session.js", "bridge-store.js"]
 BRIDGE_JS_BUDGET = 30_000          # bytes, uncompressed
 # The dashboard frame (R10b, docs/bridge-frame.md) follows the same pattern: its own allowance, outside the shell's.
 FRAME_JS = ["bridge-transport.js", "frame-host.js", "frame-render.js", "frame-scope.js", "frame-shim.js"]
-FRAME_JS_BUDGET = 72_000           # bytes, uncompressed
+FRAME_CSS = ["frame.css"]          # loaded by frame-host.js itself, so app.css (and the shell budget) stay as they were
+FRAME_JS_BUDGET = 72_000           # bytes, uncompressed (the scripts)
 
 
 def test_the_offline_shell_stays_within_its_budget():
     assets = json.loads((STATIC / "precache.json").read_text())["assets"]
-    bridge = {f"/static/js/{n}" for n in BRIDGE_JS + FRAME_JS}
+    bridge = {f"/static/js/{n}" for n in BRIDGE_JS + FRAME_JS} | {f"/static/css/{n}" for n in FRAME_CSS}
     total = sum((STATIC / a.removeprefix("/static/")).stat().st_size for a in assets
                 if a.startswith("/static/") and a not in bridge)
     assert total <= SHELL_BUDGET, total
@@ -45,3 +46,4 @@ def test_the_dashboard_frame_stays_within_its_own_allowance():
     assert {f"/static/js/{n}" for n in FRAME_JS} <= set(assets)
     total = sum((STATIC / "js" / n).stat().st_size for n in FRAME_JS)
     assert total <= FRAME_JS_BUDGET, total
+    assert sum((STATIC / "css" / n).stat().st_size for n in FRAME_CSS) <= 2_000

@@ -13,6 +13,7 @@
   "assets": [
     "/manifest.webmanifest",
     "/static/css/app.css",
+    "/static/css/frame.css",
     "/static/css/preview.css",
     "/static/css/tokens.css",
     "/static/fonts/IBMPlexMono-Medium.woff2",
