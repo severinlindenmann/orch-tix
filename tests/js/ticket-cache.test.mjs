@@ -145,3 +145,22 @@ test("offlineText says when it was last updated, with the date when not today", 
   assert.equal(cache.offlineText(at, new Date(2026, 9, 5, 20, 0).getTime()), "Offline · last updated 14:05");
   assert.equal(cache.offlineText(at, new Date(2026, 9, 7, 9, 0).getTime()), "Offline · last updated 05.10 14:05");
 });
+
+test("the badge memo opens only rows that changed, and is sealed", async () => {
+  reset();
+  const mkLocal = mk;
+  const rows = [{ uuid: "aa", wrapped_dek: "w", enc_content: "c1" }, { uuid: "bb", wrapped_dek: "w", enc_content: "c2" }];
+  let opened = [];
+  const open = async (_k, r) => { opened.push(r.uuid); return { uuid: r.uuid, doc: { id: "X" }, needs: r.uuid === "aa" ? "question" : null }; };
+  let out = await cache.rowsWithMemo(mkLocal, rows, open);
+  assert.deepEqual(opened.sort(), ["aa", "bb"]);
+  assert.equal(out.filter((r) => r.doc && r.needs).length, 1);
+  assert.ok(!JSON.stringify([...stores.lists.values()]).includes("question"));
+  opened = [];
+  out = await cache.rowsWithMemo(mkLocal, rows, open);
+  assert.deepEqual(opened, []);                                   // nothing changed: nothing opened
+  assert.equal(out.filter((r) => r.doc && r.needs).length, 1);
+  rows[1] = { ...rows[1], enc_content: "c3" };
+  await cache.rowsWithMemo(mkLocal, rows, open);
+  assert.deepEqual(opened, ["bb"]);                               // only the changed row
+});

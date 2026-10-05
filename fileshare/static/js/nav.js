@@ -63,10 +63,12 @@ export function attentionBadge(count) {
 // Opens the mirrors with this browser's MK (mirrors-data.openRow). Loaded on demand: mirrors-data imports
 // this module too.
 async function openRowsHere(mirrors) {
-  const [{ loadKeys }, { openRow }] = await Promise.all([import("./keystore.js"), import("./mirrors-data.js")]);
+  const [{ loadKeys }, { openRow }, { rowsWithMemo }] = await Promise.all([import("./keystore.js"), import("./mirrors-data.js"), import("./ticket-cache.js")]);
   const keys = await loadKeys();
   if (!keys) return [];
-  return Promise.all(mirrors.map((m) => openRow(keys.mk, m)));
+  // A row that did not change since it was last opened is answered from the sealed memo (ticket-cache.js), so the
+  // badge on every page no longer decrypts the whole list.
+  return rowsWithMemo(keys.mk, mirrors, openRow);
 }
 
 const optional = async (p, pick, fallback = 0) => {

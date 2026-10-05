@@ -224,3 +224,38 @@ def test_key_links_come_from_the_sealed_map_without_opening_the_whole_list(phone
     stacks = page.evaluate("window.__stacks")
     assert sum("loadKeyLinks" in st for st in stacks) == 1          # the sealed map: one small decrypt
     assert not any("loadCachedLists" in st for st in stacks)         # not one per mirrored ticket
+
+
+def test_the_badge_opens_no_row_that_did_not_change(phone_page, mirror_with_question):
+    m = mirror_with_question
+    page = phone_page("light")
+    page.wait_for_function("""() => new Promise((ok) => { const q = indexedDB.open("fileshare");
+      q.onsuccess = () => { const g = q.result.transaction("lists").objectStore("lists").get("needsmemo");
+        g.onsuccess = () => { q.result.close(); ok(Boolean(g.result)); }; }; })""")
+    page.add_init_script(COUNT_DECRYPTS)
+    page.goto(f"{m.base}/settings")
+    page.locator("h1").wait_for()
+    page.wait_for_timeout(1500)                       # the badge has run by now
+    assert not any("openMirror" in st for st in page.evaluate("window.__stacks"))
+    expect(page.locator("#needs-badge").first).to_have_text("1")
+
+
+def test_the_offline_approve_card_opens_the_saved_copy(phone_page, mirror_with_question, context):
+    m = mirror_with_question
+    gates = {**FULL_DOC["gates"], "plan": {**FULL_DOC["gates"]["plan"], "state": "pending"}}
+    doc = {**FULL_DOC, "questions": [{**q, "answer": "A"} for q in FULL_DOC["questions"]], "gates": gates,
+           "needs": [{"kind": "approve-plan"}], "move": {"who": "you", "kind": "approve-plan", "label": "Approve plan", "ref": "plan"}}
+    m.push(doc, rev=2, needs="approval", open_questions=0)
+    page = phone_page("light")
+    card = page.locator(f'.ncard[data-n="{m.n}"]')
+    card.wait_for()
+    context.set_offline(True)
+    try:
+        page.evaluate("window.dispatchEvent(new Event('offline'))")
+        link = card.get_by_role("link", name=re.compile("Open the saved copy"))
+        expect(link).to_contain_text("actions are off until you are back")
+        link.click()
+        expect(page.locator(".offline-note")).to_be_visible()
+        expect(page.get_by_role("button", name=re.compile("^Approve"))).to_be_disabled()
+    finally:
+        context.set_offline(False)

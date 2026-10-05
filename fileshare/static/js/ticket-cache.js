@@ -121,3 +121,54 @@ export async function loadKeyMap(mk) {
     return null;
   }
 }
+
+// ---- the badge memo: what a row's sealed doc said about "needs you", per row version
+
+const AAD_NEEDS = te.encode("sharing/needs-memo/v1");
+
+async function digest(text) {
+  const d = new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", te.encode(text)));
+  return Array.from(d.subarray(0, 12), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Map uuid -> {h, need}: h is a digest of the sealed content the answer was read from, so a changed row is opened
+// again; the map itself is sealed under MK. Lets the tab-bar badge skip opening rows that did not change.
+export async function loadNeedsMemo(mk) {
+  try {
+    const e = await getValue(LISTS, "needsmemo");
+    if (!e || typeof e.enc !== "string") return new Map();
+    const obj = JSON.parse(td.decode(await open(mk, unb64u(e.enc), AAD_NEEDS)));
+    return new Map(Object.entries(obj || {}));
+  } catch {
+    return new Map();
+  }
+}
+
+export async function saveNeedsMemo(mk, memo) {
+  try {
+    const pt = te.encode(canonicalJson(Object.fromEntries(memo)));
+    await putValue(LISTS, "needsmemo", { enc: b64u(await seal(mk, pt, AAD_NEEDS)), at: Date.now() });
+  } catch {
+    /* best effort */
+  }
+}
+
+export const contentDigest = (row) => digest(`${row.uuid}|${row.wrapped_dek}|${row.enc_content}`);
+
+// Rows as nav's badge wants them ({doc, needs}): a memo hit stands in for the opened row, anything else is opened.
+export async function rowsWithMemo(mk, mirrors, openRow) {
+  const memo = await loadNeedsMemo(mk);
+  const next = new Map();
+  let changed = mirrors.length !== memo.size;
+  const rows = await Promise.all(mirrors.map(async (m) => {
+    const h = await contentDigest(m);
+    const hit = memo.get(m.uuid);
+    if (hit && hit.h === h) { next.set(m.uuid, hit); return { uuid: m.uuid, doc: {}, needs: hit.need }; }
+    const r = await openRow(mk, m);
+    changed = true;
+    if (r?.doc) next.set(m.uuid, { h, need: r.needs ?? null });
+    return r;
+  }));
+  if (changed) await saveNeedsMemo(mk, next);
+  return rows;
+}

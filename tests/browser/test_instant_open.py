@@ -112,7 +112,7 @@ def test_needs_you_renders_the_cached_list_before_the_network_answers(phone_page
     page = phone_page("light")
     base = mirror_with_question.base
     stored = page.evaluate(READ_LISTS)
-    assert set(stored) == {"spaces", "mirrors", "keymap"}
+    assert set(stored) == {"spaces", "mirrors", "keymap", "needsmemo"}
     # Ciphertext only: the label and the ticket title never reach the cache in the clear.
     raw = repr(stored)
     assert "Acme Energy" not in raw and EXAMPLE_DOC["title"] not in raw and "ISO 8601" not in raw
@@ -185,7 +185,7 @@ def test_sign_out_clears_the_cached_lists_and_a_signed_out_open_ends_on_login(pa
     page.wait_for_function("() => navigator.serviceWorker.controller !== null")
     page.locator('#needs-list[data-from="server"]').wait_for(state="attached")   # the lists are stored
     page.goto(live_server.url + "/files")
-    assert set(page.evaluate(READ_LISTS) or {}) == {"spaces", "mirrors", "keymap"}
+    assert set(page.evaluate(READ_LISTS) or {}) == {"spaces", "mirrors", "keymap", "needsmemo"}
     page.get_by_role("button", name="Sign out", exact=True).click()
     page.wait_for_url(live_server.url + "/login")
     assert page.evaluate(READ_LISTS) == {}
@@ -279,7 +279,7 @@ def test_signing_in_and_a_keyless_open_clear_lists_left_by_another_key(page, liv
     page.get_by_role("button", name="Log in").click()
     page.wait_for_url(base + "/")
     page.locator('#needs-list[data-from="server"]').wait_for(state="attached")
-    assert set(page.evaluate(READ_LISTS)) == {"spaces", "mirrors", "keymap"}
+    assert set(page.evaluate(READ_LISTS)) == {"spaces", "mirrors", "keymap", "needsmemo"}
 
 
 def test_an_expired_session_on_the_ticket_page_ends_on_login(phone_page, mirror_with_question, context):

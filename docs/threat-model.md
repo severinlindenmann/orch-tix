@@ -106,7 +106,8 @@ What TIX protects, what it does not, and exactly which fields the server can rea
   sent: the same sealed content, never opened or re-written; at most 40 tickets and 6 MiB, least recently used
   dropped first), `seen` (per ticket, the newest snapshot generation and revision this browser opened) and a
   `keymap` (local key to TIX number, sealed under the master key with its own AAD, so a ticket page can link
-  `DEMO-0042` without opening every mirror). `labels` holds the decrypted space labels and a titles flag for the
+  `DEMO-0042` without opening every mirror) and a `needsmemo` (per mirror, a digest of its sealed content and
+  whether it needs you, sealed the same way, so the tab-bar badge opens only rows that changed). `labels` holds the decrypted space labels and a titles flag for the
   lock screen. So the readable text kept on the phone is the space labels (as before); ticket titles, text, keys
   and answers are stored only as ciphertext, readable only with the non-extractable master key in the same browser
   profile. Nothing in this cache is sent anywhere: it is read back through the
