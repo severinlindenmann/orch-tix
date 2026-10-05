@@ -4,7 +4,9 @@ from __future__ import annotations
 from orch.addons.api import PairingTarget
 from orch.errors import ValidationError
 
-from . import files, inbox, sync, ticket_widgets, widgets
+import threading
+
+from . import files, inbox, sync, ticket_widgets, watch, widgets
 from .cli import Sharing, SharingError
 from .providers import DevicesProvider, FilesProvider, HealthProvider, MessagesProvider
 from .state import State
@@ -27,7 +29,9 @@ class TixAddon:
         self.ctx = ctx
         self.state = State(ctx.state_dir)
         self.errors: list[str] = []
-        self.providers = [inbox.InboxProvider(self), HealthProvider(self), DevicesProvider(self),
+        # drain runs from core's outbox pass and from the immediate watcher (watch.py), in different threads: one at a time
+        self.sync_lock = threading.RLock()
+        self.providers = [inbox.InboxProvider(self), watch.NeedsWatchProvider(self), HealthProvider(self), DevicesProvider(self),
                           MessagesProvider(self), FilesProvider(self)]
 
     # -- plumbing --------------------------------------------------------------------------------------------
@@ -43,7 +47,14 @@ class TixAddon:
         sync.on_event(event, outbox)
 
     def drain(self, ctx, items) -> list[str]:
-        return sync.drain(self, ctx, items)
+        with self.sync_lock:
+            # what the immediate watcher already synced (watch.py) is acknowledged without pushing it again
+            done = self.state.watch()["done"]
+            skip = [i["id"] for i in items
+                    if (d := i.get("data") or {}).get("op") in ("sync", "history") and isinstance(d.get("seq"), int)
+                    and d["seq"] <= int(done.get(d.get("ticket")) or 0)]
+            rest = [i for i in items if i["id"] not in set(skip)]
+            return skip + (sync.drain(self, ctx, rest) if rest else [])
 
     # -- widgets ---------------------------------------------------------------------------------------------
     def widgets(self, slot, view) -> list:
@@ -98,7 +109,8 @@ class TixAddon:
         return str(ctx.document(ref)["id"])
 
     def _push(self, ctx, key: str) -> str:
-        status = sync.push(self, ctx, key, ctx.document(key))
+        with self.sync_lock:
+            status = sync.push(self, ctx, key, ctx.document(key))
         link = self.state.links().get(key) or {}
         if status == "gone":
             return f"{key} is no longer on the phone; use Sync to TIX to link it again"

@@ -463,3 +463,15 @@ def test_an_older_own_payload_stays_stale_without_any_local_rev_file(desk, cli):
     r = cli(desk.root, "mirror", "push", "--file", _payload(desk.root, rev=2), "--json").json()
     assert r["status"] == "stale" and r["server_rev"] == 3 and r["rev"] == 2
     assert not (desk.root / ".claude" / "skills" / "sharing" / "mirror-revs.json").exists()
+
+
+def test_decided_via_is_forwarded_and_only_phone_is_accepted(desk, cli):
+    p = _payload(desk.root, rev=1, needs="question")
+    assert cli(desk.root, "mirror", "push", "--file", p, "--json").json()["status"] == "pushed"
+    body = json.loads(_payload(desk.root, rev=2, needs=None).read_text())
+    bad = desk.root / "bad.json"
+    bad.write_text(json.dumps({**body, "decided_via": "tablet"}))
+    assert cli(desk.root, "mirror", "push", "--file", bad, "--json").code == 1          # usage error
+    good = desk.root / "good.json"
+    good.write_text(json.dumps({**body, "decided_via": "phone"}))
+    assert cli(desk.root, "mirror", "push", "--file", good, "--json").json()["status"] == "pushed"

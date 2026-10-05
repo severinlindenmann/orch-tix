@@ -2,10 +2,23 @@
 Read-only: the addon's own state files and cached snapshots, never a command."""
 from __future__ import annotations
 
+from orch.addons.api import PendingDecision
 from orch.addons.widgets import KV, Action, Callout, Card, Chips, Copy, Link, Table, Text, Tile
 
 from .cli import configured_path
 from .mapping import LEVEL_LABEL
+
+# An orch-core that knows PendingDecision.origin also lets Action(confirm="") skip the dialog: "Sync now" repeats
+# a harmless push, so it asks nothing there; an older core keeps the manifest's confirm text (QA TF-16).
+def supports_origin() -> bool:
+    try:
+        PendingDecision("probe", "probe", origin="phone")
+    except TypeError:
+        return False
+    return True
+
+
+SYNC_NOW = {"confirm": ""} if supports_origin() else {}
 
 BACKGROUND_HINT = ("Turn on \"Keep syncing while Mission Control runs\" to get phone answers without an open "
                    "Mission Control tab.")
@@ -67,7 +80,7 @@ def workspace_section(addon, view) -> list:
                   _text(d.get("last_seen_at"))) for d in _items(view, "devices"))
     body.append(Table(("Device", "State", "Last seen"), rows, empty="The device list is in your browser."))
     body.append(Text(DEVICES_NOTE))
-    body.append(Action("push_now", "Sync now"))
+    body.append(Action("push_now", "Sync now", **SYNC_NOW))
     return [Card("TIX", tuple(body))]
 
 
@@ -84,7 +97,7 @@ def ticket_panel(addon, view) -> list:
     body = [KV((("TIX", _text(link.get("n"), "waiting for the first push")),
                 ("Shows", LEVEL_LABEL.get(level, level)),
                 ("Last push", f"rev {int(link.get('rev') or 0)}"))),
-            Action("push_now", "Sync now", key)]
+            Action("push_now", "Sync now", key, **SYNC_NOW)]
     if override:
         body.append(Action("redaction", "Use the workspace setting", key, confirm="Show this ticket as the workspace "
                                                                                  "setting says?"))

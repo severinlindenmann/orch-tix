@@ -9,6 +9,7 @@ from fileshare.push import ensure_vapid
 from fileshare.routes.files import read_bounded_json
 from fileshare.security import b64u_decode, new_id
 from fileshare.sessions import session_name
+from fileshare.tickets import _tx
 
 router = APIRouter()
 
@@ -46,11 +47,18 @@ async def subscribe(request: Request, principal: Principal = Depends(require_ses
     name = session_name(conn, principal.session_hash) or "browser"
     existing = conn.execute("SELECT id FROM push_subs WHERE endpoint = ?", (endpoint,)).fetchone()
     sub_id = existing["id"] if existing else new_id("psh")
-    conn.execute(
-        "INSERT INTO push_subs (id, session_name, endpoint, p256dh, auth, created_at) VALUES"
-        " (?, ?, ?, ?, ?, ?) ON CONFLICT(endpoint) DO UPDATE SET"
-        " session_name = excluded.session_name, p256dh = excluded.p256dh, auth = excluded.auth",
-        (sub_id, name, endpoint, p256dh, auth, clock.now_iso()))
+    session = principal.session_hash
+    with _tx(conn):
+        conn.execute(
+            "INSERT INTO push_subs (id, session_name, endpoint, p256dh, auth, created_at, session_hash) VALUES"
+            " (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(endpoint) DO UPDATE SET"
+            " session_name = excluded.session_name, p256dh = excluded.p256dh, auth = excluded.auth,"
+            " session_hash = excluded.session_hash, failure_count = 0",
+            (sub_id, name, endpoint, p256dh, auth, clock.now_iso(), session))
+        # One browser, one subscription (QA N-06): when the push service rotated the endpoint, the old row of the
+        # same session is replaced, not kept as a second phone to push to.
+        if session:
+            conn.execute("DELETE FROM push_subs WHERE session_hash = ? AND endpoint != ?", (session, endpoint))
     return {"id": sub_id}
 
 

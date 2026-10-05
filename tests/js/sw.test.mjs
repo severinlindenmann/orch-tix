@@ -764,17 +764,28 @@ test("push v2: a batch joins the workspace grouping: past three workspaces it go
   assert.deepEqual(after.options.data.ts[S4], ["TIX-8"]);                      // the clear updates the group
 });
 
-test("push v2: a message clear replaces the message notification, but never a needs notification that shares the tag", async () => {
+test("push v2: a message has its own tag, so it never replaces a needs notification, and its clear never touches one", async () => {
   const w = load({ idb: LABELS });
-  await push(w, { v: 2, s: S1, t: "", k: "message", n: 2, c: 2 });
-  const got = await push(w, { v: 2, s: S1, t: "", k: "clear", w: "message", n: 0, c: 0 });
-  assert.equal(got.options.tag, `tix:${S1}`);
-  assert.equal(got.options.silent, true);
+  await push(w, { v: 2, s: S1, t: "TIX-42", k: "question", n: 1, c: 1, cs: 1 });
+  const msg = await push(w, { v: 2, s: S1, t: "", k: "message", n: 2, c: 3 });
+  assert.equal(msg.options.tag, `tix:msg:${S1}`);
+  assert.deepEqual(w.notifications.map((n) => n.tag).sort(), [`tix:${S1}`, `tix:msg:${S1}`].sort());     // both visible
+  assert.equal(w.notifications.find((n) => n.tag === `tix:${S1}`).title, "Agent needs input");
+  const got = await push(w, { v: 2, s: S1, t: "", k: "clear", w: "message", n: 0, c: 1 });
+  assert.equal(got.options.tag, `tix:msg:${S1}`);
+  assert.equal(got.title, "Read on desktop");
   assert.equal(got.options.body, "Read on desktop · Acme Energy");
-  const w2 = load({ idb: LABELS });
-  await push(w2, { v: 2, s: S1, t: "TIX-42", k: "question", n: 1, c: 1 });
-  const kept = await push(w2, { v: 2, s: S1, t: "", k: "clear", w: "message", n: 0, c: 1 });
-  assert.equal(kept.options.body, "Acme Energy · 1 question");
+  assert.equal(w.notifications.find((n) => n.tag === `tix:${S1}`).title, "Agent needs input");           // untouched
+  const none = await push(w, { v: 2, s: "", t: "", k: "message", n: 1, c: 1 });
+  assert.equal(none.options.tag, "tix:msg");
+});
+
+test("push v2: a message does not count as a ticket of its workspace for the 'tix:all' grouping", async () => {
+  const w = load({ idb: LABELS });
+  for (const s of [S1, S2, S3]) await push(w, { v: 2, s, t: "", k: "message", n: 1, c: 3 });
+  assert.equal(w.notifications.length, 3);
+  const q = await push(w, { v: 2, s: S4, t: "TIX-1", k: "question", n: 1, c: 4, cs: 1 });
+  assert.equal(q.options.tag, `tix:${S4}`);                                                                // not folded into tix:all
 });
 
 test("push v2: the app badge follows c, and a clear to 0 removes it", async () => {
@@ -878,7 +889,50 @@ test("needs-spaces never closes what the list cannot know yet: a notification ne
   const ask = async (data) => { const ev = { data: { type: "needs-spaces", ...data }, waits: [], waitUntil(p) { this.waits.push(p); } };
     w.listeners.message(ev); await Promise.all(ev.waits); };
   await ask({ spaces: [], tickets: [], messages: null, at: 1000 });              // unread count unreadable, S1 is newer
-  assert.deepEqual(w.notifications.map((n) => n.tag).sort(), [`tix:${S1}`, `tix:${S2}`].sort());
+  assert.deepEqual(w.notifications.map((n) => n.tag).sort(), [`tix:${S1}`, `tix:msg:${S2}`].sort());
   await ask({ spaces: [], tickets: [], messages: 0, at: 3000 });                 // now both are older than the request
   assert.equal(w.notifications.length, 0);
+});
+
+test("push v2: a clear that says it was decided on a phone is worded so, join clears name the outcome", async () => {
+  const w = load({ idb: LABELS });
+  await push(w, { v: 2, s: S1, t: "TIX-1", k: "question", n: 1, c: 1, cs: 1 });
+  const phone = await push(w, { v: 2, s: S1, t: "TIX-1", k: "clear", via: "phone", n: 0, c: 0, cs: 0 });
+  assert.equal(phone.title, "Decided on a phone");
+  assert.equal(phone.options.body, "Decided on a phone · Acme Energy");
+  const ok = await push(w, { v: 2, s: S1, t: "", k: "clear", w: "join", r: "approved", n: 0, c: 0 });
+  assert.equal(ok.title, "Workspace request approved");
+  assert.equal(ok.options.tag, `tix:join:${S1}`);
+  const no = await push(w, { v: 2, s: S1, t: "", k: "clear", w: "join", r: "denied", n: 0, c: 0 });
+  assert.equal(no.title, "Workspace request denied");
+});
+
+test("needs-spaces closes a join notification whose request is no longer pending", async () => {
+  const w = load({ idb: LABELS });
+  await push(w, { v: 2, s: S1, t: "", k: "join", n: 1, c: 1 });
+  assert.equal(w.notifications.length, 1);
+  const ev = { data: { type: "needs-spaces", spaces: [], tickets: [], messages: 0, joins: [] }, waits: [], waitUntil(p) { this.waits.push(p); } };
+  w.listeners.message(ev);
+  await Promise.all(ev.waits);
+  assert.equal(w.notifications.length, 0);
+});
+
+test("needs-spaces closes a read message notification: spaceless, new tag and the pre-#62 tags (live step 10)", async () => {
+  const w = load({ idb: LABELS });
+  await push(w, { v: 2, s: "", t: "", k: "message", n: 1, c: 1 });                       // spaceless: tag tix:msg
+  await push(w, { v: 2, s: S1, t: "", k: "message", n: 1, c: 2 });                       // tix:msg:<space>
+  await w.self.registration.showNotification("Message from agent", { tag: "tix", data: { msg: true, s: "" } });   // shown before the tag existed
+  await w.self.registration.showNotification("Message from agent", { tag: `tix:${S2}`, data: { msg: true, s: S2 } });
+  await w.self.registration.showNotification("TIX", { tag: "tix", data: { url: "/" } });                          // generic: not a message
+  const before = w.notifications.length;
+  const ev = (m) => ({ data: { type: "needs-spaces", spaces: [], tickets: [], messages: m }, waits: [], waitUntil(p) { this.waits.push(p); } });
+  const unknown = ev(null);
+  w.listeners.message(unknown);
+  await Promise.all(unknown.waits);
+  assert.equal(w.notifications.length, before);                                       // unread count unknown: left alone
+  const e = ev(0);
+  w.listeners.message(e);
+  await Promise.all(e.waits);
+  assert.deepEqual(w.notifications.map((n) => n.tag), ["tix"]);                          // only the generic one stays
+  assert.equal(w.notifications[0].title, "TIX");
 });

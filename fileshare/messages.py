@@ -4,6 +4,7 @@ a message with a space (and a ticket of it) only when it owns that space; the br
 recipient (ruling TIX-M1): a message acked by one device leaves only that device's list; the others (same
 project, a later owner of the space) still see it until they ack it too. The browser acks as 'human'."""
 import json
+import logging
 import threading
 
 from fileshare import clock
@@ -12,6 +13,8 @@ from fileshare.ids import format_id, format_ticket_id, parse_ticket_ref
 from fileshare.mirrors import attention_total, owner_space, push_v2, space_row
 from fileshare.sessions import session_name
 from fileshare.tickets import _live_file_ns, _tx
+
+log = logging.getLogger("fileshare.push")
 
 TO_KINDS = ("device", "project", "space", "human")
 KINDS = ("text", "file", "question")
@@ -137,8 +140,12 @@ def create_message(conn, app, *, principal, body: dict) -> dict:
     if body["to_kind"] == "human":
         payload = {"v": 2, "s": body["space"] or "", "t": format_ticket_id(ticket_n) if ticket_n else "", "k": "message"}
 
+        store = getattr(app.state, "held_store", None)
+
         def trailing() -> None:            # at the end of the sender's minute, on its own connection
             from fileshare import db
+            if store is not None:
+                store.remove("message", sender_key)
             c = db.connect(app.state.settings.db_path)
             try:
                 unread = _unread_for_human(c, from_device)
@@ -149,7 +156,31 @@ def create_message(conn, app, *, principal, body: dict) -> dict:
 
         if app.state.message_push_gate.due(sender_key, trailing):
             push_v2(app, {**payload, "n": _unread_for_human(conn, from_device), "c": attention_total(conn)})
+        elif store is not None:        # held for the trailing push: kept in the database too (QA N-08)
+            store.put("message", sender_key, space=payload["s"], ticket=payload["t"], sender=from_device)
     return {"id": "msg_" + body["uuid"], "seq": seq}
+
+
+def recover_held(app) -> int:
+    """After a restart: the trailing "message" pushes the previous process still held (QA N-08), one per sender, when
+    something from that sender is still unread."""
+    store = getattr(app.state, "held_store", None)
+    if store is None:
+        return 0
+    from fileshare import db
+    rows = store.take("message")
+    for r in rows:
+        c = db.connect(app.state.settings.db_path)
+        try:
+            unread = _unread_for_human(c, r["sender"])
+            if unread:
+                push_v2(app, {"v": 2, "s": r["space_id"], "t": r["ticket"], "k": "message", "n": unread,
+                              "c": attention_total(c)})
+        except Exception as e:      # a push never fails anything
+            log.warning("push: recovering a held message push failed: %s", e)
+        finally:
+            c.close()
+    return len(rows)
 
 
 def _unread_for_human(conn, from_device) -> int:

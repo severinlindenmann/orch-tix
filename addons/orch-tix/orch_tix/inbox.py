@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from orch.addons.api import Intent, PendingDecision, Snapshot
 
 from .cli import SharingError
+from .widgets import supports_origin
 
 MAX_AGE = timedelta(days=14)
 APPLYING_TIMEOUT = timedelta(minutes=10)
@@ -140,6 +141,13 @@ def log_decision(addon, rec: dict, outcome, message) -> None:
 
 
 def receive(addon, pctx, items, *, now) -> None:
+    # One at a time with the immediate watcher (watch.py): it must not sync the ticket between core applying a phone
+    # answer and the decision being recorded here, or the push would not say the phone decided (QA #55).
+    with addon.sync_lock:
+        _receive(addon, pctx, items, now=now)
+
+
+def _receive(addon, pctx, items, *, now) -> None:
     st = addon.state
     known = st.decisions()
     for item in items or []:
@@ -306,8 +314,9 @@ def pending_decisions(addon, view) -> list:
             body = f"{body}\nRequirements and plan together: approve them on the ticket page."
         else:
             choices = (("apply", "Apply"), ("ignore", "Ignore"))
+        extra = {"origin": "phone"} if supports_origin() else {}   # TF-20
         out.append(PendingDecision(did, title[:200], body[:2000], None if request else rec.get("ticket"), stale,
-                                   choices, "info", anchor))
+                                   choices, "info", anchor, **extra))
     return out
 
 
@@ -393,7 +402,8 @@ class InboxProvider:
                 pass
             reconcile(self.addon, ctx, now)
         except SharingError as e:
-            health = "auth_required" if e.code in _AUTH else "offline"
+            # nothing needs a login when the CLI path is unset: say "not set up", not "Login needed" (QA TF-02)
+            health = "never_fetched" if e.code == "not_configured" else "auth_required" if e.code in _AUTH else "offline"
             return Snapshot(self.id, scope, now, health=health, message=e.detail[:200])
         return self._snapshot(scope, now)
 

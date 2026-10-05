@@ -3719,6 +3719,8 @@ def _mirror_body(raw: str) -> dict:
         raise UsageError("mirror file: key must be non-empty, gen and rev at least 1")
     if body.get("needs") is not None and not isinstance(body["needs"], str):
         raise UsageError("mirror file: needs must be null or a string")
+    if body.get("decided_via") not in (None, "phone"):
+        raise UsageError("mirror file: decided_via must be absent or \"phone\"")
     return body
 
 
@@ -3767,6 +3769,8 @@ def cmd_mirror_push(args) -> int:
         req = {"space": space, "mirror_rev": rev, "schema_version": body["schema_version"],
                "status": body["status"], "priority": body["priority"], "needs": body.get("needs"),
                "open_questions": body["open_questions"], "event_uuid": mirror_event_uuid(space, key, gen, rev)}
+        if body.get("decided_via"):      # Mission Control applied a phone answer: the "handled" push says so (QA #55)
+            req["decided_via"] = body["decided_via"]
         if existing is not None:         # reuse the stored DEK and key version (else 409 dek_mismatch)
             dek = open_(cfg.mk, unb64u(existing["wrapped_dek"]), aad_tdek(tu))
             req["key_version"] = existing["key_version"]

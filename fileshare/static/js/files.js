@@ -31,6 +31,7 @@ const state = {
   loaded: false,
   gen: 0, // bumped by reload(); a loadMore from an older generation discards its result
   loading: null, // the generation whose loadMore is in flight
+  doneCount: null, // done files on the server while the Done chip is off and nothing else is listed (null: not asked)
 
   filter: { type: "all", device: "", project: "", q: "" },
   showAcked: false, // the "Done" chip; remembered per browser
@@ -108,6 +109,7 @@ async function loadMore() {
       added += decoded.length;
       if (state.nextBefore == null) break;
     }
+    if (gen === state.gen) await probeDone();
     $("load-error").hidden = true;
     setOffline(false);
   } catch (err) {
@@ -128,6 +130,20 @@ async function loadMore() {
       render();
       openWanted();
     }
+  }
+}
+
+// With the Done chip off and nothing else listed, "No files yet" would be a lie when done files exist
+// (QA TF-04): ask once, newest page only, so the empty state can say "All caught up" instead.
+async function probeDone() {
+  state.doneCount = null;
+  if (state.showAcked || state.files.length || state.nextBefore != null || hasTagFilter()) return;
+  try {
+    const res = await api("GET", `/api/files?${new URLSearchParams({ limit: String(PAGE), acked: "1" })}`);
+    const n = res.files.filter((f) => !f.deleted_at).length;
+    state.doneCount = n ? { n, more: res.next_before != null } : null;
+  } catch {
+    state.doneCount = null; // the plain empty state is the safe fallback
   }
 }
 
@@ -292,15 +308,22 @@ function countText(visibleCount) {
 
 function render() {
   const visible = visibleFiles();
-  const empty = state.loaded && state.files.length === 0 && state.nextBefore == null && !hasTagFilter(); // ---- tags
+  const nothing = state.loaded && state.files.length === 0 && state.nextBefore == null && !hasTagFilter(); // ---- tags
+  const caughtUp = nothing && !state.showAcked && state.doneCount != null;
+  const empty = nothing && !caughtUp;
   if (state.selected != null && !visible.some((f) => f.n === state.selected)) state.selected = null;
   $("file-list").replaceChildren(...renderGroups(visible));
   $("empty").hidden = !empty;
-  $("results").hidden = empty || !state.loaded;
+  $("all-done").hidden = !caughtUp;
+  if (caughtUp) {
+    const { n, more } = state.doneCount;
+    $("all-done-count").textContent = `${n}${more ? "+" : ""} done ${n === 1 && !more ? "file is" : "files are"} hidden.`;
+  }
+  $("results").hidden = nothing || !state.loaded;
   // Also shown when only tombstones were found so far but older pages remain behind "Load more".
   $("no-match").hidden = visible.length > 0 || (state.files.length === 0 && state.nextBefore == null && !hasTagFilter());
   $("load-more").hidden = state.nextBefore == null;
-  $("count").textContent = !state.loaded || empty ? "" : countText(visible.length);
+  $("count").textContent = !state.loaded || nothing ? "" : countText(visible.length);
   const fresh = state.files.filter((f) => isNew(f)).length;
   const badge = $("files-new");
   if (badge) {
@@ -512,12 +535,14 @@ function wireToolbar() {
   $("droplink-btn").addEventListener("click", () => openDropDialog());
   initTagFilter({ after: chips, onChange: reload }); // ---- tags: the tag chip row under the type chips
   ackedChip.setAttribute("aria-pressed", String(state.showAcked));
-  ackedChip.addEventListener("click", () => {
+  const toggleAcked = () => {
     state.showAcked = !state.showAcked;
     ackedChip.setAttribute("aria-pressed", String(state.showAcked));
     writeShowAcked(state.showAcked);
     reload();
-  });
+  };
+  ackedChip.addEventListener("click", toggleAcked);
+  $("show-done").addEventListener("click", toggleAcked);
   $("load-more").addEventListener("click", loadMore);
   $("retry").addEventListener("click", loadMore);
   document.addEventListener("keydown", onKey);

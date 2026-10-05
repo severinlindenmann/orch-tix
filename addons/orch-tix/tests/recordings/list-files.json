@@ -1,4 +1,4 @@
-{"argv": ["/opt/sharing/sharing", "list", "-n", "100", "--json"], "returncode": 0,
+{"argv": ["/opt/sharing/sharing", "list", "--all", "-n", "100", "--json"], "returncode": 0,
  "stdout_json": [{"id": "FILE7", "name": "report.pdf", "mime": "application/pdf", "size": 1250000, "note": "",
                   "device": "iPhone", "project": "acme", "created_at": "2026-10-02T09:00:00Z", "deleted_at": null,
                   "acked_at": null, "acked_by": null, "expires_at": "2026-10-09T09:00:00Z", "transcript": null,

@@ -44,7 +44,7 @@ class HealthProvider:
         now = ctx.now()
         sharing = self.addon.sharing(ctx)
         if not sharing.configured:
-            return Snapshot(self.id, scope, now, health="auth_required", message=NOT_CONFIGURED)
+            return Snapshot(self.id, scope, now, health="never_fetched", message=NOT_CONFIGURED)
         try:
             me = sharing.run_json("whoami", timeout=15)
         except SharingError as e:
@@ -98,7 +98,7 @@ class DevicesProvider:
         now = ctx.now()
         sharing = self.addon.sharing(ctx)
         if not sharing.configured:
-            return Snapshot(self.id, scope, now, health="auth_required", message=NOT_CONFIGURED)
+            return Snapshot(self.id, scope, now, health="never_fetched", message=NOT_CONFIGURED)
         try:
             r = sharing.run_json("devices", timeout=15)
         except SharingError as e:
@@ -130,7 +130,7 @@ class MessagesProvider:
         now = ctx.now()
         sharing = self.addon.sharing(ctx)
         if not sharing.configured:
-            return Snapshot(self.id, scope, now, health="auth_required", message=NOT_CONFIGURED)
+            return Snapshot(self.id, scope, now, health="never_fetched", message=NOT_CONFIGURED)
         try:
             r = sharing.run_json("msg", "list", timeout=20)
         except SharingError as e:
@@ -180,7 +180,7 @@ class MessagesProvider:
 
 
 class FilesProvider:
-    """The share's live files for the Shared files page (names come from the CLI, which decrypts them)."""
+    """The share's live files, done ones flagged, for the Shared files page (names come from the CLI, which decrypts them)."""
     id, kind, interval_s = "files", "status", 120
 
     def __init__(self, addon):
@@ -193,10 +193,10 @@ class FilesProvider:
         now = ctx.now()
         sharing = self.addon.sharing(ctx)
         if not sharing.configured:
-            return Snapshot(self.id, scope, now, health="auth_required", message=NOT_CONFIGURED)
+            return Snapshot(self.id, scope, now, health="never_fetched", message=NOT_CONFIGURED)
         sweep_downloads(self.addon.ctx.state_dir)       # plaintext never outlives 10 minutes
         try:
-            rows = sharing.run_list("list", "-n", "100", timeout=60)
+            rows = sharing.run_list("list", "--all", "-n", "100", timeout=60)
         except SharingError as e:
             return Snapshot(self.id, scope, now, health=_health_of(e), message=e.detail[:200])
         items = tuple(_file_item(f, now) for f in rows
@@ -234,7 +234,8 @@ def _file_item(f: dict, now) -> dict:
     item = {"id": f["id"], "label": str(f.get("name") or "(cannot decrypt)"), "role": "neu",
             "text": _size(f.get("size")), "from": str(f.get("device") or ""), "project": str(f.get("project") or ""),
             "tags": [t for t in f.get("tags") or [] if isinstance(t, str)], "expires": _expires(f.get("expires_at"), now),
-            "transcript": isinstance(f.get("transcript"), dict), "mime": str(f.get("mime") or "")}
+            "transcript": isinstance(f.get("transcript"), dict), "mime": str(f.get("mime") or ""),
+            "done": bool(f.get("acked_at"))}
     if created is not None:
         item["created_at"] = created.isoformat()
     return item

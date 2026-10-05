@@ -30,7 +30,7 @@ class Recorder:
     def notify(self, ticket, event):
         raise AssertionError("v1 push for a mirror")
 
-    def notify_payload(self, payload):
+    def notify_payload(self, payload, exclude_sessions=None):
         self.payloads.append(payload)
 
 
@@ -77,7 +77,7 @@ def test_phone_decision_itself_sends_no_push_but_the_apply_sends_clear(frozen_cl
     assert _decide(session_client, tix).status_code == 201
     assert len(pushes) == n0                              # the decision creates no push (good)
     _put(device_client, u, 2, None)                       # desktop applied it
-    assert pushes[-1]["k"] == "clear"                     # ...and the phone that just answered gets "Handled on desktop"
+    assert pushes[-1]["k"] == "clear"                     # ...worded "Decided on a phone"; the deciding session gets none (QA #55)
 
 
 # ---- Scenario 3: clear for a ticket whose "needs you" push was held by the 60 s window -----------------------------

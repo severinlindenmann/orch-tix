@@ -2,10 +2,14 @@
 
 ## Unreleased
 
+- Shared files page: done files are listed too (the provider now calls `sharing list --all`), hidden by default behind a "Done N" chip; a share with only done files says "All caught up: N done files hidden" instead of "No files on the share yet" (QA TF-04).
+- An unset sharing CLI path reports health `never_fetched` ("not set up") instead of `auth_required` ("Login needed"): nothing needs a login (QA TF-02).
+- "Sync to TIX" and "Sync now" confirmations say what leaves the machine (QA TF-16); on an orch-core that supports it "Sync now" asks nothing, and phone decisions carry `origin: phone` in the event log (QA TF-20). The "TIX does this outside orch" body line is orch-core's.
 - The code for a TIX section on orch-core's How it works page (`guide.section`) is in, but the manifest does not declare the slot yet: orch-core validates a manifest strictly and an orch-core without that slot rejects the whole addon, so declaring it now would break everyone who updates the addon before orch-core. To switch it on, once the orch-core release that adds `guide.section` is out: add `"guide.section"` to `slots` in `orch-addon.json` and bump the version to 0.3.0. Until then the section never shows and nothing changes.
 
 ## 0.2.0
 
+- A new always-on provider `needs-watch` syncs a ticket to the phone within about a second when its events change (question asked, gate waiting, decision applied) instead of at the next outbox pass (core pumps every `pull_seconds`, 60 s). The periodic pass stays as the fallback and skips what the watcher already synced. Runs while Mission Control is open or "Keep syncing while Mission Control runs" is on.
 - A ticket the server answered `gone` for is linked again on the next sync cycle as a new generation (once per cycle, when the sync policy would mirror it); by-hand unlinks and done cleanups stay retired. The link records why it was retired (`retired_why`).
 
 - The mirrored document carries orch-core's `signed` block (schema 1.6) at full and title (never key-only), cleaned to `{signed, by}` per gate and verdict; the phone names who signed each approved gate and the verdict. An older orch-core sends none and the phone keeps its "not signed here" wording.

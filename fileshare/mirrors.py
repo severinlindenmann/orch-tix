@@ -10,7 +10,7 @@ from datetime import timedelta
 
 from fileshare import clock
 from fileshare.deps import api_error, rate_slot
-from fileshare.ids import format_ticket_id
+from fileshare.ids import format_ticket_id, parse_ticket_ref
 from fileshare.tickets import _tx, _write_event, Actor
 
 SCHEMA_MAJORS = ("1",)
@@ -130,7 +130,8 @@ def list_join_requests(conn, *, status: str = "pending") -> list[dict]:
     return [out for out in (join_request_out(conn, r) for r in rows) if out["status"] == status]
 
 
-def decide_join(conn, app, *, space_id: str, req_id: str, decision: str, decided_by: str) -> dict:
+def decide_join(conn, app, *, space_id: str, req_id: str, decision: str, decided_by: str,
+                session_hash: str | None = None) -> dict:
     """The browser session approves or denies. Approval moves ownership and bumps owner_gen; mirror_rev is
     kept (final review I1: a reset let the phone see the new owner's rev 1 as a rollback). The new owner's CLI
     pushes above the stored rev. The request row is the audit."""
@@ -155,8 +156,10 @@ def decide_join(conn, app, *, space_id: str, req_id: str, decision: str, decided
                      (decision, now, decided_by, req_id))
     log.info("space %s: join request jr_%s %s (device %s, was owned by %s)", space_id, req_id, decision,
              row["device_id"], row["from_device"])
-    # Replace the phone's "<device> wants to sync" notification silently (the SW closes it on "clear").
-    push_v2(app, {"v": 2, "s": space_id, "t": "", "k": "clear", "n": 0, "c": attention_total(conn)})
+    # Tell the OTHER phones/browsers how the request ended ("Workspace request approved"); the one that decided knows
+    # (QA #55): it gets no copy, and closes the "wants to sync" notification itself when the app is open.
+    push_v2(app, {"v": 2, "s": space_id, "t": "", "k": "clear", "w": "join", "r": decision, "n": 0,
+                  "c": attention_total(conn)}, {session_hash} if session_hash else None)
     return join_request_out(conn, join_request_row(conn, space_id, req_id))
 
 
@@ -337,9 +340,13 @@ def attention_total(conn) -> int:
     return needs_total(conn) + human_messages_open(conn) + join_requests_open(conn)
 
 
-def push_v2(app, payload: dict) -> None:
+def push_v2(app, payload: dict, exclude_sessions=None) -> None:
+    """`exclude_sessions`: browser sessions whose subscriptions get no copy (the phone that made the decision)."""
     try:
-        app.state.pusher.notify_payload(payload)
+        if exclude_sessions:
+            app.state.pusher.notify_payload(payload, frozenset(exclude_sessions))
+        else:
+            app.state.pusher.notify_payload(payload)
     except Exception as e:      # a push never fails the request (spec T7)
         log.warning("push: notify failed: %s", e)
 
@@ -363,8 +370,9 @@ class NeedsPushGate:
 
     MAX_TRACKED = 10_000
 
-    def __init__(self, every_s: int = NEEDS_PUSH_EVERY_S):
+    def __init__(self, every_s: int = NEEDS_PUSH_EVERY_S, store=None):
         self.every_s = every_s
+        self.store = store          # heldpush.HeldStore: what is held also lives in the database (QA N-08)
         self._last: dict[str, float] = {}
         self._held: dict[str, list[str]] = {}
         # (space, ticket) pairs the phone was told about / was NOT told about yet (held in a window): a clear for a
@@ -391,18 +399,23 @@ class NeedsPushGate:
                 self._held[space].remove(ticket)
             was_unshown = key in self._unshown
             self._unshown.discard(key)
-            return not (held and was_unshown)
+        if held and self.store is not None:
+            self.store.remove("needs", f"{space}|{ticket}")
+        return not (held and was_unshown)
 
     def due(self, space: str, ticket: str, flush) -> bool:
         """True: push this transition now. False: it is held; `flush(space, tickets)` runs when the window ends."""
         now = clock.now().timestamp()
+        holding = False
         with self._lock:
             last = self._last.get(space)
             if last is not None and now - last < self.every_s:
+                holding = True
                 held = self._held.get(space)
                 if held is None:
                     held = self._held[space] = []
                     self.timer(self.every_s - (now - last), lambda: self._trail(space, flush))
+                    log.info("push: needs held for the %ds window, summary in %ds", self.every_s, self.every_s - (now - last))
                 if ticket in held:
                     held.remove(ticket)
                 held.append(ticket)
@@ -410,28 +423,40 @@ class NeedsPushGate:
                     if len(self._unshown) >= self.MAX_TRACKED:
                         self._unshown.clear()
                     self._unshown.add((space, ticket))
-                return False
-            if len(self._last) >= self.MAX_TRACKED:
-                self._last = {k: v for k, v in self._last.items() if now - v < self.every_s}
-            self._last[space] = now
-            return True
+            else:
+                if len(self._last) >= self.MAX_TRACKED:
+                    self._last = {k: v for k, v in self._last.items() if now - v < self.every_s}
+                self._last[space] = now
+        if holding and self.store is not None:
+            self.store.put("needs", f"{space}|{ticket}", space=space, ticket=ticket)
+        return not holding
+
+    def opened(self, space: str) -> None:
+        """A push for `space` just went out (a summary sent after a restart): it opens the next window."""
+        with self._lock:
+            self._last[space] = clock.now().timestamp()
 
     def drop(self, space: str, ticket: str) -> None:
         with self._lock:
-            if ticket in self._held.get(space, []):
+            held = ticket in self._held.get(space, [])
+            if held:
                 self._held[space].remove(ticket)
+        if held and self.store is not None:
+            self.store.remove("needs", f"{space}|{ticket}")
 
     def _trail(self, space: str, flush) -> None:
         with self._lock:
             held = self._held.pop(space, None)
             if held:
                 self._last[space] = clock.now().timestamp()     # the summary opens the next window
-        if not held:
-            return
         try:
-            flush(space, held)
+            if held:
+                flush(space, held)
         except Exception as e:      # a push never fails anything
             log.warning("push: summary failed: %s", e)
+        finally:
+            if self.store is not None:
+                self.store.remove_space("needs", space)
 
 
 def _flush_held(app, space: str, held: list[str]) -> None:
@@ -447,6 +472,7 @@ def _flush_held(app, space: str, held: list[str]) -> None:
             if row is not None:
                 live.append((t, row["needs"], row["open_questions"]))
         if not live:
+            log.info("push: summary of %d held ticket(s): none needs you any more", len(held))
             return
         total = attention_total(c)
         gate = getattr(app.state, "needs_push_gate", None)
@@ -464,7 +490,47 @@ def _flush_held(app, space: str, held: list[str]) -> None:
         c.close()
 
 
-def after_needs_change(conn, app, *, space, ticket, before, after, open_questions) -> None:
+def recover_held(app) -> int:
+    """After a restart: send what the previous process held inside a workspace's window (QA N-08), as the summary it
+    would have sent, one per workspace. Returns how many tickets were found."""
+    store = getattr(app.state, "held_store", None)
+    if store is None:
+        return 0
+    rows = store.take("needs")
+    by_space: dict[str, list[str]] = {}
+    for r in rows:
+        by_space.setdefault(r["space_id"], []).append(r["ticket"])
+    gate = getattr(app.state, "needs_push_gate", None)
+    for space, tickets in by_space.items():
+        try:
+            _flush_held(app, space, tickets)
+            if gate is not None:
+                gate.opened(space)
+        except Exception as e:      # a push never fails anything
+            log.warning("push: recovering held pushes failed: %s", e)
+    return len(rows)
+
+
+DECISION_ORIGIN_WINDOW = timedelta(minutes=15)
+_DECIDING = ("answer", "approve", "request_changes", "verdict")
+
+
+def decision_session(conn, space: str, ticket: str) -> str | None:
+    """The browser session that sent the newest answer/approve/request_changes/verdict for this ticket in the last 15
+    minutes that was not refused or overtaken (no ack yet, applied, or held for an Apply): the one to leave out of the
+    "handled" push. Only asked when Mission Control said it applied a phone answer (decided_via)."""
+    n = parse_ticket_ref(ticket)
+    if n is None:
+        return None
+    cutoff = clock.now_iso(clock.now() - DECISION_ORIGIN_WINDOW)
+    row = conn.execute(
+        f"SELECT session_hash FROM decisions WHERE space_id = ? AND ticket_n = ? AND kind IN ({','.join('?' * len(_DECIDING))})"
+        " AND created_at >= ? AND (ack IS NULL OR ack = 'applied' OR ack LIKE 'waiting-%') ORDER BY seq DESC LIMIT 1",
+        (space, n, *_DECIDING, cutoff)).fetchone()
+    return row["session_hash"] if row is not None else None
+
+
+def after_needs_change(conn, app, *, space, ticket, before, after, open_questions, decided_via=None) -> None:
     """Push only when a mirror starts needing the human or needs something else; replace it when it stops.
     The payload is cleartext routing only (TIX spec §7): no title, text, client name or local key. Needs pushes
     are coalesced per workspace (NeedsPushGate); a clear goes out at once."""
@@ -474,8 +540,14 @@ def after_needs_change(conn, app, *, space, ticket, before, after, open_question
     if after is None:
         if gate is not None and not gate.clear_wanted(space, ticket):
             return          # its "needs you" never left the server (held in the window): nothing to withdraw
-        push_v2(app, {"v": 2, "s": space, "t": ticket, "k": "clear", "n": 0, "c": attention_total(conn),
-                      "cs": space_needs_total(conn, space)})
+        payload = {"v": 2, "s": space, "t": ticket, "k": "clear", "n": 0, "c": attention_total(conn),
+                   "cs": space_needs_total(conn, space)}
+        # Mission Control says (decided_via) when it applied a phone answer; the server does not guess. Then the SW words
+        # it "Decided on a phone", and the session that sent the answer gets no push at all.
+        decided = decision_session(conn, space, ticket) if decided_via == "phone" else None
+        if decided_via == "phone":
+            payload["via"] = "phone"
+        push_v2(app, payload, {decided} if decided else None)
         return
     if gate is not None and not gate.due(space, ticket, lambda sp, held: _flush_held(app, sp, held)):
         return

@@ -58,7 +58,7 @@ def test_today_headline_counts_blocking_decisions_and_puts_the_recommended_optio
 def test_an_applied_decision_shows_a_receipt(phone_page, mirror_with_question):
     page = phone_page("light")
     card = page.locator(f'.ncard[data-n="{mirror_with_question.n}"]')
-    card.get_by_role("button", name="1 · ISO 8601").click()
+    card.get_by_role("button", name="A · ISO 8601").click()
     card.get_by_role("button", name="Send answer").click()
     card.get_by_text("Sent · waiting for the desktop").wait_for()
     d = mirror_with_question.decisions()[0]

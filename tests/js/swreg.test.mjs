@@ -41,3 +41,60 @@ test("a new-build message from the worker registers that build's worker; anythin
   assert.deepEqual(calls, [["/sw.js?v=NEW1", { scope: "/" }]]);
   listenForNewBuild({});          // no service workers: nothing to listen to
 });
+
+import { listenForUpdate, safeToReload } from "../../fileshare/static/js/swreg.js";
+
+function swFake(controller) {
+  let fire;
+  return { sw: { controller, addEventListener: (t, fn) => { if (t === "controllerchange") fire = fn; } }, fire: () => fire() };
+}
+const fakeDoc = (visibility, extra = {}) => { const made = []; return { visibilityState: visibility, made, querySelector: () => extra.dialog || null,
+  querySelectorAll: () => extra.fields || [], getElementById: (id) => made.find((x) => x.id === id) || null,
+  createElement: () => { const n = { children: [], listeners: {}, setAttribute() {}, append(...c) { this.children.push(...c); }, addEventListener(t, f) { this.listeners[t] = f; } }; return n; },
+  body: { append(n) { made.push(n); } } }; };
+
+test("the first claim of an uncontrolled page is not an update", () => {
+  const { sw, fire } = swFake(null);
+  const d = fakeDoc("visible");
+  listenForUpdate({ serviceWorker: sw }, d, () => assert.fail("no reload"));
+  fire();
+  assert.equal(d.made.length, 0);
+});
+
+test("a visible controlled page is asked, once; Reload reloads", () => {
+  const { sw, fire } = swFake({});
+  const d = fakeDoc("visible"); let reloads = 0;
+  listenForUpdate({ serviceWorker: sw }, d, () => reloads++);
+  fire(); fire();
+  assert.equal(d.made.length, 1);
+  d.made[0].children[1].listeners.click();
+  assert.equal(reloads, 1);
+});
+
+test("a hidden page with nothing typed reloads quietly; with a draft it asks", () => {
+  let a = swFake({}), reloads = 0, d = fakeDoc("hidden");
+  listenForUpdate({ serviceWorker: a.sw }, d, () => reloads++);
+  a.fire();
+  assert.equal(reloads, 1); assert.equal(d.made.length, 0);
+  a = swFake({}); d = fakeDoc("hidden", { fields: [{ value: "half a request" }] }); reloads = 0;
+  listenForUpdate({ serviceWorker: a.sw }, d, () => reloads++);
+  a.fire();
+  assert.equal(reloads, 0); assert.equal(d.made.length, 1);
+  assert.equal(safeToReload(fakeDoc("hidden", { dialog: {} })), false);
+});
+
+test("safeToReload counts everything unsent: text, a chosen file, a picked radio, a checked box, contenteditable", () => {
+  const ok = (fields) => safeToReload(fakeDoc("hidden", { fields }));
+  assert.equal(ok([]), true);
+  assert.equal(ok([{ type: "text", value: "", defaultValue: "" }, { type: "hidden", value: "csrf" }, { type: "search", value: "q" }]), true);
+  assert.equal(ok([{ type: "text", value: "prefilled", defaultValue: "prefilled" }]), true);   // rendered, not typed
+  assert.equal(ok([{ type: "text", value: "typed", defaultValue: "" }]), false);
+  assert.equal(ok([{ tagName: "TEXTAREA", value: "half a note" }]), false);
+  assert.equal(ok([{ type: "file", files: { length: 1 } }]), false);                          // a chosen file
+  assert.equal(ok([{ type: "file", files: { length: 0 } }]), true);
+  assert.equal(ok([{ type: "radio", checked: true, defaultChecked: false }]), false);          // an answer picked, not sent
+  assert.equal(ok([{ type: "radio", checked: false, defaultChecked: false }]), true);
+  assert.equal(ok([{ type: "checkbox", checked: true, defaultChecked: true }]), true);
+  assert.equal(ok([{ type: "checkbox", checked: true, defaultChecked: false }]), false);
+  assert.equal(ok([{ tagName: "DIV", isContentEditable: true, textContent: " draft " }]), false);
+});

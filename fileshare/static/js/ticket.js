@@ -24,7 +24,7 @@ import {
 } from "./mirror-model.js";
 import {
   acItems, agreedNote, byLabel, chapters, chipFor, costText, doneNote, idleNote, journey, mainPr, moreSections, pinnedImages,
-  keySplit, planSteps, proofImage, receipts,
+  keySplit, planSteps, proofImage, receipts, approveVerb, TITLE_APPROVE_WHY,
 } from "./ticket-card.js";
 import { pinnedFigure } from "./images.js";
 import { moveChipEl, needsPill, pill, stripEl } from "./needs.js";
@@ -162,7 +162,8 @@ function statusLine() {
   const late = !state.queued.length && state.paired && latest && latest.ack == null && ageOf(latest.created_at) > NOT_YET_MS;
   return el("div", { class: `decision-status${text ? "" : " is-empty"}`, role: "status", "aria-live": "polite" },
     text ? pill(role, role === "ok" ? "check" : role === "warn" ? "alert" : "clock", text) : "",
-    waiting ? el("p", { class: "hint" }, "This phone isn't paired with the desktop, so it waits there for an Apply. Pair in Settings to have it apply at once.") : null,
+    waiting ? el("p", { class: "hint" }, "Confirm it in Mission Control (Today, or this ticket). ",
+      el("a", { href: "/settings#pair" }, "Pair this phone so answers apply directly")) : null,
     late ? el("p", { class: "hint" }, "Nothing back from the desktop yet. Open Mission Control; if this phone was unpaired there, pair it again in Settings.") : null);
 }
 
@@ -226,7 +227,7 @@ function paintBar() {
     // Approve only where the phone shows the gate text (full); at title the text stays on the desktop
     // (final review I2) and only Request changes is offered. Together: one decision for requirements and plan.
     const approve = approvalGates(state.doc).every((g) => canApproveOnPhone(state.doc, g))
-      ? [btn(together ? "Approve requirements and plan" : `Approve ${gate || "plan"}`, "btn-primary", () => confirmApprove(gate, target),
+      ? [btn(together ? `${approveVerb(state.doc)} requirements and plan` : `${approveVerb(state.doc)} ${gate || "plan"}`, "btn-primary", () => confirmApprove(gate, target),
         !target || !gateVerified(state.doc))] : [];
     kids = [el2(approve.length ? "div" : "div", approve.length ? "bar-grid" : "bar-one", ...approve,
       btn("Request changes", "", () => send("request_changes", [{ target: targetFor(state.doc, "request_changes", { gate }), value: draft.note.trim() }]),
@@ -379,9 +380,9 @@ function decisionCard() {
   } else if (mode === "approval") {
     const gate = approvalGate(doc);
     const gates = approvalGates(doc);
-    kids.push(el2("div", "decision-head", pill("you", "dot", gates.length === 2 ? "Approve requirements and plan" : `Approve ${gate || "plan"}`),
+    kids.push(el2("div", "decision-head", pill("you", "dot", gates.length === 2 ? `${approveVerb(doc)} requirements and plan` : `${approveVerb(doc)} ${gate || "plan"}`),
       el("span", { class: "muted" }, NEEDS_LABEL.approval)));
-    if (doc.redaction !== "full") kids.push(el("p", { class: "hint" }, "Review on desktop"));
+    if (doc.redaction !== "full") kids.push(el("p", { class: "callout r-info approve-why", role: "status" }, icon("alert"), el("span", {}, TITLE_APPROVE_WHY)));
     for (const gname of doc.redaction === "full" ? gates : []) {
       const cov = gateCovers(doc, gname);
       if (gates.length === 2) kids.push(el("h3", { class: "sect gate-group" }, gname === "plan" ? "Plan" : "Requirements"));

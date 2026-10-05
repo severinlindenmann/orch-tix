@@ -349,9 +349,12 @@ export const WAITING_REASON = Object.freeze({
 });
 // No ack this long after sending: say so instead of "applying" forever (an older desktop never sends a waiting ack).
 export const NOT_YET_MS = 120000;
+export const UNPAIRED_TEXT = "Sent · waiting for you to confirm in Mission Control";
 const NOT_YET_TEXT = "Not applied yet · open the desktop";
 
 export function outcomeText(ack, { changed = false, paired = false, ageMs = 0, request = false } = {}) {
+  // Not an error: an unpaired phone's answer is safe on the desktop and waits there for Apply (QA #56).
+  if (ack === "waiting-unpaired") return UNPAIRED_TEXT;
   if (typeof ack === "string" && WAITING_REASON[ack]) return `Not applied · ${WAITING_REASON[ack]} · open the desktop`;
   switch (ack) {
     case null:
@@ -378,6 +381,7 @@ export function outcomeText(ack, { changed = false, paired = false, ageMs = 0, r
 export function outcomeRole(ack, { ageMs = 0 } = {}) {
   if (ack === "applied") return "ok";
   if (ack === null || ack === undefined) return ageMs > NOT_YET_MS ? "warn" : "info";
+  if (ack === "waiting-unpaired") return "info";
   if (ack === "stale" || (typeof ack === "string" && WAITING_REASON[ack])) return "warn";
   return "neu";
 }

@@ -1,4 +1,5 @@
 import re
+import secrets
 import sqlite3
 from pathlib import Path
 
@@ -19,6 +20,14 @@ def connect(path: Path) -> sqlite3.Connection:
 def get_meta(conn: sqlite3.Connection, key: str) -> str | None:
     row = conn.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
     return None if row is None else row["value"]
+
+
+def ensure_epoch(conn: sqlite3.Connection) -> str:
+    """This database's identity (meta `epoch`, random, made once). A client that keeps a copy of a list with a sequence
+    cursor sends nothing else to tell a server that started over (a wiped or restored database numbers its events from
+    the start again, so an old cursor means something else): the epoch changes, the client takes the full list."""
+    conn.execute("INSERT OR IGNORE INTO meta(key, value) VALUES ('epoch', ?)", (secrets.token_hex(8),))
+    return get_meta(conn, "epoch")
 
 
 def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:

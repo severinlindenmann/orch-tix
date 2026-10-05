@@ -41,7 +41,7 @@ class Recorder:
     def notify(self, ticket, event):
         raise AssertionError("v1 push for a space")
 
-    def notify_payload(self, payload):
+    def notify_payload(self, payload, exclude_sessions=None):
         self.payloads.append(payload)
 
 
@@ -199,4 +199,4 @@ def test_deciding_a_join_request_pushes_a_silent_clear(app, owned, other_device_
     app.state.pusher = Recorder()
     assert session_client.post(f"/api/spaces/{SPACE}/join-requests/{req}/deny").status_code == 200
     assert session_client.post(f"/api/spaces/{SPACE}/join-requests/{req}/deny").status_code == 200   # no-op
-    assert app.state.pusher.payloads == [{"v": 2, "s": SPACE, "t": "", "k": "clear", "n": 0, "c": 0}]
+    assert app.state.pusher.payloads == [{"v": 2, "s": SPACE, "t": "", "k": "clear", "w": "join", "r": "denied", "n": 0, "c": 0}]

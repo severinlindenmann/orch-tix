@@ -2,6 +2,7 @@
 import { unb64u } from "./crypto.js";
 import { api } from "./api.js";
 import { tellWorker } from "./swreg.js";
+import { syncedMirrors } from "./mirrors-sync.js";
 
 export const MIN_ITERATIONS = 1000;
 export const MAX_ITERATIONS = 10_000_000;
@@ -82,11 +83,11 @@ const optional = async (p, pick, fallback = 0) => {
 // `messages` is null when the unread count could not be read (offline, a device token): the worker then leaves message
 // notifications alone. `at` is when the lists were requested: the worker never closes a notification shown after it
 // (a push that arrived while the answer was on its way is newer than the list).
-export function tellWorkerNeeds(mirrors, messages, nav = globalThis.navigator, at = undefined) {
+export function tellWorkerNeeds(mirrors, messages, nav = globalThis.navigator, at = undefined, joins = null) {
   try {
     const live = (mirrors || []).filter((m) => m && m.needs);
     tellWorker({ type: "needs-spaces", spaces: [...new Set(live.map((m) => m.space))],
-      tickets: live.map((m) => `${m.space}|${m.id}`), messages, ...(at === undefined ? {} : { at }) }, nav);
+      tickets: live.map((m) => `${m.space}|${m.id}`), messages, joins, ...(at === undefined ? {} : { at }) }, nav);
   } catch {
     /* no worker */
   }
@@ -102,22 +103,26 @@ export function setAppBadge(n, nav = globalThis.navigator) {
   }
 }
 
-export async function needsCount(get = (path) => api("GET", path), openRows = openRowsHere) {
+// The tab-bar badge reads the same stored list plus changes as the Needs list (mirrors-sync.js), not a second full copy.
+const getHere = (path) => (path === "/api/mirrors" ? syncedMirrors() : api("GET", path));
+
+export async function needsCount(get = getHere, openRows = openRowsHere) {
   const at = Date.now();
   const { mirrors = [] } = await get("/api/mirrors");
+  let joinSpaces = null;
   const [rows, messages, joins] = await Promise.all([
     openRows(mirrors),
     optional(get("/api/messages?after=0&wait=0"), (r) => (r.messages || []).filter((m) => m.to_kind === "human").length, null),
-    optional(get("/api/join-requests"), (r) => (r.requests || []).length),
+    optional(get("/api/join-requests"), (r) => { joinSpaces = (r.requests || []).map((x) => x.space); return joinSpaces.length; }),
   ]);
   const total = rows.filter((r) => r && r.doc && r.needs).length + (messages ?? 0) + joins;
-  tellWorkerNeeds(mirrors, messages, undefined, at);
+  tellWorkerNeeds(mirrors, messages, undefined, at, joinSpaces);
   return total;
 }
 
 // Fills #needs-badge (the sidebar and the tab bar share it). Failures keep the badge as it was:
 // the session and network banners report those.
-export async function refreshAttention(doc = document, get = (path) => api("GET", path), openRows = openRowsHere) {
+export async function refreshAttention(doc = document, get = getHere, openRows = openRowsHere) {
   const badge = doc.getElementById("needs-badge");
   if (!badge) return;
   let n;
