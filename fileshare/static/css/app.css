@@ -528,13 +528,15 @@ dialog.onboard > .btn-accent { margin-top: 16px; }
   .files-layout { display: grid; grid-template-columns: minmax(320px, 408px) minmax(0, 1fr); min-height: 0; }
   .list-col { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); overflow-y: auto; }
   .list-head { position: sticky; top: 0; z-index: 5; gap: 12px; padding: 20px 16px 12px; background: var(--ground); }
-  .list-title-row { align-items: center; gap: 8px; }
+  /* the 408px list column cannot hold title, count, four dock buttons and two icons on one line (QA TF-03):
+     the count never wraps, and the dock takes its own row below */
+  .list-title-row { align-items: center; flex-wrap: wrap; gap: 8px; }
   .list-title-row .page-title { margin-right: auto; }
-  .list-count { font-size: 12px; }
-  .dock { order: 3; gap: 6px; }
+  .list-count { font-size: 12px; white-space: nowrap; }
+  .dock { order: 5; flex: 1 0 100%; gap: 6px; }
   .dock-btn { width: 36px; height: 36px; border-radius: 9px; }
   .dock-btn .icon { width: 17px; height: 17px; }
-  .dock-primary { order: 3; width: auto; padding: 0 14px; font-size: 13.5px; }
+  .dock-primary { width: auto; padding: 0 14px; font-size: 13.5px; }
   .dock-primary .icon { width: 16px; height: 16px; }
   .list-menu-wrap { order: 4; }
   .list-menu-wrap .icon-btn { width: 36px; height: 36px; border: 1px solid var(--border); background: var(--surface); border-radius: 9px; }
