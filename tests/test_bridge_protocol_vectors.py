@@ -120,6 +120,8 @@ def test_host_case(c):
         res = ref.host_check(envelope_of(st), s, st["now_ms"], st["mailbox_id"])
         assert {k: v for k, v in res.items() if k in st["expect"]} == st["expect"], f"step {i}"
         assert res["result"] == st["expect"]["result"], f"step {i}"
+        rec = s["rids"].get(st["mailbox_id"])
+        assert (rec["until"] if rec else None) == st["record_until"], f"step {i}: retention"
 
 
 def test_every_refusal_after_the_signature_is_recorded():
@@ -153,8 +155,15 @@ def test_replay_never_runs_twice():
     assert ref.host_check(env, s, c["now_ms"])["result"] == "accept"
     for later in (1, 60_000, ref.RID_RETENTION_MS - 1):
         assert ref.host_check(env, s, c["now_ms"] + later)["code"] == "already_done"
-    # after the retention the timestamp is long out of window: still refused, never run
-    assert ref.host_check(env, s, c["now_ms"] + ref.RID_RETENTION_MS)["code"] == "stale_timestamp"
+    # after the retention its seq is already consumed (sequence runs before time): refused, never run
+    assert ref.host_check(env, s, c["now_ms"] + ref.RID_RETENTION_MS)["code"] == "stale_sequence"
+
+
+def test_retention_never_follows_the_senders_clock():
+    for c in VEC["host_cases"]:
+        for st in steps_of(c):
+            if st["record_until"] is not None:
+                assert st["record_until"] - st["now_ms"] <= ref.RID_RETENTION_MS, c["name"]
 
 
 def test_drops_carry_no_refusal():
@@ -170,7 +179,7 @@ def test_device_case(c):
            "device": VEC["ids"]["device_a"]["device_id"], "host_pub": PUB["host"],
            "pending": json.loads(json.dumps(c["pending"])), "offset_ms": c["offset_ms"]}
     res = ref.device_check(bytes.fromhex(c["envelope"]), ctx, c["mailbox"], c["now_ms"])
-    assert {k: v for k, v in res.items() if k in c["expect"]} == c["expect"]
+    assert {k: res.get(k) for k in c["expect"]} == c["expect"]     # offset_ms / clock_wrong: None means absent
 
 
 def test_pairing_link():
@@ -218,6 +227,7 @@ def test_assertion_challenge():
 def test_assertion_case(c):
     cred, pending = dict(c["credential"]), json.loads(json.dumps(c["pending"]))
     assert ref.verify_assertion(cred, pending, c["sender"], c["assertion"], c["now_ms"]) == c["expect"]
+    assert cred["sign_count"] == c["sign_count_after"]
     presented = ref.unb64u(json.loads(bytes.fromhex(c["assertion"]["client_data_json"]))["challenge"]).hex()
     assert presented not in pending, "a challenge is single use, whatever the outcome"
 

@@ -203,8 +203,13 @@ file permissions. Therefore:
 - a device MUST be added to the registry only from the Remote tab (pairing and approval); scope changes
   and revocations are likewise made only there;
 - every addition and every other registry change MUST be written to the audit log;
-- every `--remote` start MUST show the registry's devices, scopes and the changes since the last start,
-  so a device added behind the Remote tab's back is visible (owner decision D8).
+- every `--remote` start MUST show the registry's devices, scopes and the changes since the last start
+  (owner decision D8).
+
+What this buys, honestly: the guard and the start-up listing deter and expose careless or accidental
+changes; they do not stop an agent determined to also rewrite the audit log. The audit log and the
+since-last-start baseline sit on the same guarded paths under the same operating-system user, and the
+guard matches command patterns, so an indirect write may get past it.
 
 ## 3. Envelope
 
@@ -341,11 +346,17 @@ the chunk order (§7); the window on responses only adds a bound. A host-signed 
 carries the host's clock (`host_ms`):
 
 - the device MUST NOT drop that refusal because of its own clock;
-- it sets `offset = host_ms − device_now`;
+- it adopts `offset = host_ms − device_now` **only** from a host-signed `stale_timestamp` refusal for one
+  of its **pending** rids, at most **once per pending rid**, and only if `|offset| ≤ 24 h`; a larger
+  offset is not adopted, and the app says "this device's clock is wrong";
 - it sends the request again as a **new** request (new rid, new seq).
 
-Without this, a device with a skewed clock would never recover (vectors
-`stale_timestamp_refusal_to_a_skewed_clock`, `response_old_timestamp_corrected_by_offset`).
+A re-sent stored refusal carries the host's current `host_ms` (§5.3), so a retry of identical bytes never
+yields a stale offset. Without this rule, a device with a skewed clock would never recover. Vectors:
+`stale_timestamp_refusal_to_a_skewed_clock`, `stale_timestamp_offset_adopted_once_per_request`,
+`stale_timestamp_offset_out_of_range`, `stale_timestamp_refusal_for_a_request_not_pending`,
+`other_refusal_to_a_skewed_clock_is_not_exempt`, `response_old_timestamp_corrected_by_offset`; host
+chain `old_timestamp_replay_is_restamped`.
 
 ### 5.2 Per-device sequence numbers
 
@@ -374,7 +385,7 @@ verified is sent**, the host records and **persists** this, together with the se
 
 ```
 rid → { device id, digest = H(header || ciphertext || tag), received_at, outcome, until }
-until = max(received_at + 900 s, ts_ms + 300 s + 60 s)
+until = received_at + 900 s          (never derived from the sender's ts_ms)
 ```
 
 `outcome` is one of:
@@ -385,24 +396,33 @@ until = max(received_at + 900 s, ts_ms + 300 s + 60 s)
 
 **Every refusal issued after the signature verified (§6.1 steps 5–9) MUST be persisted as the rid's
 outcome before it is sent.** Otherwise a future-dated envelope refused at `t0` would run when the same
-bytes arrive a few seconds later. The record lives until `until`: at least 900 s, more than the 600 s
-span of timestamps the window lets in, and at least until the envelope's own timestamp has left the
-window plus a 60 s margin.
+bytes arrive a few seconds later.
+
+The record lives for 900 s from receipt, refusals included. Retention never follows `ts_ms`: the sender
+chooses it, and a paired device that wrote `ts_ms = 2^63 − 1` would otherwise make the host keep records
+for millions of years (vector `far_future_timestamp_bounded_retention`). A refused envelope still never
+runs after its record expired, because the host checks the **sequence before the time** (§6.1): a
+`stale_timestamp` refusal has already consumed its seq, so the same bytes get `stale_sequence` (vector
+`future_timestamp_then_in_window`, whose last step is after the record expired).
+
+A stored refusal is re-sent re-stamped: `host_ms` and `high` carry the host's **current** values, and the
+refusal is sealed and signed afresh (vectors `old_timestamp_replay_is_restamped`,
+`sequence_refused_then_same_bytes_after_window_moved`).
 
 For a known rid whose record has not expired:
 
 | Case | Answer |
 |---|---|
 | same device, same digest, finished | a **replay**: the stored outcome, re-sealed with a fresh salt. It never runs again (vector `replay_of_finished_request`). |
-| same device, same digest, refused | the stored refusal, with the stored fields (vectors `future_timestamp_then_in_window`, `repeated_sequence_then_replayed`, `sequence_refused_then_same_bytes_after_window_moved`) |
+| same device, same digest, refused | the stored refusal, re-stamped with the current `host_ms` / `high` (vectors `future_timestamp_then_in_window`, `repeated_sequence_then_replayed`, `sequence_refused_then_same_bytes_after_window_moved`) |
 | same device, same digest, no outcome (still running, or the host crashed between recording and finishing) | `already_done` with `status: "unknown"`. The app says "outcome unknown", never "failed" (vector `replayed_request`). |
 | anything else (another device, other bytes) | `rid_conflict` (vectors `same_rid_other_content`, `replay_from_other_device_record`) |
 
 When no response arrived, a device retrying MUST resend the identical envelope bytes. The mailbox refuses
 a second post of an id while its route exists (`duplicate_id`), so the retry first cancels the old
 request (`DELETE /api/bridge/{space}/requests/{id}`) or waits until the route's 60 s TTL has passed.
-Once the record has expired, the timestamp is long outside the window, so an old envelope is refused and
-never runs (`test_replay_never_runs_twice`). The signature is not in the digest because it is malleable
+Once the record has expired, the envelope's seq is consumed, so it is refused and never runs
+(`test_replay_never_runs_twice`). The signature is not in the digest because it is malleable
 (§3.4).
 
 ## 6. What the host does with a request
@@ -434,12 +454,18 @@ mailbox already shows that a response exists and its size.
    **Refusal budget:** the refusals of this step are issued before any registered signature verified.
    They count against **one host-wide budget** of 10 per minute, never against the claimed device id,
    which anyone with K_ws can write. Over the budget the host drops them. A request whose signature
-   verified is never dropped because of the budget (vectors
-   `refusal_budget_spent_drops_unverified`, `refusal_budget_spent_signed_request_runs`).
+   verified is never dropped because of the budget. The refusals of an **open pairing offer** count
+   against that offer's own budget instead (5 per minute, keyed by its unguessable `pairing_id`, §8.1),
+   so junk envelopes cannot starve an honest pairing (vectors `refusal_budget_spent_drops_unverified`,
+   `refusal_budget_spent_signed_request_runs`, `refusal_budget_counts_from_any_claimed_device`,
+   `pair_refusal_for_open_offer_under_spent_host_budget`, `pair_refusal_without_offer_under_spent_host_budget`,
+   `pair_refusals_spent_the_offers_own_budget`, `pair_request_under_spent_host_budget_succeeds`).
 4. **Replay.** A known rid gets §5.3's answer.
 5. **Framing.** If the plaintext framing or the meta JSON is invalid: record, then refuse `malformed`.
-6. **Time.** Outside the window (§5.1): record, then refuse `stale_timestamp` with `host_ms`.
-7. **Sequence.** Outside the sequence window (§5.2): record, then refuse `stale_sequence` with `high`.
+6. **Sequence.** Outside the sequence window (§5.2): record, then refuse `stale_sequence` with `high`.
+   A seq that passes is consumed now, even if step 7 refuses the request.
+7. **Time.** Outside the window (§5.1): record, then refuse `stale_timestamp` with `host_ms`. Because
+   step 6 came first, a re-delivered copy can never run (§5.3).
 8. **Stream.** If the header names a stream the device did not open (§4): record, then refuse
    `forbidden_scope`.
 9. **Record and run.** Record the rid (no outcome yet) and persist it with the sequence state. Then
@@ -513,7 +539,8 @@ trusts a new host key on first use, and never replaces the pin without a new pai
    - the MAC verifies (a wrong MAC gets the same `pairing_closed` refusal as no offer);
    - the timestamp is in the window (vector `pair_request_stale_timestamp`).
 
-   These refusals count against the host-wide budget. The host then marks the offer used and shows on
+   Once the offer is known to be open, these refusals count against the offer's own budget, not the
+   host-wide one (§6.1). The host then marks the offer used and shows on
    the Mac the label (as text, cleaned like `shown`, §9.3), the scope, the phone link (§8.2) and the
    **device fingerprint**. It answers `pending` in a response signed by the host key.
 4. **The device** checks that `H("sharing/bridge/host/v1|" || host_pub)` equals `host_pin` from the
@@ -526,9 +553,10 @@ trusts a new host key on first use, and never replaces the pin without a new pai
    and logs it (§2.7). The device asks with `op = "pair_status"` (signed with its key, read-only, so a
    replay changes nothing) until the answer is `approved` or `rejected`.
 
-A device that gets `pairing_closed` for a link it just opened MUST say: "this link was used by someone
-else: reject it on your Mac". Someone else holding the link is exactly the case the fingerprint
-comparison exists for.
+A device that gets `pairing_closed` for a link it just opened, **or no answer at all within 60 s**,
+MUST say: "this link was used by someone else: reject it on your Mac". Someone else holding the link is
+exactly the case the fingerprint comparison exists for, and an answer that never comes may be one the
+host dropped under a spent budget.
 
 What each part protects:
 
@@ -578,8 +606,9 @@ records stay until they expire, so no replay runs. Nothing on the TIX server has
 can also sign the browser out on TIX's Devices page, which stops it from posting to the mailbox.
 
 Revoking a device in one workspace's Remote tab revokes it in every workspace registry **on that
-computer**. It does not reach other computers: their hosts keep their own registries, and the owner
-revokes there too (D7). Changing a device's scope ends its streams with `scope_changed` and drops its
+computer**. Device ids differ per workspace (§2.4), so the other registries are matched by the device's
+**public key** (equivalently its fingerprint), never by device id. It does not reach other computers:
+their hosts keep their own registries, and the owner revokes there too (D7). Changing a device's scope ends its streams with `scope_changed` and drops its
 lease. The kill switch refuses everything with `stopped`.
 
 ## 9. Platform-authenticator binding
@@ -647,20 +676,30 @@ The host builds `subject` from its own data for that route (R2, R13). Vectors:
 
 - It MUST consist of Unicode scalar values only; a string with a lone surrogate is an error, and the host
   does not issue the challenge.
-- The host removes every C0 control except line feed, DEL, every C1 control, and the bidi formatting
-  characters U+061C, U+200E, U+200F, U+202A–U+202E and U+2066–U+2069.
+- The host removes every code point of general category **Cc** (except line feed), **Cf**, **Zl**,
+  **Zp**, **Co** and **Cn**, and every **Default_Ignorable_Code_Point**. That covers C0/C1 controls, bidi
+  controls, zero-width characters, word joiners, the BOM, line and paragraph separators, tag characters,
+  variation selectors, the soft hyphen, the combining grapheme joiner, the Mongolian vowel separator,
+  Hangul fillers, private use and unassigned code points. In JavaScript the same rule is
+  `/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Co}\p{Cn}\p{Default_Ignorable_Code_Point}]/gu` with LF kept.
+- The host cleans, the device does not re-clean: it displays and hashes exactly the string it received,
+  so the two sides cannot disagree because their Unicode versions differ (which changes `Cn`).
 - There is **no normalisation**: the hash covers exactly what is shown.
 - The TIX app renders it as plain text in an isolated bidi context (`dir="auto"` inside an element
   with `unicode-bidi: isolate`), never as HTML.
+- **Homoglyphs remain** (a Cyrillic "а" for a Latin "a" passes every rule above). So the app shows,
+  beside `shown`, the ticket's ASCII key and the first 8 hex digits of `digest`, which the person can
+  compare with the Mac.
 
 Vectors: `shown`.
 
 ### 9.4 Fresh and lease
 
 1. The device sends the action as a normal request R1. The host completes §6.1 up to step 9 and finds
-   that the route needs an assertion. It parks R1 (its exact digest) and answers R1 with the refusal
-   `assertion_required` (or `lease_required`). The refusal carries `purpose`, `scope`, `expires_ms`,
-   `nonce` and `subject`.
+   that the route needs an assertion. It checks the **fresh-action rate limit now** (D9), before issuing
+   any challenge: over the limit, R1 is refused `assertion_failed` and nothing is parked. Otherwise it
+   parks R1 (its exact digest) and answers R1 with the refusal `assertion_required` (or
+   `lease_required`). The refusal carries `purpose`, `scope`, `expires_ms`, `nonce` and `subject`.
 2. The TIX app shows `subject.shown`, recomputes the challenge from those parts itself, and calls
    `navigator.credentials.get` with that challenge and only its own credential id (§10.5).
 3. The device sends R2 with `op = "assert"` and `{"for": R1 rid hex, "credential_id",
@@ -668,7 +707,9 @@ Vectors: `shown`.
    request.
 4. The host verifies the assertion (§9.5). On success:
    - **fresh**: R1 runs exactly once, after its scope is checked again, and R2's response carries R1's
-     result. The assertion allows nothing else.
+     result. R1's record then takes **the result of that run** as its outcome, replacing
+     `assertion_required`, so a replay of R1 gets the result (§5.3), not a new prompt. The assertion
+     allows nothing else.
    - **lease**: the host opens a **15-minute typing lease** for that device and runs R1. The lease uses
      the host clock and is not kept across a host restart. While it is open, that device's requests in
      the lease's class run without a new assertion. The lease ends at 15 minutes, on revocation, scope
@@ -707,14 +748,15 @@ Then the stored count is updated.
 
 Every assertion-backed action MUST be written to the host's **audit log** (device, time, purpose, scope
 and the `subject`), and the Remote tab MUST list them with their subject. Fresh assertions MUST be rate
-limited per device (D9); over the limit the host refuses `assertion_failed` without consuming the parked
-request. Together these are the owner's mitigation against a device whose assertions are forged (§1, D8).
+limited per device (D9). The limit is checked when `assertion_required` is issued (§9.4), never at R2: a
+challenge is consumed whatever happens, so a refusal at R2 would leave R1 parked behind a dead challenge. Together these are the owner's mitigation against a device whose assertions are forged (§1, D8).
 
 Vectors: `assertion.cases`:
 
 - verified;
 - replayed;
-- count not increased (refused without BE; advisory with BE);
+- count not increased (refused without BE; advisory with BE, and the stored count is **not** changed by an
+  advisory pass);
 - zero count;
 - user verification flag clear;
 - other origin, cross-origin, `webauthn.create`, other rp id;
@@ -833,12 +875,12 @@ See the reference.
 | size, magic, unknown version, wrong direction, unknown flag, other workspace or key version | drop | drop |
 | mailbox id differs from the header's rid | drop | drop |
 | bad tag | drop | drop |
-| unknown device, revoked device, bad signature | refusal (`not_paired`, `revoked`, `bad_signature`), within the host-wide budget, otherwise drop | drop (bad host signature) |
+| unknown device, revoked device, bad signature | refusal (`not_paired`, `revoked`, `bad_signature`), within the host-wide budget (an open offer's own budget for its pairing refusals), otherwise drop | drop (bad host signature) |
 | invalid framing after a verified signature | refusal `malformed`, recorded | drop |
-| old or future timestamp | refusal `stale_timestamp` + `host_ms`, recorded | drop, except a `stale_timestamp` refusal (§5.1) |
-| repeated, zero or too old seq | refusal `stale_sequence` + `high`, recorded | — (a chunk out of order: drop) |
+| repeated, zero or too old seq (checked first) | refusal `stale_sequence` + `high`, recorded | — (a chunk out of order: drop) |
+| old or future timestamp (seq already consumed) | refusal `stale_timestamp` + `host_ms`, recorded | drop, except a `stale_timestamp` refusal for a pending rid (§5.1) |
 | another device's stream | refusal `forbidden_scope`, recorded | — |
-| known rid, same bytes | stored outcome or stored refusal, or `already_done` / `unknown`; never runs again | — |
+| known rid, same bytes | stored outcome, or stored refusal re-stamped, or `already_done` / `unknown`; never runs again | — |
 | known rid, other bytes or other device | refusal `rid_conflict` | — |
 | response for a rid that is not pending | — | drop |
 
@@ -867,18 +909,22 @@ checked too. The `why` fields are informative and not part of the contract.
 | `seal` | header encoding, K_msg, zero nonce, AAD, `ciphertext || tag` |
 | `sign`, `sig_scalars` | valid, wrong key, changed message, the malleable twin, `r = 0`, `r = n`, `s = n`, `r = n + 1`, `r = n − 1`, short |
 | `ids` | device ids (and that another workspace gives another id), fingerprints, the host pin |
-| `host_cases` | full request; replay without an outcome, of a finished request, from another device's record; same rid with other content; old, future and edge timestamps; a future-dated envelope refused and then in the window; tampered tag and header; mailbox id mismatch; wrong-device signature; unknown device; refusal budget (unverified dropped, signed still runs); unknown version, direction, flag; another workspace's key; revoked; meta over 64 KiB; seq 0, repeated, below the window, reordered, the sliding window, stored refusal versus a moved window; own and another device's stream; oversize; pairing (first, twice, status, other key, bad MAC, no offer, stale, device id not of the key, phone link with and without proof) |
-| `device_cases` | full response chunk; signed by a device key; for another device; for an unknown request; tampered tag; old timestamp, and corrected by the offset; out of order; mailbox mismatch; refusal chunk; refusal without `LAST`; a `stale_timestamp` refusal to a skewed clock |
+| `host_cases` | full request; replay without an outcome, of a finished request, from another device's record; same rid with other content; old, future and edge timestamps; a future-dated envelope refused and then in the window; tampered tag and header; mailbox id mismatch; wrong-device signature; unknown device; refusal budget (unverified dropped, signed still runs); unknown version, direction, flag; another workspace's key; revoked; meta over 64 KiB; seq 0, repeated, below the window, reordered, the sliding window, stored refusal versus a moved window; a far-future `ts_ms` with bounded retention; a re-stamped replay; a stream opened through `STREAM`, used by its own device and refused to another; a stream never opened; oversize; budgets (any claimed device, an open offer's own budget, pairing under a spent host budget); pairing (first, twice, status, other key, bad MAC, no offer, stale, device id not of the key, phone link with and without proof) |
+| `device_cases` | full response chunk; signed by a device key; for another device; for an unknown request; tampered tag; old timestamp, and corrected by the offset; out of order; mailbox mismatch; refusal chunk; refusal without `LAST`; a `stale_timestamp` refusal to a skewed clock, adopted once per request, out of range, for a request not pending; another refusal code to a skewed clock (not exempt) |
 | `pairing` | the link fragment, host pin, pairing MAC, device id, fingerprint, phone-link proof |
-| `shown` | controls and bidi removed, no normalisation, lone surrogate |
+| `shown` | controls and bidi removed; invisible, format, separator, tag, variation-selector, filler, private-use and unassigned code points removed; visible text kept; no normalisation; lone surrogate |
 | `assertion` | challenge inputs and bytes, lease challenge, registration challenge, 17 verification cases with a fake authenticator |
 
-Every MUST in §3–§9 that the reference implements has a negative vector.
-`tests/test_bridge_protocol_mutations.py` applies 32 mutations to the reference (the first review's 16,
-plus 16 for the rules added since) and fails unless the vectors catch every one.
+Every MUST in §3–§9 that the reference implements has a negative vector. Every host case and step also
+pins the rid record's `until` (`record_until`), and every assertion case the stored count afterwards
+(`sign_count_after`). `tests/test_bridge_protocol_mutations.py` applies 54 mutations to the reference
+(the first review's 16, the second review's 12, and one or more for each rule added since) and fails
+unless the vectors catch every one.
 
-Not covered by vectors yet: parsing a real WebAuthn attestation object (CBOR) at registration, and the
-`credential_begin` / `credential_finish` requests of a pending device (F2).
+Not covered by vectors yet (F2): parsing a real WebAuthn attestation object (CBOR) at registration; the
+`credential_begin` / `credential_finish` requests of a pending device; and the host's park-and-run flow of
+§9.4 (when the fresh-action rate limit is checked, and R1's outcome after it ran). The reference checks
+an assertion (§9.5) but does not run that flow.
 
 ## 13. Reused and new
 
@@ -939,8 +985,8 @@ exception (D4).
   again. On a pin failure the device drops every response, says "the host key changed: pair again", and
   never trusts a new key on first use.
 - **D7 — How far a revocation reaches.** Meanwhile: revoking a device in one workspace's Remote tab
-  revokes it in every workspace registry on that computer. It does not reach other computers; their
-  hosts are revoked separately.
+  revokes it in every workspace registry on that computer, matched by public key, since device ids
+  differ per workspace. It does not reach other computers; their hosts are revoked separately.
 - **D8 — The accepted limits. ACCEPTED by the owner**, with the mitigations written as MUSTs (§2.7, §9.5):
   devices are added only from the Remote tab, every addition is logged and shown on each remote start,
   every assertion-backed action is listed with its subject in the Remote tab, and fresh assertions are rate
@@ -954,13 +1000,17 @@ exception (D4).
     actions;
   - a local process running as the owner on the host computer can read MK, the host key, the registry
     and the request store; an agent that can write the host registry could add a device, the orch
-    command guard being the only barrier (§2.7).
+    command guard being the only barrier (§2.7). The guard and the start-up listing deter and expose
+    careless or accidental changes; they do not stop an agent determined to also rewrite the audit
+    log.
 - **D9 — Lifetimes and limits.** Meanwhile:
   - pairing offer: 10 minutes, single use;
   - assertion and registration challenges: 120 s;
-  - rid records: `max(received_at + 900 s, ts_ms + 360 s)`, refusals included;
+  - rid records: `received_at + 900 s`, refusals included (never from `ts_ms`);
   - stored replay body: 64 KiB;
-  - refusal budget: 10 per minute, host-wide;
+  - refusal budget: 10 per minute, host-wide; 5 per minute for each open pairing offer;
+  - clock offset a device adopts: at most 24 h, once per pending request;
+  - a pairing with no answer: 60 s, then the "used by someone else" warning;
   - fresh actions: at most 6 per 10 minutes per device;
   - stream silence that counts as closed: 60 s.
 

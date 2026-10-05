@@ -156,3 +156,19 @@ test("signature scalars outside 1..n-1 never verify in WebCrypto", async () => {
     assert.equal(ok, false, s.name);
   }
 });
+
+// §9.3: the `shown` rule as one Unicode property regex (the host applies it; the app may check it).
+const REMOVED = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Co}\p{Cn}\p{Default_Ignorable_Code_Point}]/gu;
+function cleanShown(s) {
+  if (!s.isWellFormed()) throw new TypeError("not Unicode scalar values");
+  return s.replace(REMOVED, (c) => (c === "\n" ? c : ""));
+}
+
+test("the shown vectors, with the regex form of the rule", () => {
+  for (const c of VEC.shown) {
+    const s = String.fromCodePoint(...c.input.filter((x) => x < 0xD800 || x > 0xDFFF))
+      + (c.input.some((x) => x >= 0xD800 && x <= 0xDFFF) ? "\uD800" : "");
+    if (c.expect === null) assert.throws(() => cleanShown(s), c.name);
+    else assert.equal(cleanShown(s), c.expect, c.name);
+  }
+});

@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import json
 import struct
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -39,8 +40,9 @@ MAX_META = 64 * 1024
 WINDOW_MS = 300_000                                  # each way
 SEQ_WINDOW = 64
 RID_RETENTION_MS = 900_000
-RID_AFTER_TS_MS = WINDOW_MS + 60_000                 # a rid is also kept until ts_ms + 360 s (§5.3)
 BUDGET = 10                                          # unverified refusals per minute, host-wide (§6.1)
+OFFER_BUDGET = 5                                     # refusals per minute for one open pairing offer (§8.1)
+MAX_OFFSET_MS = 24 * 3600 * 1000                     # a device adopts at most this clock offset (§5.1)
 BUDGET_WINDOW_MS = 60_000
 ZERO_NONCE = bytes(12)
 ZERO_ID = bytes(16)
@@ -252,21 +254,24 @@ def _refuse(code, **extra):
     return {"result": "refuse", "code": code, **extra}
 
 
-def _unverified(state: dict, now_ms: int, code: str, **extra) -> dict:
+def _unverified(state: dict, now_ms: int, code: str, bucket: dict | None = None, limit: int = BUDGET,
+                **extra) -> dict:
     """A refusal before any registered signature verified: counted against ONE host-wide budget (never
-    the claimed device id, which anyone can write), dropped once the budget is spent."""
-    recent = [t for t in state.get("unverified", []) if now_ms - t < BUDGET_WINDOW_MS]
-    if len(recent) >= BUDGET:
-        state["unverified"] = recent
+    the claimed device id, which anyone can write), dropped once the budget is spent. An open pairing
+    offer passes itself as `bucket`: its own budget, keyed by the unguessable pairing id (§8.1)."""
+    holder = state if bucket is None else bucket
+    recent = [t for t in holder.get("unverified", []) if now_ms - t < BUDGET_WINDOW_MS]
+    if len(recent) >= limit:
+        holder["unverified"] = recent
         return _drop("budget")
-    state["unverified"] = recent + [now_ms]
+    holder["unverified"] = recent + [now_ms]
     return _refuse(code, **extra)
 
 
 def _record(state, h: Header, env: bytes, now_ms: int, outcome) -> None:
     """Persisted (on a real host) before the refusal is sent or the request runs."""
     state["rids"][h.rid.hex()] = {"device": h.device.hex(), "digest": digest(env).hex(), "outcome": outcome,
-                                  "until": max(now_ms + RID_RETENTION_MS, h.ts_ms + RID_AFTER_TS_MS)}
+                                  "until": now_ms + RID_RETENTION_MS}       # never from the sender's ts_ms
 
 
 def _recorded_refusal(state, h, env, now_ms, code, **extra) -> dict:
@@ -346,8 +351,13 @@ def host_check(env: bytes, state: dict, now_ms: int, mailbox_id: str | None = No
             out = known["outcome"]
             if out is None:                             # accepted, no outcome stored (running, or a crash)
                 return _refuse("already_done", status="unknown")
-            if "refusal" in out:
-                return _refuse(out["refusal"], **{k: v for k, v in out.items() if k != "refusal"})
+            if "refusal" in out:                        # re-sent with the host's CURRENT clock and high
+                extra = {k: v for k, v in out.items() if k != "refusal"}
+                if "host_ms" in extra:
+                    extra["host_ms"] = now_ms
+                if "high" in extra:
+                    extra["high"] = dev["high"]
+                return _refuse(out["refusal"], **extra)
             return {"result": "replay", "outcome": out}
         return _refuse("rid_conflict")
     # 5. from here every refusal is recorded before it is sent
@@ -355,10 +365,11 @@ def host_check(env: bytes, state: dict, now_ms: int, mailbox_id: str | None = No
         meta, data = unframe(pt)
     except ValueError:
         return _recorded_refusal(state, h, env, now_ms, "malformed")
-    if abs(now_ms - h.ts_ms) > WINDOW_MS:
-        return _recorded_refusal(state, h, env, now_ms, "stale_timestamp", host_ms=now_ms)
+    # sequence BEFORE time: a stale_timestamp refusal consumes its seq, so the same bytes can never run
     if not seq_accept(dev, h.seq):
         return _recorded_refusal(state, h, env, now_ms, "stale_sequence", high=dev["high"])
+    if abs(now_ms - h.ts_ms) > WINDOW_MS:
+        return _recorded_refusal(state, h, env, now_ms, "stale_timestamp", host_ms=now_ms)
     streams = state.setdefault("streams", {})
     if h.stream != ZERO_ID and streams.get(h.stream.hex()) != did:
         return _recorded_refusal(state, h, env, now_ms, "forbidden_scope")    # not this device's stream
@@ -377,13 +388,14 @@ def _pair(state, h, hb, body, sig, meta, now_ms):
         return _unverified(state, now_ms, "malformed")
     if offer is None or now_ms >= offer["expires_ms"] or offer.get("used"):
         return _unverified(state, now_ms, "pairing_closed")
+    ob = {"bucket": offer, "limit": OFFER_BUDGET}  # an open offer is not starved by the host-wide budget
     if device_id(h.workspace, pub) != h.device or not verify(pub, sig, signed_bytes(hb, body)):
-        return _unverified(state, now_ms, "bad_signature")
+        return _unverified(state, now_ms, "bad_signature", **ob)
     want = pair_mac(bytes.fromhex(offer["secret"]), h.workspace, bytes.fromhex(pid), pub)
     if not hmac.compare_digest(want, mac):
-        return _unverified(state, now_ms, "pairing_closed")      # the same answer as no offer: the link is the secret
+        return _unverified(state, now_ms, "pairing_closed", **ob)      # the same answer as no offer: the link is the secret
     if abs(now_ms - h.ts_ms) > WINDOW_MS:
-        return _unverified(state, now_ms, "stale_timestamp", host_ms=now_ms)
+        return _unverified(state, now_ms, "stale_timestamp", host_ms=now_ms, **ob)
     offer["used"] = True
     link = None                                    # a phone link is recorded only with its proof (§8.2)
     phone_key = state.get("phones", {}).get(str(meta.get("phone_id", "")))
@@ -434,8 +446,15 @@ def device_check(env: bytes, ctx: dict, mailbox: dict, now_ms: int) -> dict:
     res = {"result": "accept", "last": bool(h.flags & F_LAST), "refusal": bool(h.flags & F_REFUSAL),
            "meta": meta, "data": data.hex()}
     if h.flags & F_REFUSAL and meta.get("refusal") == "stale_timestamp" and type(meta.get("host_ms")) is int:
-        # the host says this device's clock is off: never dropped for that clock (§5.1)
-        res["offset_ms"] = meta["host_ms"] - now_ms
+        # the host says this device's clock is off: never dropped for that clock, and adopted at most once
+        # per pending request and only within 24 h (§5.1)
+        if not pend.get("offset_adopted"):
+            pend["offset_adopted"] = True
+            off = meta["host_ms"] - now_ms
+            if abs(off) <= MAX_OFFSET_MS:
+                res["offset_ms"] = off
+            else:
+                res["clock_wrong"] = True
     elif abs(now_ms + ctx.get("offset_ms", 0) - h.ts_ms) > WINDOW_MS:
         return _drop("stale_timestamp")
     pend["next"] += 1
@@ -444,15 +463,28 @@ def device_check(env: bytes, ctx: dict, mailbox: dict, now_ms: int) -> dict:
 
 # --- the platform-authenticator binding (§9) ------------------------------------------------------
 
-_BIDI = {0x061C, 0x200E, 0x200F, *range(0x202A, 0x202F), *range(0x2066, 0x206A)}
+# Default_Ignorable_Code_Point (Unicode DerivedCoreProperties.txt), as ranges
+_IGNORABLE = ((0x00AD, 0x00AD), (0x034F, 0x034F), (0x061C, 0x061C), (0x115F, 0x1160), (0x17B4, 0x17B5),
+              (0x180B, 0x180F), (0x200B, 0x200F), (0x202A, 0x202E), (0x2060, 0x206F), (0x3164, 0x3164),
+              (0xFE00, 0xFE0F), (0xFEFF, 0xFEFF), (0xFFA0, 0xFFA0), (0xFFF0, 0xFFF8), (0x1BCA0, 0x1BCA3),
+              (0x1D173, 0x1D17A), (0xE0000, 0xE0FFF))
+_REMOVED_CATEGORIES = {"Cc", "Cf", "Zl", "Zp", "Co", "Cn"}
+
+
+def _removed(c: str) -> bool:
+    if c == "\n":
+        return False
+    o = ord(c)
+    return unicodedata.category(c) in _REMOVED_CATEGORIES or any(a <= o <= b for a, b in _IGNORABLE)
 
 
 def clean_shown(s: str) -> str:
-    """The host's `shown` text (§9.3): Unicode scalar values only (a lone surrogate is an error), C0 except
-    LF, DEL, C1 and bidi formatting characters removed, no normalisation."""
+    """The host's `shown` text (§9.3): Unicode scalar values only (a lone surrogate is an error); every code
+    point of category Cc (except LF), Cf, Zl, Zp, Co, Cn and every Default_Ignorable_Code_Point removed;
+    no normalisation."""
     if any(0xD800 <= ord(c) <= 0xDFFF for c in s):
         raise ValueError("not Unicode scalar values")
-    return "".join(c for c in s if not ((ord(c) < 0x20 and c != "\n") or 0x7F <= ord(c) <= 0x9F or ord(c) in _BIDI))
+    return "".join(c for c in s if not _removed(c))
 
 
 def subject_hash(subject: dict) -> bytes:
@@ -505,7 +537,7 @@ def verify_assertion(cred: dict, pending: dict, sender_device: str, a: dict, now
     if (count or cred["sign_count"]) and count <= cred["sign_count"]:
         if not cred["be"]:
             return _refuse("assertion_failed", why="sign_count")          # this assertion only; shown, not suspended
-        return {"result": "verified", "counter_warning": True}          # synced: the counter is advisory
+        return {"result": "verified", "counter_warning": True}          # synced: advisory, stored count kept
     cred["sign_count"] = count
     return {"result": "verified"}
 
@@ -545,7 +577,7 @@ def build() -> dict:
         "constants": {"magic": MAGIC.decode(), "header_len": HEADER_LEN, "tag_len": TAG_LEN, "sig_len": SIG_LEN,
                       "max_request": MAX_REQUEST, "max_chunk": MAX_CHUNK, "max_meta": MAX_META,
                       "window_ms": WINDOW_MS, "seq_window": SEQ_WINDOW, "rid_retention_ms": RID_RETENTION_MS,
-                      "rid_after_ts_ms": RID_AFTER_TS_MS, "budget": BUDGET, "budget_window_ms": BUDGET_WINDOW_MS,
+                      "offer_budget": OFFER_BUDGET, "max_offset_ms": MAX_OFFSET_MS, "budget": BUDGET, "budget_window_ms": BUDGET_WINDOW_MS,
                       "labels": {n: v.decode() for n, v in (("ws", L_WS), ("msg", L_MSG), ("sig", L_SIG),
                                  ("device", L_DEVICE), ("fp", L_FP), ("host", L_HOST), ("pair", L_PAIR),
                                  ("phone_link", L_PHONE), ("assert", L_ASSERT), ("webauthn_reg", L_REG))}},
@@ -634,8 +666,13 @@ def build() -> dict:
         # an all-zero envelope is written as its length, so the file stays small
         wire = {"envelope_zeros": len(env)} if not any(env) else {"envelope": env.hex()}
         host_cases.append({"name": name, **wire, "mailbox_id": mb, "state": before, "now_ms": now_ms,
-                           "expect": {k: v for k, v in res.items() if k in keep}})
+                           "expect": {k: v for k, v in res.items() if k in keep}, "record_until": until_of(s, mb)})
         return s
+
+    def until_of(s, mb):
+        """The rid record's `until` after the call (None if there is none): pins the retention rule."""
+        rec = s["rids"].get(mb)
+        return rec["until"] if rec else None
 
     def chain(name, steps, mutate=None):
         """Several envelopes against ONE state, from its initial value: what a step leaves behind is part
@@ -649,7 +686,8 @@ def build() -> dict:
             mb = Header.decode(env).rid.hex()
             res = host_check(env, s, now_ms, mb)
             out_steps.append({"envelope": env.hex(), "mailbox_id": mb, "now_ms": now_ms,
-                              "expect": {k: v for k, v in res.items() if k in keep}})
+                              "expect": {k: v for k, v in res.items() if k in keep},
+                              "record_until": until_of(s, mb)})
         host_cases.append({"name": name, "state": before, "steps": out_steps})
 
     def da(**kw):
@@ -668,10 +706,18 @@ def build() -> dict:
     case("replay_from_other_device_record", full, None, now + 1500,
          lambda s: s["rids"].update({fake("rid-7")[:16].hex(): {"device": dev_b.hex(), "digest": digest(full).hex(),
                                                                 "outcome": {"status": 200}, "until": now + 900_000}}))
-    case("old_timestamp", req(seq=2, ts=now - WINDOW_MS - 1), None, now)
+    old = req(seq=2, ts=now - WINDOW_MS - 1)
+    case("old_timestamp", old, None, now)
+    # a re-sent stored refusal carries the host's CURRENT clock, not the stored one
+    chain("old_timestamp_replay_is_restamped", [(old, now), (old, now + 5000)])
     case("future_timestamp", req(seq=2, ts=now + WINDOW_MS + 1), None, now)
     fut = req(seq=2, ts=now + WINDOW_MS + 1)
-    chain("future_timestamp_then_in_window", [(fut, now), (fut, now + 2000), (fut, now + RID_RETENTION_MS - 1)])
+    # refused at t0; redelivered inside the window it gets the stored refusal; after the record expired
+    # its seq is already consumed, so it still never runs
+    chain("future_timestamp_then_in_window", [(fut, now), (fut, now + 2000), (fut, now + RID_RETENTION_MS - 1),
+                                              (fut, now + RID_RETENTION_MS)])
+    # a sender-chosen far-future ts_ms must not extend retention: until = received + 900 s
+    case("far_future_timestamp_bounded_retention", req(seq=2, ts=2**63 - 1), None, now)
     case("timestamp_at_window_edge", req(seq=2, ts=now - WINDOW_MS), None, now)
     case("future_timestamp_at_window_edge", req(seq=2, ts=now + WINDOW_MS), None, now)
     bad_tag = bytearray(full)
@@ -688,6 +734,8 @@ def build() -> dict:
          lambda s: s.update(unverified=[now - i for i in range(BUDGET)]))
     case("refusal_budget_spent_signed_request_runs", req(seq=3), None, now,
          lambda s: s.update(unverified=[now - i for i in range(BUDGET)]))
+    case("refusal_budget_counts_from_any_claimed_device", req(signer="intruder", device=fake("forged-id")[:16], seq=3),
+         None, now, lambda s: s.update(unverified=[now - i for i in range(BUDGET)]))
     case("unknown_version", full[:4] + bytes([2]) + full[5:], None, now)
     case("response_sent_to_host", req(direction=TO_DEVICE, seq=4), None, now)
     case("unknown_flag", req(flags=0x08, seq=4), None, now)
@@ -700,7 +748,7 @@ def build() -> dict:
     case("repeated_sequence", req(seq=9, rid=fake("rid-9b")[:16]), None, now, da(high=9, bitmap=1))
     late = req(seq=9, rid=fake("rid-9c")[:16])
     chain("repeated_sequence_then_replayed", [(late, now), (late, now + 1000)], da(high=9, bitmap=1))
-    # the replay gets the STORED refusal (high = 110), not a fresh one (high = 111)
+    # the replay gets the stored refusal, re-stamped with the CURRENT high (111)
     chain("sequence_refused_then_same_bytes_after_window_moved",
           [(late, now), (req(seq=111, rid=fake("rid-111")[:16]), now + 1), (late, now + 2)], da(high=110, bitmap=1))
     case("sequence_below_window", req(seq=30), None, now, da(high=94, bitmap=1))
@@ -715,14 +763,15 @@ def build() -> dict:
     # streams belong to the device that opened them (§4)
     term = fake("terminal-stream")[:16]
 
-    def owned(owner):
-        return lambda s: s["streams"].update({term.hex(): owner.hex()})
-
     keys_meta = {"op": "http", "method": "POST", "path": "/terminal/input"}
-    case("input_to_own_stream", req(meta=keys_meta, data=b"ls\n", stream=term, seq=11), None, now, owned(dev_a))
-    case("input_to_other_devices_stream", req(meta=keys_meta, data=b"ls\n", stream=term, seq=11), None, now,
-         owned(dev_b))
-    case("cancel_of_other_devices_stream", req(meta={"op": "cancel"}, stream=term, seq=12), None, now, owned(dev_b))
+    opening = req(meta={"op": "http", "method": "GET", "path": "/terminal/stream"}, flags=F_STREAM, rid=term, seq=10)
+    chain("streams_belong_to_the_device_that_opened_them", [
+        (opening, now),
+        (req(meta=keys_meta, data=b"ls\n", stream=term, seq=11), now + 10),
+        (req(signer="device_b", device=dev_b, meta=keys_meta, data=b"ls\n", stream=term, seq=1), now + 20),
+        (req(signer="device_b", device=dev_b, meta={"op": "cancel"}, stream=term, seq=2), now + 30),
+        (req(meta={"op": "cancel"}, stream=term, seq=12), now + 40)])
+    case("input_to_a_stream_never_opened", req(meta=keys_meta, data=b"ls\n", stream=term, seq=11), None, now)
 
     # pairing (§8)
     pid, secret = fake("pairing-id")[:16], fake("pairing-secret")
@@ -742,6 +791,13 @@ def build() -> dict:
 
     case("pair_request_bad_mac", pair({**pair_meta, "mac": fake("wrong")[:32].hex()}), None, now, offer)
     case("pair_request_no_offer", pair(), None, now)
+    spent = lambda s: s.update(unverified=[now - i for i in range(BUDGET)])   # noqa: E731
+    case("pair_refusal_for_open_offer_under_spent_host_budget", pair({**pair_meta, "mac": fake("wrong")[:32].hex()}),
+         None, now, lambda s: (offer(s), spent(s)))
+    case("pair_refusal_without_offer_under_spent_host_budget", pair(), None, now, spent)
+    case("pair_refusals_spent_the_offers_own_budget", pair({**pair_meta, "mac": fake("wrong")[:32].hex()}), None, now,
+         lambda s: (offer(s), s["offers"][pid.hex()].update(unverified=[now - i for i in range(OFFER_BUDGET)])))
+    case("pair_request_under_spent_host_budget_succeeds", pair(), None, now, lambda s: (offer(s), spent(s)))
     case("pair_request_stale_timestamp", pair(ts=now - WINDOW_MS - 1), None, now, offer)
     case("pair_request_device_id_not_of_pub", pair(device=fake("unregistered-id")[:16]), None, now, offer)
     case("pair_request_with_phone_link", pair({**pair_meta, "phone_id": phone_id,
@@ -768,14 +824,15 @@ def build() -> dict:
         return envelope(key, pk[signer], h, frame(meta if meta is not None else {"status": 200,
                                                   "headers": {"content-type": "application/json"}}, data))
 
-    def ctx(offset=0):
+    def ctx(offset=0, adopted=False):
+        pend = {"next": 0, "stream": False, **({"offset_adopted": True} if adopted else {})}
         return {"workspace": ws_hex, "k_ws": k_ws, "key_version": 1, "device": dev_a.hex(), "host_pub": pub["host"],
-                "pending": {rid.hex(): {"next": 0, "stream": False}}, "offset_ms": offset}
+                "pending": {rid.hex(): pend}, "offset_ms": offset}
 
     dev_cases = []
 
-    def dcase(name, env, now_ms=now + 2500, mailbox=None, offset=0):
-        c = ctx(offset)
+    def dcase(name, env, now_ms=now + 2500, mailbox=None, offset=0, adopted=False):
+        c = ctx(offset, adopted)
         hh = Header.decode(env)
         mb = mailbox or {"id": hh.rid.hex(), "idx": hh.seq, "last": bool(hh.flags & F_LAST),
                          "stream": bool(hh.flags & F_STREAM)}
@@ -783,8 +840,8 @@ def build() -> dict:
         res = device_check(env, c, mb, now_ms)
         dev_cases.append({"name": name, "envelope": env.hex(), "mailbox": mb, "pending": pend_before,
                           "offset_ms": offset, "now_ms": now_ms,
-                          "expect": {k: v for k, v in res.items() if k in ("result", "last", "refusal", "meta", "data",
-                                                                           "offset_ms")}})
+                          "expect": {**{k: v for k, v in res.items() if k in ("result", "last", "refusal", "meta", "data")},
+                                     "offset_ms": res.get("offset_ms"), "clock_wrong": res.get("clock_wrong")}})
 
     ok = resp(data=b'{"moved":true}')
     dcase("full_response_chunk", ok)
@@ -801,16 +858,32 @@ def build() -> dict:
     dcase("refusal_chunk", resp(flags=F_LAST | F_REFUSAL, meta={"refusal": "stale_sequence", "high": 9}))
     dcase("refusal_without_last", resp(flags=F_REFUSAL, meta={"refusal": "x"}))
     skew = now + 2000 + 400_000                       # the device's clock runs 400 s fast
-    dcase("stale_timestamp_refusal_to_a_skewed_clock",
-          resp(flags=F_LAST | F_REFUSAL, meta={"refusal": "stale_timestamp", "host_ms": now + 2000}), now_ms=skew)
+    stale = resp(flags=F_LAST | F_REFUSAL, meta={"refusal": "stale_timestamp", "host_ms": now + 2000})
+    dcase("stale_timestamp_refusal_to_a_skewed_clock", stale, now_ms=skew)
+    dcase("stale_timestamp_offset_adopted_once_per_request", stale, now_ms=skew, adopted=True)
+    far = now + 2000 + MAX_OFFSET_MS + 1                 # the device's clock is more than 24 h off
+    dcase("stale_timestamp_offset_out_of_range", stale, now_ms=far)
+    dcase("stale_timestamp_refusal_for_a_request_not_pending",
+          resp(flags=F_LAST | F_REFUSAL, meta={"refusal": "stale_timestamp", "host_ms": now + 2000},
+               r=fake("old-request")[:16]), now_ms=skew)
+    dcase("other_refusal_to_a_skewed_clock_is_not_exempt",
+          resp(flags=F_LAST | F_REFUSAL, meta={"refusal": "rid_conflict", "host_ms": now + 2000}), now_ms=skew)
     out["device_cases"] = dev_cases
 
     # the `shown` text (§9.3)
     out["shown"] = [
         {"name": "controls_and_bidi_removed",
-         "input": [ord(c) for c in "Run ‮rm -rf‬\u0007 ok\u0085\n⁧x⁩é"],
-         "expect": "Run rm -rf ok\nxé"},
-        {"name": "no_normalisation", "input": [0x65, 0x301], "expect": "é"},
+         "input": [ord(c) for c in "Run \u202erm -rf\u202c\u0007 ok\u0085\n\u2067x\u2069\u00e9"],
+         "expect": "Run rm -rf ok\nx\u00e9"},
+        {"name": "invisible_and_default_ignorable_removed",
+         "input": [0x61, 0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF, 0x2028, 0x2029, 0xE0041, 0xE007F, 0xFE0F, 0xE0100,
+                   0x00AD, 0x034F, 0x180E, 0x115F, 0x1160, 0x3164, 0xFFA0, 0x2064, 0x1D173, 0xE000, 0xF0000, 0x0378,
+                   0x0600, 0xFFF9, 0x110BD,
+                   0x62],
+         "expect": "ab"},
+        {"name": "visible_text_kept", "input": [ord(c) for c in "E-12 \u00fcber \u65e5\u672c \U0001F44D\ttab"],
+         "expect": "E-12 \u00fcber \u65e5\u672c \U0001F44Dtab"},
+        {"name": "no_normalisation", "input": [0x65, 0x301], "expect": "e\u0301"},
         {"name": "lone_surrogate", "input": [0x41, 0xD800], "expect": None},
     ]
 
@@ -837,14 +910,16 @@ def build() -> dict:
     def acase(name, a, c=None, sender=dev_a.hex(), now_ms=now + 5000, pending=None):
         c = c or cred()
         p = pending if pending is not None else {ch.hex(): {"device": dev_a.hex(), "expires_ms": expires}}
-        acases.append({"name": name, "credential": dict(c), "pending": json.loads(json.dumps(p)), "sender": sender,
-                       "now_ms": now_ms, "assertion": a, "expect": verify_assertion(c, p, sender, a, now_ms)})
+        before, p_before = dict(c), json.loads(json.dumps(p))
+        res = verify_assertion(c, p, sender, a, now_ms)
+        acases.append({"name": name, "credential": before, "pending": p_before, "sender": sender, "now_ms": now_ms,
+                       "assertion": a, "expect": res, "sign_count_after": c["sign_count"]})
 
     good = assertion()
     acase("fresh_assertion_verified", good)
     acase("replayed_assertion", good, pending={})
     acase("sign_count_not_increased", assertion(count=5), c=cred(5))
-    acase("synced_counter_not_increased_is_advisory", assertion(count=5, flags=AD_UP | AD_UV | AD_BE), c=cred(5, be=True))
+    acase("synced_counter_not_increased_is_advisory", assertion(count=3, flags=AD_UP | AD_UV | AD_BE), c=cred(5, be=True))
     acase("synced_passkey_zero_count", assertion(count=0))
     acase("user_not_verified", assertion(flags=AD_UP))
     acase("other_origin", assertion(org="https://other.example"))
