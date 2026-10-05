@@ -1,12 +1,12 @@
 # Ticket format example
 
-Generated with `orch schema example` (orch-core schema 1.5.0). Do not edit by hand.
+Generated with `orch schema example` (orch-core schema 1.8.0). Do not edit by hand.
 
 This is the document the orch-tix addon builds a mirror from (`ctx.document`). What reaches the phone is a redacted view of it; see the `redaction` setting in `addons/orch-tix/README.md`.
 
 ```json
 {
-  "schema_version": "1.5.0",
+  "schema_version": "1.8.0",
   "id": "DEMO-0038",
   "title": "Export the meter readings as CSV",
   "type": "feature",
@@ -59,7 +59,8 @@ This is the document the orch-tix addon builds a mirror from (`ctx.document`). W
     "verify": {
       "verdict": null,
       "at": null,
-      "via": null
+      "via": null,
+      "hash": null
     }
   },
   "questions": [
@@ -202,7 +203,38 @@ This is the document the orch-tix addon builds a mirror from (`ctx.document`). W
     }
   ],
   "artifacts": [],
-  "artifact_items": [],
+  "artifact_items": [
+    {
+      "source": "file",
+      "kind": "receipt",
+      "label": "T2 verify: test failed with exit 1 at 1a2b3c4",
+      "name": "receipt-T2-20261002T090000Z.log",
+      "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+      "task": "T2",
+      "by": "agent:claude-code:7f3c9a21",
+      "run": {
+        "exit": 1,
+        "timed_out": false,
+        "commit": "1a2b3c4000000000000000000000000000000000",
+        "dirty": false,
+        "seconds": 42,
+        "at": "2026-10-02T09:00Z",
+        "check": "verify",
+        "steps": [
+          {
+            "name": "build",
+            "status": "pass",
+            "seconds": 30
+          },
+          {
+            "name": "test",
+            "status": "fail",
+            "seconds": 12
+          }
+        ]
+      }
+    }
+  ],
   "verdict": null,
   "move": {
     "who": "you",
@@ -210,6 +242,17 @@ This is the document the orch-tix addon builds a mirror from (`ctx.document`). W
     "label": "Answer Q1",
     "ref": "Q1",
     "why": "The agent asked a blocking question and waits for your answer."
-  }
+  },
+  "signed": {
+    "requirements": {
+      "signed": false,
+      "by": null
+    },
+    "plan": {
+      "signed": false,
+      "by": null
+    }
+  },
+  "revalidate": null
 }
 ```

@@ -130,13 +130,13 @@ function card(ticket, w) {
 
 // A section's text with its widget blocks as cards (a fence nothing vouches for stays text). Returns at once with
 // the text; the cards replace it when the fences have been matched to their entries by digest.
-export function sectionBody(doc, name, text) {
-  const box = el("div", { class: "section-text" }, shown(text));
+export function sectionBody(doc, name, text, textNodes = shown) {
+  const box = el("div", { class: "section-text" }, textNodes(text));
   sectionParts(doc, name, text).then((parts) => {
     if (!parts.some((p) => p.widget)) return;
     box.className = "section-body";
     box.replaceChildren(...parts.map((p) => {
-      if (p.kind === "text") return p.text.trim() ? el("div", { class: "section-text" }, shown(p.text.replace(/^\n+|\n+$/g, ""))) : null;
+      if (p.kind === "text") return p.text.trim() ? el("div", { class: "section-text" }, textNodes(p.text.replace(/^\n+|\n+$/g, ""))) : null;
       return p.widget ? card(doc?.id, p.widget) : el("div", { class: "section-text" }, shown("```orch\n" + p.raw + "\n```"));
     }).filter(Boolean));
   }).catch(() => {});

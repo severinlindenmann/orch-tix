@@ -20,6 +20,10 @@ import {
 import {
   blockingCount, cardAction, cardLine, gateImage, moveChip, progressStrip, proofImage, quickAnswer, taskBar, taskChip,
 } from "./ticket-card.js";
+
+// " · idle 40d" after a board row's title: an open or backlog ticket nobody touched for a while (schema 1.7)
+const idleTag = (doc) => (Number.isInteger(doc?.revalidate?.idle_days) && doc.revalidate.idle_days > 0
+  ? el("span", { class: "muted", title: "Untouched for a while — check it still holds" }, ` · idle ${doc.revalidate.idle_days}d`) : null);
 import { pinnedFigure } from "./images.js";
 import { OutboxFullError, queuedDecisions } from "./outbox-ui.js";
 import { myDecisions, sendDecisions } from "./decision-send.js";
@@ -375,7 +379,7 @@ function board(state, list) {
   const fold = (title, items, cls) => (items.length ? el("details", { class: `card bfold ${cls}` },
     el("summary", {}, el("span", {}, title), el("span", { class: "muted", "aria-hidden": "true" }, "▾")),
     el("div", { class: "bfold-body" }, items.map((r) => el("a", { class: "brow-plain", href: `/t/${r.n}` },
-      el("b", {}, r.doc?.id || r.id), " ", shown(cardTitle(r.doc, r.doc?.id || r.id)))))) : null);
+      el("b", {}, r.doc?.id || r.id), " ", shown(cardTitle(r.doc, r.doc?.id || r.id)), idleTag(r.doc))))) : null);
   return [
     yours.length ? lab(`Your move · ${yours.length}`) : null, yours.map(boardRow),
     agents.length ? lab(`Agents · ${agents.length}`) : null, agents.map(agentCard),

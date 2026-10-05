@@ -99,7 +99,8 @@ def test_ticket_journey_never_names_who_agreed_without_a_signed_ledger(phone_pag
     expect(j.locator(".journey-words")).to_have_text("Asked ✓ · Agreed ✓ · Doing · Proven · Done")
     assert j.locator(".seg5 i").evaluate_all("els => els.map(e => e.className)") == [
         "seg-done", "seg-done", "seg-doing", "seg-todo", "seg-todo"]
-    expect(j.locator(".journey-who")).to_have_text("Agreed: req + plan, approval not signed here")
+    # schema 1.6 `signed` (now in the vectors): unsigned gates say so, still without naming anyone
+    expect(j.locator(".journey-who")).to_have_text("Agreed: req + plan not signed here")
     assert "you" not in j.inner_text().split()
 
 
@@ -136,6 +137,68 @@ def test_proof_and_artifacts_show_a_pinned_image_only_when_its_sha256_verifies(p
     src = proof.locator("img").get_attribute("src")
     assert src.startswith("blob:")
     assert not any("evil" in u for u in requests)
+
+
+def test_proof_lists_the_checks_orch_ran_and_artifacts_say_who_added_them(phone_page, mirror_with_question):
+    """Schema 1.7: receipts of `orch task done --run` (facts only), `by` on artifacts, the idle note."""
+    run_ok = {"exit": 0, "timed_out": False, "commit": "1a2b3c4" + "0" * 33, "dirty": False, "seconds": 42,
+              "check": "verify", "steps": [{"name": "build", "status": "pass", "seconds": 30},
+                                           {"name": "test", "status": "pass", "seconds": 12}]}
+    run_bad = {"exit": 1, "timed_out": False, "commit": None, "dirty": True, "seconds": 3, "check": None,
+               "steps": [{"name": "verify", "status": "fail", "seconds": 3}]}
+    items = [
+        {"source": "file", "kind": "receipt", "label": "T2 verify: passed", "name": "receipt-T2-a.log",
+         "task": "T2", "by": "agent:claude-code", "run": run_ok},
+        {"source": "file", "kind": "receipt", "label": "T3 verify: failed", "name": "receipt-T3-a.log",
+         "task": "T3", "by": "agent:claude-code", "run": run_bad},
+        {"source": "link", "kind": "link", "label": "PR #31", "by": "human:you"},
+    ]
+    doc = _testing_doc(artifact_items=items, revalidate={"idle_days": 40})
+    mirror_with_question.push(doc, rev=2, needs=None, open_questions=0, status="in-progress")
+    page = phone_page("light")
+    page.goto(f"{mirror_with_question.base}/t/{mirror_with_question.n}")
+    runs = page.locator(".proof .proof-runs li")
+    expect(runs).to_have_count(2)
+    expect(runs.nth(0)).to_contain_text("T2 verify · passed · 1a2b3c4 · 42s")
+    expect(runs.nth(0)).to_contain_text("build ✓ · test ✓")
+    expect(runs.nth(1)).to_contain_text("T3 verify · failed (exit 1) · uncommitted changes · 3s")
+    expect(runs.nth(1).locator(".t-err")).to_have_count(1)
+    arts = page.locator(".arts")
+    expect(arts).to_contain_text("· link · by you")
+    expect(arts).to_contain_text("· receipt · by claude-code")
+    expect(page.locator(".t-idle")).to_have_text("Untouched for 40 days — check it still holds")
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")  # no sideways scroll at 390 px
+
+
+def test_ticket_keys_in_ticket_text_link_to_mirrored_tickets(phone_page, mirror_with_question):
+    """A key of a ticket this phone mirrors links to its page; a key it has no page for stays text."""
+    import os
+    from .conftest import sealed_doc
+    m, s = mirror_with_question, mirror_with_question.sim.s
+    other = {**FULL_DOC, "id": "DEMO-0040", "title": "The meter import", "questions": [], "needs": []}
+    uuid = s.mirror_uuid(m.space, other["id"], 1)
+    dek = os.urandom(32)
+    tu = bytes.fromhex(uuid)
+    r = httpx.put(f"{m.base}/api/mirrors/{uuid}", headers=m.headers, timeout=30, json={
+        "space": m.space, "mirror_rev": 1, "schema_version": "1.0.0", "status": "open", "priority": "normal",
+        "needs": None, "open_questions": 0, "key_version": 1,
+        "wrapped_dek": s.b64u(s.seal(m.sim.mk, dek, s.aad_tdek(tu))),
+        "enc_content": s.seal_mirror(dek, tu, sealed_doc(other, 1)),
+        "event_uuid": s.mirror_event_uuid(m.space, other["id"], 1, 1)})
+    assert r.status_code == 200, r.text
+    n_other = r.json()["n"]
+    doc = _testing_doc(sections={**FULL_DOC["sections"], "Context": "Builds on DEMO-0040, not on DEMO-0999."})
+    m.push(doc, rev=2, needs=None, open_questions=0, status="in-progress")
+    page = phone_page("light")
+    page.goto(f"{m.base}/?view=tickets")                              # the board keeps the last-known list
+    page.locator(".brow-plain, .bfold, .tcard, .brow").first.wait_for()
+    page.goto(f"{m.base}/t/{m.n}")
+    page.locator('.chap[data-chapter="1"] > summary').click()
+    link = page.locator(".section-text a.key-link")
+    expect(link).to_have_count(1)
+    expect(link).to_have_text("DEMO-0040")
+    expect(link).to_have_attribute("href", f"/t/{n_other}")
+    expect(page.locator(".section-text", has_text="DEMO-0999")).to_have_count(1)
 
 
 def test_a_pinned_gate_image_on_the_approval_card(phone_page, mirror_with_question):
