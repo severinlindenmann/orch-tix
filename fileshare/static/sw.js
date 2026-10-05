@@ -501,7 +501,11 @@ async function reconcileNeeds(spaces, tickets, messages, at) {
   }
   try {
     for (const x of await self.registration.getNotifications()) {
-      if (/^tix:msg(:[0-9a-f]{32})?$/.test(x.tag || "") && (x.data?.handled || messages === 0)) x.close();   // read messages
+      // Message notifications: `tix:msg[:<space>]`, and the ones shown before that tag existed (`tix` for a message
+      // without a workspace, `tix:<space>` marked msg): the spaceless one was never seen by openSpaceTags, so a read
+      // message stayed on the lock screen after the app opened (live test 2026-10-05, step 10).
+      const isMsg = /^tix:msg(:[0-9a-f]{32})?$/.test(x.tag || "") || (x.data?.msg === true && /^tix(:[0-9a-f]{32})?$/.test(x.tag || ""));
+      if (isMsg && !newer(x) && (x.data?.handled || messages === 0)) x.close();
     }
   } catch {
     /* no notification list */

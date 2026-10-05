@@ -889,7 +889,27 @@ test("needs-spaces never closes what the list cannot know yet: a notification ne
   const ask = async (data) => { const ev = { data: { type: "needs-spaces", ...data }, waits: [], waitUntil(p) { this.waits.push(p); } };
     w.listeners.message(ev); await Promise.all(ev.waits); };
   await ask({ spaces: [], tickets: [], messages: null, at: 1000 });              // unread count unreadable, S1 is newer
-  assert.deepEqual(w.notifications.map((n) => n.tag).sort(), [`tix:${S1}`, `tix:${S2}`].sort());
+  assert.deepEqual(w.notifications.map((n) => n.tag).sort(), [`tix:${S1}`, `tix:msg:${S2}`].sort());
   await ask({ spaces: [], tickets: [], messages: 0, at: 3000 });                 // now both are older than the request
   assert.equal(w.notifications.length, 0);
+});
+
+test("needs-spaces closes a read message notification: spaceless, new tag and the pre-#62 tags (live step 10)", async () => {
+  const w = load({ idb: LABELS });
+  await push(w, { v: 2, s: "", t: "", k: "message", n: 1, c: 1 });                       // spaceless: tag tix:msg
+  await push(w, { v: 2, s: S1, t: "", k: "message", n: 1, c: 2 });                       // tix:msg:<space>
+  await w.self.registration.showNotification("Message from agent", { tag: "tix", data: { msg: true, s: "" } });   // shown before the tag existed
+  await w.self.registration.showNotification("Message from agent", { tag: `tix:${S2}`, data: { msg: true, s: S2 } });
+  await w.self.registration.showNotification("TIX", { tag: "tix", data: { url: "/" } });                          // generic: not a message
+  const before = w.notifications.length;
+  const ev = (m) => ({ data: { type: "needs-spaces", spaces: [], tickets: [], messages: m }, waits: [], waitUntil(p) { this.waits.push(p); } });
+  const unknown = ev(null);
+  w.listeners.message(unknown);
+  await Promise.all(unknown.waits);
+  assert.equal(w.notifications.length, before);                                       // unread count unknown: left alone
+  const e = ev(0);
+  w.listeners.message(e);
+  await Promise.all(e.waits);
+  assert.deepEqual(w.notifications.map((n) => n.tag), ["tix"]);                          // only the generic one stays
+  assert.equal(w.notifications[0].title, "TIX");
 });
