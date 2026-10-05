@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   acceptance, cardAction, costText, cardLine, chapters, currentChapter, dayMonth, mainPr, moreSections, moveChip, planSteps,
-  progressStrip, quickAnswer, taskItems, tasksDone, receipts, byLabel, idleNote, keySplit,
+  progressStrip, quickAnswer, approveVerb, optionTag, TITLE_APPROVE_WHY, taskItems, tasksDone, receipts, byLabel, idleNote, keySplit,
 } from "../../fileshare/static/js/ticket-card.js";
 
 const LEVELS = JSON.parse(readFileSync(new URL("../vectors/addon-docs.json", import.meta.url), "utf8")).levels;
@@ -122,7 +122,7 @@ test("a gate card says how long the plan is and what opens", () => {
   assert.equal(planSteps(doc), 2);
   assert.equal(cardLine({ needs: "approval" }, doc), "2 steps · claude-code waits");
   assert.equal(cardAction({ needs: "approval" }, doc), "Review and approve");
-  assert.equal(cardLine({ needs: "approval" }, { ...TITLE, needs: [{ kind: "approve-plan" }] }), "Read it on the desktop · claude-code waits");
+  assert.equal(cardLine({ needs: "approval" }, { ...TITLE, needs: [{ kind: "approve-plan" }] }), "Approve on the desktop (phone shows titles only) · claude-code waits");
   assert.equal(cardAction({ needs: "verdict" }, TITLE), "Review and decide");
   assert.equal(cardLine({ needs: "verdict" }, TITLE), "All 14 jobs export; Excel opens every file.");
 });
@@ -206,4 +206,18 @@ test("keySplit links only keys the phone knows, and never inside a longer word",
   assert.deepEqual(keySplit("nothing here", hrefOf), [{ text: "nothing here" }]);
   assert.deepEqual(keySplit("", hrefOf), []);
   assert.deepEqual(keySplit("DEMO-0038", () => "javascript:alert(1)"), [{ text: "DEMO-0038" }]);  // only /t/<n>
+});
+
+test("approveVerb says Re-approve for a gate that was approved before, like the desktop", () => {
+  assert.equal(approveVerb({ needs: [{ kind: "approve-plan" }] }), "Approve");
+  assert.equal(approveVerb({ needs: [{ kind: "re-approve", gate: "plan" }] }), "Re-approve");
+  assert.equal(approveVerb({ move: { kind: "re-approve" } }), "Re-approve");
+  assert.equal(approveVerb(null), "Approve");
+});
+
+test("a card names an option by its key (A, B, C) as the ticket page does, never by its list position", () => {
+  const [a, b] = quickAnswer(TITLE).options;
+  assert.deepEqual([optionTag(a), optionTag(b)], ["A", "B"]);
+  assert.equal(optionTag({ key: "yes", label: "Yes", n: 1 }), "");
+  assert.match(TITLE_APPROVE_WHY, /Show on the phone/);
 });
