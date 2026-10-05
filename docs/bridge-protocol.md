@@ -5,7 +5,7 @@ This document says what is inside the sealed bodies that the bridge mailbox (`fi
 keys seal and sign, where each key lives, how a device is recognised, the exact bytes, and what each
 side does with an envelope that is not right.
 
-Status: **draft, revised after the first cryptography review** (ticket #58, part of #22 and orch-core#85).
+Status: **draft, revised after the first cryptography review; D1 and D8 decided by the owner** (ticket #58, part of #22 and orch-core#85).
 The host side (orch-core R3, #89) and the TIX app side (R10, #25) implement this document. The contract
 is [`tests/bridge_vectors.json`](../tests/bridge_vectors.json). The reference implementation that
 produces it, [`tests/support/bridge_protocol_ref.py`](../tests/support/bridge_protocol_ref.py), is test
@@ -51,7 +51,8 @@ What this protocol adds to TIX's protections:
 - every request is fresh and runs at most once;
 - a platform-authenticator gesture is bound to the exact request it allows.
 
-It adds no confidentiality boundary between master-key holders (D1).
+It adds no confidentiality boundary between master-key holders, and v1 has no forward secrecy (D1,
+decided: per-device secrets come in v2).
 
 ## 2. Keys
 
@@ -199,9 +200,11 @@ The host key, the registry, the request store, the audit log and the F1 command 
 operating-system user is shared with every agent on that computer, so the guard is the only barrier, not
 file permissions. Therefore:
 
-- registry changes are made only from the Remote tab (pairing, approval, scope change, revocation);
-- every registry change is written to the audit log;
-- every `--remote` start shows the registry's devices, scopes and the last changes.
+- a device MUST be added to the registry only from the Remote tab (pairing and approval); scope changes
+  and revocations are likewise made only there;
+- every addition and every other registry change MUST be written to the audit log;
+- every `--remote` start MUST show the registry's devices, scopes and the changes since the last start,
+  so a device added behind the Remote tab's back is visible (owner decision D8).
 
 ## 3. Envelope
 
@@ -702,9 +705,10 @@ If the count did not increase:
 
 Then the stored count is updated.
 
-Every assertion-backed action is written to the host's **audit log**: device, time, purpose, scope and
-the `subject`. The Remote tab shows the log. Fresh actions are rate-limited per device (D9). Together
-these are the mitigation the owner has against a device whose assertions are forged (§1).
+Every assertion-backed action MUST be written to the host's **audit log** (device, time, purpose, scope
+and the `subject`), and the Remote tab MUST list them with their subject. Fresh assertions MUST be rate
+limited per device (D9); over the limit the host refuses `assertion_failed` without consuming the parked
+request. Together these are the owner's mitigation against a device whose assertions are forged (§1, D8).
 
 Vectors: `assertion.cases`:
 
@@ -911,14 +915,13 @@ Not covered by vectors yet: parsing a real WebAuthn attestation object (CBOR) at
 Until the owner decides, the specification takes the more restrictive option for each, with one stated
 exception (D4).
 
-- **D1 — Confidentiality between master-key holders. PENDING THE OWNER.** As the ticket decided, K_ws is
-  derivable from MK. So every master-key holder can read bridge traffic, terminal output included, if it
-  also obtains the ciphertext, which today takes the server's position. That includes approved CLI
-  devices in every repo, among them a remote agent's VM for another client, and a compromised TIX web
-  app. The question is whether to mix a per-device ECDH secret, agreed with the host key at pairing,
-  into K_msg now or in a version 2, so that only that device and the host can read its traffic. Cost: a
-  second non-extractable key per device and a pairing field; scopes stay host-enforced. Meanwhile: as
-  written. The versioned labels and `key_version` let a v2 come without breaking v1.
+- **D1 — Confidentiality between master-key holders. DECIDED by the owner: v1 ships as written; mixing
+  a per-device ECDH secret into K_msg is planned for v2.** v1 derives K_ws from MK. Known consequence,
+  accepted: every holder of MK can read bridge traffic, terminal output included, whenever it obtains the
+  ciphertext. That includes approved CLI devices in every repo (also ones revoked since, which still hold
+  MK), a remote agent's VM for another client, a compromised TIX web app, and a server that also holds
+  MK. v1 has **no forward secrecy**: a later MK compromise exposes recorded traffic. The versioned labels
+  (`…/v1`) and `key_version` stay, so v2 can come without breaking v1.
 - **D2 — The existing phone pairing.** Meanwhile: it does not replace the link and fingerprint steps
   (§8.2). A link between the two pairings is recorded only with the HMAC proof, and revoking either
   revokes both.
@@ -938,7 +941,10 @@ exception (D4).
 - **D7 — How far a revocation reaches.** Meanwhile: revoking a device in one workspace's Remote tab
   revokes it in every workspace registry on that computer. It does not reach other computers; their
   hosts are revoked separately.
-- **D8 — The accepted limits. PENDING THE OWNER'S RECONFIRMATION.** The limits are:
+- **D8 — The accepted limits. ACCEPTED by the owner**, with the mitigations written as MUSTs (§2.7, §9.5):
+  devices are added only from the Remote tab, every addition is logged and shown on each remote start,
+  every assertion-backed action is listed with its subject in the Remote tab, and fresh assertions are rate
+  limited. The limits are:
   - a TIX web app compromised after pairing can recover MK and read every workspace's bridge traffic it
     obtains, which goes beyond "acts at the device's scope", and it can obtain an assertion for
     something other than what it shows;
@@ -947,7 +953,8 @@ exception (D4).
     is revoked (§1). The mitigations are the audit log in the Remote tab and the rate limit on fresh
     actions;
   - a local process running as the owner on the host computer can read MK, the host key, the registry
-    and the request store, with the orch command guard as the only barrier (§2.7).
+    and the request store; an agent that can write the host registry could add a device, the orch
+    command guard being the only barrier (§2.7).
 - **D9 — Lifetimes and limits.** Meanwhile:
   - pairing offer: 10 minutes, single use;
   - assertion and registration challenges: 120 s;
