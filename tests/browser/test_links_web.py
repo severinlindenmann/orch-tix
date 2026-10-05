@@ -283,6 +283,7 @@ def test_other_types_get_no_preview_and_spend_no_download_until_asked(stranger, 
     page = view_link(stranger, url)
     expect(page.locator(".pub-name")).to_have_text("archive.zip")
     expect(page.locator(".pub-preview")).to_have_text("No preview for this file type — Download it instead.")
+    assert "null" not in page.inner_text()  # no note and no transcript: nothing is drawn for them
     assert sim.request("GET", f"/api/files/{f['id']}/links").json()["links"][0]["downloads"] == 0
     with stranger.expect_download() as info:
         page.get_by_role("button", name="Download", exact=True).click()

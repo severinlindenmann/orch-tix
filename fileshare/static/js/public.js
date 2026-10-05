@@ -155,14 +155,14 @@ async function show(token, lk, body, fail) {
   const facts = [humanSize(size), expiryPhrase(pub.expires_at)].filter(Boolean).join(" · ");
   const preview = el("div", { class: "pub-preview" });
   const download = el("button", { type: "button", class: "btn btn-accent btn-block btn-big pub-download" }, icon("download"), "Download");
-  body.replaceChildren(
+  body.replaceChildren(...[
     el("div", { class: "pub-head" },
       el("h1", { class: "pub-name" }, meta.name),
       el("p", { class: "pub-facts" }, facts)),
     meta.note ? el("p", { class: "pub-note" }, meta.note) : null,
     preview,
     meta.transcript ? transcriptCard(meta) : null,
-    download);
+    download].filter(Boolean));
 
   download.addEventListener("click", async () => {
     download.disabled = true;
