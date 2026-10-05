@@ -19,8 +19,8 @@ import { showBanner } from "./banner.js";
 const PAGE = 50;
 const DECRYPT_CONCURRENCY = 6;
 const TOMBSTONE_PAGES = 20;
-// The type chips of the redesign (spec §18); "Text" covers Markdown, JSON and plain text.
-const TYPES = [["all", "All"], ["image", "Images"], ["audio", "Audio"], ["text", "Text"]];
+// The type chips of the redesign (spec §18); "Text" covers Markdown, JSON and plain text, "Other" the rest (zip, pdf, bin).
+const TYPES = [["all", "All"], ["image", "Images"], ["audio", "Audio"], ["text", "Text"], ["other", "Other"]];
 const UNREADABLE = { kind: "other", label: "?" };
 const TILE_ICON = { image: "image", audio: "audio", text: "doc", other: "files", done: "check", bad: "alert" };
 

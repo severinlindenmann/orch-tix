@@ -2597,6 +2597,32 @@ def _download_decrypted(api: Api, blob_path: str, dek: bytes, file_uuid: bytes, 
     return size
 
 
+def _identical_existing(api: Api, f: dict, dek: bytes, out_dir: Path, name: str, ref: str) -> Path | None:
+    """A copy of this very file already in out_dir (as NAME or REF-NAME): `get` again reuses it instead of
+    piling up FILE7-name copies until it is refused (QA TF-19). Compared by content: the file is decrypted
+    into a scratch folder beside it and hashed; only a regular, non-symlink file of the right size is considered."""
+    try:
+        size = plaintext_size(int(f["size"]))
+    except (KeyError, TypeError, ValueError):
+        return None
+    for cand in (out_dir / name, out_dir / f"{ref}-{name}"):
+        try:
+            if cand.is_symlink() or not cand.is_file() or cand.stat().st_size != size:
+                continue
+        except OSError:
+            continue
+        scratch = Path(tempfile.mkdtemp(dir=out_dir, prefix=".sharing-cmp-"))
+        try:
+            probe = scratch / "probe"
+            _download_decrypted(api, f"/api/files/{ref}/blob", dek, bytes.fromhex(f["uuid"]), probe)
+            same = hashlib.sha256(probe.read_bytes()).digest() == hashlib.sha256(cand.read_bytes()).digest()
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
+        if same:
+            return cand
+    return None
+
+
 def cmd_get(args) -> int:
     cfg = load_config(Path.cwd())
     api = Api(cfg.server_url, cfg.device_token)
@@ -2623,8 +2649,11 @@ def cmd_get(args) -> int:
             raise Refused(f"share/ points outside the repo (to {out_dir.resolve()}); refusing to write there. "
                           "Pass -o DIR to choose the output directory explicitly")
         ensure_self_ignore(out_dir)
-    target = choose_target(out_dir, ref, safe_name(meta["name"], f"{ref}.bin"), args.force)
-    _download_decrypted(api, f"/api/files/{ref}/blob", dek, bytes.fromhex(f["uuid"]), target)
+    name = safe_name(meta["name"], f"{ref}.bin")
+    target = None if args.force else _identical_existing(api, f, dek, out_dir, name, ref)
+    if target is None:
+        target = choose_target(out_dir, ref, name, args.force)
+        _download_decrypted(api, f"/api/files/{ref}/blob", dek, bytes.fromhex(f["uuid"]), target)
     d = describe_file(cfg.mk, f)
     d["path"] = str(target)
     d["acked"] = bool(f.get("acked_at"))
@@ -2632,6 +2661,9 @@ def cmd_get(args) -> int:
         try:
             api.send("POST", _file_path(ref, "/ack"))
             d["acked"] = True
+            if not d.get("acked_at"):      # fresh metadata: acked_at must agree with acked (QA TF-19)
+                with contextlib.suppress(ApiError):
+                    d = {**describe_file(cfg.mk, _fetch_file(api, ref)), "path": str(target), "acked": True}
         except ApiError as e:   # the file was delivered: warn, never fail the get
             d["acked"] = False
             _warn(f"{ref} was saved, but could not be acknowledged ({e.detail or e.code}); "

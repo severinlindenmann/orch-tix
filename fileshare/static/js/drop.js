@@ -8,7 +8,7 @@
 import { buildZip, zipPlainSize } from "./zip.js";
 import { encryptBlob, newDropFileCrypto, unb64u } from "./crypto.js";
 import { el, hydrateIcons, icon } from "./ui.js";
-import { cipherSize, humanSize } from "./format.js";
+import { cipherSize, expiryLabel, humanSize } from "./format.js";
 
 const TOKEN_RE = /^\/u\/([A-Za-z0-9_-]{43})$/;
 
@@ -319,6 +319,9 @@ function renderForm(token, linkPub, pub, body) {
 
   body.replaceChildren(el("div", { class: "drop-form" },
     el("div", { class: "pub-head" }, el("h1", { class: "pub-name" }, "Send files")),
+    // QA TF-22: what the sender can expect, with no name of the receiver
+    el("p", { class: "hint drop-info", id: "drop-info" },
+      `Up to ${humanSize(pub.max_bytes)} per upload. This link ${expiryLabel(pub.expires_at)}. Only the person who sent you this link can open what you send.`),
     fileInput, folderInput,
     el("div", { class: "upload-pick-row" }, pick, pickFolder),
     list,

@@ -60,3 +60,15 @@ test("a change reported by the feed drops the shared list, so the reload it trig
   globalThis.fetch = real;
   assert.deepEqual(calls.map((c) => c[1]), ["/api/x", "/api/mirrors", "/api/mirrors/changes?after=1&wait=25", "/api/mirrors"]);
 });
+
+test("the device list, join requests and the non-waiting message list are shared too; a waiting poll is not", async () => {
+  await api("POST", "/api/x");
+  for (const path of ["/api/devices", "/api/join-requests", "/api/messages?after=0&wait=0"]) {
+    calls = [];
+    await Promise.all([api("GET", path), api("GET", path), api("GET", path)]);
+    assert.equal(calls.length, 1, path);
+  }
+  calls = [];
+  await Promise.all([api("GET", "/api/messages?after=5&wait=25"), api("GET", "/api/messages?after=5&wait=25")]);
+  assert.equal(calls.length, 2);
+});
