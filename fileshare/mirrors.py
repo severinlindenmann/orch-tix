@@ -187,6 +187,14 @@ def needs_total(conn) -> int:
                         " AND needs IS NOT NULL").fetchone()[0]
 
 
+def space_needs_total(conn, space_id: str) -> int:
+    """`cs` in a needs push: mirrors of this one workspace that need the human. The phone decides "Handled" versus
+    "N still need you" for the workspace's notification from this, never from the global `c` (which counts other
+    workspaces) or from what it remembered."""
+    return conn.execute("SELECT COUNT(*) FROM tickets WHERE mode = 'mirror' AND deleted_at IS NULL"
+                        " AND needs IS NOT NULL AND space_id = ?", (space_id,)).fetchone()[0]
+
+
 def check_schema(version) -> str:
     m = _SEMVER.fullmatch(version) if isinstance(version, str) else None
     if m is None:
@@ -447,10 +455,11 @@ def _flush_held(app, space: str, held: list[str]) -> None:
                 gate.mark_shown(space, t)
         if len(live) == 1:
             t, needs, oq = live[0]
-            push_v2(app, {"v": 2, "s": space, "t": t, "k": needs, "n": oq if needs == "question" else 0, "c": total})
+            push_v2(app, {"v": 2, "s": space, "t": t, "k": needs, "n": oq if needs == "question" else 0, "c": total,
+                          "cs": space_needs_total(c, space)})
         else:
             push_v2(app, {"v": 2, "s": space, "t": "", "k": "batch", "n": len(live), "c": total,
-                          "ts": [t for t, _, _ in live][-BATCH_TICKETS_MAX:]})
+                          "cs": space_needs_total(c, space), "ts": [t for t, _, _ in live][-BATCH_TICKETS_MAX:]})
     finally:
         c.close()
 
@@ -465,11 +474,12 @@ def after_needs_change(conn, app, *, space, ticket, before, after, open_question
     if after is None:
         if gate is not None and not gate.clear_wanted(space, ticket):
             return          # its "needs you" never left the server (held in the window): nothing to withdraw
-        push_v2(app, {"v": 2, "s": space, "t": ticket, "k": "clear", "n": 0, "c": attention_total(conn)})
+        push_v2(app, {"v": 2, "s": space, "t": ticket, "k": "clear", "n": 0, "c": attention_total(conn),
+                      "cs": space_needs_total(conn, space)})
         return
     if gate is not None and not gate.due(space, ticket, lambda sp, held: _flush_held(app, sp, held)):
         return
     if gate is not None:
         gate.mark_shown(space, ticket)
     push_v2(app, {"v": 2, "s": space, "t": ticket, "k": after, "n": open_questions,
-                  "c": attention_total(conn)})
+                  "c": attention_total(conn), "cs": space_needs_total(conn, space)})

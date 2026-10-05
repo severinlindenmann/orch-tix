@@ -64,7 +64,7 @@ def test_handled_on_desktop_sends_clear(frozen_clock, device_client, pushes):
     tix = _put(device_client, u, 1, "question", 1).json()["id"]
     assert pushes[-1]["k"] == "question"
     _put(device_client, u, 2, None)                       # desktop answered; addon syncs needs=None
-    assert pushes[-1] == {"v": 2, "s": SPACE, "t": tix, "k": "clear", "n": 0, "c": 0}
+    assert pushes[-1] == {"v": 2, "s": SPACE, "t": tix, "k": "clear", "n": 0, "c": 0, "cs": 0}
 
 
 # ---- Scenario 2: phone answers; desktop applies; the phone is told "Handled on desktop" ---------------------------

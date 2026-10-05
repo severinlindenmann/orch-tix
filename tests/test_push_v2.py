@@ -41,20 +41,20 @@ def test_needs_transitions_push_v2_only(frozen_clock, device_client, pushes):
     _put(device_client, u, 1, None)
     assert pushes == []
     tix = _put(device_client, u, 2, "question", 2).json()["id"]
-    assert pushes == [{"v": 2, "s": SPACE, "t": tix, "k": "question", "n": 2, "c": 1}]
+    assert pushes == [{"v": 2, "s": SPACE, "t": tix, "k": "question", "n": 2, "c": 1, "cs": 1}]
     _put(device_client, u, 3, "question", 2)
     assert len(pushes) == 1                                  # same kind: nothing new
     frozen_clock(t0 + timedelta(seconds=61))                 # past the space's push window (feedback round B)
     _put(device_client, u, 4, "approval")
     assert pushes[-1]["k"] == "approval"
     _put(device_client, u, 5, None)
-    assert pushes[-1] == {"v": 2, "s": SPACE, "t": tix, "k": "clear", "n": 0, "c": 0}
+    assert pushes[-1] == {"v": 2, "s": SPACE, "t": tix, "k": "clear", "n": 0, "c": 0, "cs": 0}
 
 
 def test_payload_never_holds_text(device_client, pushes):
     device_client.post("/api/spaces", json={"id": SPACE, "key_version": 1, "enc_label": fake_env()})
     _put(device_client, new_uuid(), 1, "verdict")
-    assert set(pushes[0]) == {"v", "s", "t", "k", "n", "c"}
+    assert set(pushes[0]) == {"v", "s", "t", "k", "n", "c", "cs"}
 
 
 def test_message_to_human_pushes(device_client, pushes):
@@ -70,7 +70,7 @@ def test_unlink_of_a_needing_mirror_pushes_clear(device_client, pushes):
     u = new_uuid()
     tix = _put(device_client, u, 1, "question", 1).json()["id"]
     assert device_client.delete(f"/api/mirrors/{u}", params={"space": SPACE}).status_code == 204
-    assert pushes[-1] == {"v": 2, "s": SPACE, "t": tix, "k": "clear", "n": 0, "c": 0}
+    assert pushes[-1] == {"v": 2, "s": SPACE, "t": tix, "k": "clear", "n": 0, "c": 0, "cs": 0}
 
 
 def test_count_includes_open_human_messages(device_client, session_client, pushes):
@@ -106,7 +106,7 @@ def test_a_failing_pusher_never_fails_a_mirror_write(app, device_client):
 def test_subprocess_pusher_sends_the_v2_payload_compact(app, settings, monkeypatch):
     from fileshare import push as push_module
     sent = []
-    monkeypatch.setattr(push_module.SubprocessPusher, "_deliver_payload", lambda self, p, topic=None: sent.append((p, topic)))
+    monkeypatch.setattr(push_module.SubprocessPusher, "_deliver_payload", lambda self, p, topic=None, *rest: sent.append((p, topic)))
     monkeypatch.setattr(push_module.SubprocessPusher, "_submit", lambda self, fn, *a: fn(*a))
     push_module.SubprocessPusher(settings, settings.db_path).notify_payload(
         {"v": 2, "s": SPACE, "t": "TIX-1", "k": "question", "n": 1, "c": 1})
@@ -263,7 +263,7 @@ def test_ten_tickets_needing_you_at_once_give_one_push_then_one_summary(frozen_c
     frozen_clock(t0 + timedelta(seconds=60))
     timers[0][1]()
     assert len(pushes) == 2
-    assert pushes[1] == {"v": 2, "s": SPACE, "t": "", "k": "batch", "n": 9, "c": 10, "ts": tix[1:]}
+    assert pushes[1] == {"v": 2, "s": SPACE, "t": "", "k": "batch", "n": 9, "c": 10, "cs": 10, "ts": tix[1:]}
 
 
 def test_a_held_ticket_handled_meanwhile_leaves_the_summary(frozen_clock, app, device_client, pushes):
@@ -282,7 +282,7 @@ def test_a_held_ticket_handled_meanwhile_leaves_the_summary(frozen_clock, app, d
     frozen_clock(t0 + timedelta(seconds=60))
     timers[0][1]()
     # one held ticket left: its own push, not a summary
-    assert pushes[-1] == {"v": 2, "s": SPACE, "t": t2, "k": "approval", "n": 0, "c": 2}
+    assert pushes[-1] == {"v": 2, "s": SPACE, "t": t2, "k": "approval", "n": 0, "c": 2, "cs": 2}
 
 
 def test_the_window_is_per_workspace(frozen_clock, app, device_client, pushes):
