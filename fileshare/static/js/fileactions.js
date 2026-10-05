@@ -11,6 +11,21 @@ export const DEFAULT_TTL = "7d";
 const path = (id, rest = "") => `/api/files/${encodeURIComponent(id)}${rest}`;
 const isAuth = (err) => err instanceof ApiError && err.status === 401;
 
+// The option that is closest to what a file has left, so "Change expiry" opens on today's setting and a Save without
+// touching it does not shorten the file's life to the default. No expiry is "never".
+const TTL_DAYS = { "1d": 1, "7d": 7, "30d": 30 };
+export function closestTtl(expiresAt, now = Date.now()) {
+  if (expiresAt === null || expiresAt === undefined) return "never";
+  const at = typeof expiresAt === "number" ? expiresAt : Date.parse(expiresAt);
+  if (!Number.isFinite(at)) return DEFAULT_TTL;
+  const days = (at - now) / 86400000;
+  let best = DEFAULT_TTL;
+  for (const [v, d] of Object.entries(TTL_DAYS)) {
+    if (Math.abs(d - days) < Math.abs(TTL_DAYS[best] - days)) best = v;
+  }
+  return best;
+}
+
 export function ttlSelect(id, value = DEFAULT_TTL) {
   const select = el("select", { id, class: "input ttl-select" },
     TTL_OPTIONS.map(([v, label]) => el("option", { value: v }, label)));
@@ -51,8 +66,8 @@ export async function setAck(id, on) {
 }
 
 // Opens the "Change expiry" dialog; the new expiry counts from now. Returns the FileOut or null.
-export async function changeExpiry(id, name = "") {
-  const select = ttlSelect("expiry-ttl");
+export async function changeExpiry(id, name = "", expiresAt = undefined) {
+  const select = ttlSelect("expiry-ttl", expiresAt === undefined ? DEFAULT_TTL : closestTtl(expiresAt));
   let updated = null;
   const saved = await formDialog({
     title: `Change expiry of ${id}`,

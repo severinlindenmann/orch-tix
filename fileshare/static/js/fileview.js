@@ -185,7 +185,7 @@ export async function openFileView(row, { onClose = closeFileView, focus = true 
   back.addEventListener("click", () => onClose());
   idBtn.addEventListener("click", () => copyId(id));
   mCopyId.addEventListener("click", () => copyId(id));
-  const expiry = () => changeExpiry(id, v.file.ok ? v.file.meta.name : "");
+  const expiry = () => changeExpiry(id, v.file.ok ? v.file.meta.name : "", v.file.expires_at);
   expPill.addEventListener("click", expiry);
   mExpiry.addEventListener("click", expiry);
   mShare.addEventListener("click", () => fileViewHooks.shareLink?.(v.file));
