@@ -224,20 +224,26 @@ export async function conformance(B, C, VEC) {
     count("pin_runs");
   }
 
-  // pending_answers (§8.1 step 4): the one response opened before a host key is pinned. The composition of production
-  // primitives a caller uses: tag first, host_pub (bytes) against the link's pin, the signature with it, then §7.
+  // pending_answers (§8.1 step 4): every answer to a pair request (the pending answer and refusals), opened before a host
+  // key is pinned. The composition of production primitives a caller uses: tag first, host_pub (bytes) against the
+  // link's pin, the signature with it, then §7 (openResponse, which also adopts a verified stale_timestamp's offset).
   for (const c of VEC.pending_answers) {
     const env = hex(c.envelope), { header, body, sig } = B.splitEnvelope(env);
     let got;
     try {
       const { meta } = B.unframe(await B.openBody(kWs, header, body));
-      if (meta.state !== "pending" || typeof meta.host_pub !== "string") throw new Error("not a pending answer");
+      const refusal = !!(B.decodeHeader(header).flags & B.F_REFUSAL);
+      if (typeof meta.host_pub !== "string" || (refusal ? typeof meta.refusal !== "string" : meta.state !== "pending")) {
+        throw new Error("not an answer to a pair request");
+      }
       const key = await B.hostKeyFromPin(hex(meta.host_pub), hex(c.host_pin));
       if (!await B.verifySigned(key, sig, B.signedBytes(header, body))) throw new Error("host signature");
       const pending = new Map(Object.entries(c.pending).map(([k, v]) => [k, { ...v }]));
       const r = await B.openResponse({ workspace: VEC.keys.workspace, kWs, keyVersion: 1, device: VEC.ids.device_a.device_id,
         hostKey: key, pending, offsetMs: 0 }, env, c.mailbox, c.now_ms);
-      got = r.result === "accept" ? { result: "accept", host_pub: meta.host_pub, fingerprint: meta.fingerprint } : { result: "drop" };
+      got = r.result !== "accept" ? { result: "drop" } : { result: "accept", host_pub: meta.host_pub,
+        fingerprint: refusal ? null : meta.fingerprint, refusal: refusal ? meta.refusal : null, offset_ms: r.offsetMs ?? null,
+        clock_wrong: r.clockWrong ?? null };
     } catch {
       got = { result: "drop" };
     }

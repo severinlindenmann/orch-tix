@@ -416,12 +416,13 @@ def _pair(state, h, hb, body, sig, meta, now_ms):
         hexfield(pid, 16)
         offer = state["offers"].get(pid)
     except (KeyError, TypeError, ValueError, AttributeError):
-        return _unverified(state, now_ms, "malformed")
+        return _unverified(state, now_ms, "malformed", host_pub=state["host_pub"])
     held = state.get("pending_pairs", {}).get(h.device.hex()) or {}
     resend = held.get("pairing_id") == pid and held.get("pub") == pub.hex()   # its `pending` answer was lost
     if offer is None or now_ms >= offer["expires_ms"] or (offer.get("used") and not resend):
-        return _unverified(state, now_ms, "pairing_closed")
-    ob = {"bucket": offer, "limit": OFFER_BUDGET}  # an open offer is not starved by the host-wide budget
+        return _unverified(state, now_ms, "pairing_closed", host_pub=state["host_pub"])
+    # an open offer is not starved by the host-wide budget; every refusal to a pair carries host_pub (§6.2, §8.1)
+    ob = {"bucket": offer, "limit": OFFER_BUDGET, "host_pub": state["host_pub"]}
     if device_id(h.workspace, pub) != h.device or not verify(pub, sig, signed_bytes(hb, body)):
         return _unverified(state, now_ms, "bad_signature", **ob)
     want = pair_mac(bytes.fromhex(offer["secret"]), h.workspace, bytes.fromhex(pid), pub)
@@ -563,15 +564,17 @@ def pin_run(results: list[dict]) -> list[bool]:
 
 
 def open_pending_answer(env: bytes, ctx: dict, mailbox: dict, now_ms: int) -> dict:
-    """The one response checked before the device has a host key (§8.1 step 4): ctx has `host_pin` (from the link)
-    instead of `host_pub`. Tag first, then the pin of the `host_pub` it carries, then the signature with that key;
-    then the rest of §7. Dropped if any fails, before anything in it is used."""
+    """Every answer to a `pair` request (§8.1 step 4): the `pending` answer, or a refusal. Checked before the device
+    has a host key: ctx has `host_pin` (from the link) instead of `host_pub`. Tag first, then the pin of the
+    `host_pub` it carries, then the signature with that key; then the rest of §7, where a verified
+    `stale_timestamp` refusal is exempt from the window and gives the offset. A drop counts as no answer."""
     if not OVERHEAD <= len(env) <= MAX_CHUNK:
         return _drop("size")
     hb, body, sig = split(env)
     h = Header.decode(hb)
-    if h.magic != MAGIC or h.version != VERSION or h.direction != TO_DEVICE or h.flags != F_LAST:
+    if h.magic != MAGIC or h.version != VERSION or h.direction != TO_DEVICE or h.flags not in (F_LAST, F_LAST | F_REFUSAL):
         return _drop("version_direction_or_flags")
+    refusal = bool(h.flags & F_REFUSAL)
     if h.key_version != ctx["key_version"] or h.workspace.hex() != ctx["workspace"] or h.device.hex() != ctx["device"]:
         return _drop("not_for_this_device")
     pend = ctx["pending"].get(h.rid.hex())
@@ -584,18 +587,28 @@ def open_pending_answer(env: bytes, ctx: dict, mailbox: dict, now_ms: int) -> di
         host_pub = bytes.fromhex(meta["host_pub"])
     except (InvalidTag, ValueError, KeyError, TypeError):
         return _drop("tag_or_meta")
-    if meta.get("state") != "pending" or len(host_pub) != 65:
-        return _drop("not_a_pending_answer")
+    if len(host_pub) != 65 or (meta.get("refusal") is None if refusal else meta.get("state") != "pending"):
+        return _drop("not_a_pairing_answer")
     if not hmac.compare_digest(host_pin(host_pub), bytes.fromhex(ctx["host_pin"])):
         return _drop("host_pin")
     if not verify(host_pub, sig, signed_bytes(hb, body)):
         return _drop("host_signature")
     if h.seq != pend["next"]:
         return _drop("out_of_order")
-    if abs(now_ms + ctx.get("offset_ms", 0) - h.ts_ms) > WINDOW_MS:
+    res = {"result": "accept", "host_pub": host_pub.hex(), "fingerprint": None if refusal else meta.get("fingerprint"),
+           "refusal": meta["refusal"] if refusal else None, "offset_ms": None, "clock_wrong": None}
+    if refusal and meta["refusal"] == "stale_timestamp" and type(meta.get("host_ms")) is int:
+        if not pend.get("offset_adopted"):         # verified, so its clock may be adopted (§5.1)
+            pend["offset_adopted"] = True
+            off = meta["host_ms"] - now_ms
+            if abs(off) <= MAX_OFFSET_MS:
+                res["offset_ms"] = off
+            else:
+                res["clock_wrong"] = True
+    elif abs(now_ms + ctx.get("offset_ms", 0) - h.ts_ms) > WINDOW_MS:
         return _drop("stale_timestamp")
     pend["next"] += 1
-    return {"result": "accept", "host_pub": host_pub.hex(), "fingerprint": meta.get("fingerprint")}
+    return res
 
 
 # --- the platform-authenticator binding (§9) ------------------------------------------------------
@@ -792,6 +805,7 @@ def build() -> dict:
                      "headers": {"content-type": "application/json"}}, data=b'{"to":"testing"}', seq=7)
     host_cases = []
     keep = ("result", "code", "scope", "meta", "data", "outcome", "high", "fingerprint", "answer", "label", "status",
+            "host_pub",
             "phone_link", "host_ms")
 
     def case(name, env, st, now_ms, mutate=None, mailbox_id=None):
@@ -1094,21 +1108,28 @@ def build() -> dict:
     # the pending answer (§8.1 step 4): checked against the link's pin, before any host key is pinned
     prid = fake("pair-rid")[:16]
 
-    def pend_resp(host_pub_hex=keys["host"]["pub"], signer="host", key=k_ws, meta=None):
-        h = Header(TO_DEVICE, F_LAST, ws, dev_a, prid, ZERO_ID, 0, now + 2000, fake(f"pend-{signer}-{host_pub_hex[:8]}")[:16])
+    def pend_resp(host_pub_hex=keys["host"]["pub"], signer="host", key=k_ws, meta=None, flags=F_LAST, seq=0,
+                  ts=now + 2000, r=prid):
+        h = Header(TO_DEVICE, flags, ws, dev_a, r, ZERO_ID, seq, ts,
+                   fake(f"pend-{signer}-{host_pub_hex[:8]}-{flags}-{seq}-{ts}-{r.hex()}")[:16])
         m = meta if meta is not None else {"state": "pending", "host_pub": host_pub_hex,
                                            "fingerprint": device_fingerprint(pub["device_a"])}
         return envelope(key, pk[signer], h, frame(m))
 
+    def refusal(code, signer="host", host_pub_hex=keys["host"]["pub"], **extra):
+        return pend_resp(host_pub_hex, signer=signer, flags=F_LAST | F_REFUSAL,
+                         meta={"refusal": code, "host_pub": host_pub_hex, **extra})
+
     pend_cases = []
 
-    def pcase(name, env):
+    def pcase(name, env, now_ms=now + 2500, mailbox=None):
         c = {"workspace": ws_hex, "k_ws": k_ws, "key_version": 1, "device": dev_a.hex(), "host_pin": host_pin(pub["host"]).hex(),
              "pending": {prid.hex(): {"next": 0, "stream": False}}, "offset_ms": 0}
-        mbp = {"id": prid.hex(), "idx": 0, "last": True, "stream": False}
-        res = open_pending_answer(env, c, mbp, now + 2500)
+        hh = Header.decode(env)
+        mbp = mailbox or {"id": hh.rid.hex(), "idx": hh.seq, "last": bool(hh.flags & F_LAST), "stream": False}
+        res = open_pending_answer(env, c, mbp, now_ms)
         pend_cases.append({"name": name, "envelope": env.hex(), "mailbox": mbp, "host_pin": c["host_pin"],
-                           "pending": {prid.hex(): {"next": 0, "stream": False}}, "now_ms": now + 2500,
+                           "pending": {prid.hex(): {"next": 0, "stream": False}}, "now_ms": now_ms,
                            "expect": {k: v for k, v in res.items() if k != "why"}})
 
     pcase("pending_answer_accepted", pend_resp())
@@ -1117,6 +1138,32 @@ def build() -> dict:
     pcase("pending_answer_sealed_under_another_key", pend_resp(key=workspace_key(mk, "0" * 32)))
     pcase("pending_answer_without_host_pub", pend_resp(meta={"state": "pending"}))
     pcase("pending_answer_that_is_not_pending", pend_resp(meta={"state": "approved", "host_pub": keys["host"]["pub"]}))
+    pcase("pending_answer_with_an_extra_field_is_accepted", pend_resp(meta={
+        "state": "pending", "host_pub": keys["host"]["pub"], "fingerprint": device_fingerprint(pub["device_a"]),
+        "scope": "decide"}))
+    pcase("pending_answer_outside_the_window", pend_resp(), now_ms=now + 2000 + WINDOW_MS + 1)
+    pcase("pending_answer_out_of_order", pend_resp(seq=1))
+    pcase("pending_answer_mailbox_says_stream", pend_resp(),
+          mailbox={"id": prid.hex(), "idx": 0, "last": True, "stream": True})
+    # refusals to a pair request carry host_pub and are verified exactly like the pending answer
+    pcase("pairing_closed_refusal_verified", refusal("pairing_closed"))
+    skewed = now + 2000 + 400_000                       # the device's clock runs 400 s fast
+    pcase("stale_timestamp_refusal_to_a_pair_verified_adopts_the_offset", refusal("stale_timestamp", host_ms=now + 2000),
+          now_ms=skewed)
+    pcase("stale_timestamp_refusal_to_a_pair_more_than_24_h_off", refusal("stale_timestamp", host_ms=now + 2000),
+          now_ms=now + 2000 + MAX_OFFSET_MS + 1)
+    pcase("pair_refusal_with_a_host_key_not_of_the_pin",
+          refusal("pairing_closed", signer="intruder", host_pub_hex=keys["intruder"]["pub"]))
+    pcase("pair_refusal_signed_by_another_key", refusal("pairing_closed", signer="intruder"))
+    pcase("pair_refusal_without_host_pub", pend_resp(flags=F_LAST | F_REFUSAL, meta={"refusal": "pairing_closed"}))
+    pcase("pair_refusal_stale_timestamp_unverified_does_not_adopt",
+          refusal("stale_timestamp", signer="intruder", host_ms=now + 2000), now_ms=skewed)
+    pcase("pair_refusal_for_a_request_not_pending", pend_resp(flags=F_LAST | F_REFUSAL, r=fake("old-pair")[:16],
+          meta={"refusal": "pairing_closed", "host_pub": keys["host"]["pub"]}))
+    pcase("pair_refusal_without_last", pend_resp(flags=F_REFUSAL,                 # the mailbox claims it is last
+          meta={"refusal": "pairing_closed", "host_pub": keys["host"]["pub"]}),
+          mailbox={"id": prid.hex(), "idx": 0, "last": True, "stream": False})
+    pcase("pair_refusal_without_a_code", pend_resp(flags=F_LAST | F_REFUSAL, meta={"host_pub": keys["host"]["pub"]}))
     out["pending_answers"] = pend_cases
 
     # labels (§8.1 step 2): code points, not UTF-16 units
@@ -1134,6 +1181,7 @@ def build() -> dict:
 
     # pairing link fragments (§8.1 step 1), strictly
     good = out["pairing"]["link_fragment"]
+    B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 
     def link(name, frag):
         return {"name": name, "fragment": frag, "parsed": parse_pair_fragment(frag)}
@@ -1145,6 +1193,7 @@ def build() -> dict:
         link("upper_case_workspace", good.replace(ws_hex, ws_hex.upper(), 1)),
         link("upper_case_pairing_id", good.replace(pid.hex(), pid.hex().upper(), 1)),
         link("secret_not_canonical", good.replace(b64u(secret), b64u(secret)[:-1] + "B", 1)),
+        link("host_pin_not_canonical", good[:-1] + B64[B64.index(good[-1]) ^ 1]),   # the low (padding) bit set
     ]
 
     # nonce and expires_ms encodings (§9.2, §9.4)
