@@ -798,3 +798,17 @@ test("pushsubscriptionchange subscribes again and replaces the server row", asyn
   await Promise.all(ev.waits);
   assert.deepEqual(calls.map((c) => c.join(" ")), ["GET /api/push/vapid", "POST /api/push/subscribe", "DELETE /api/push/subscribe"]);
 });
+
+test("push v2: no banner while a TIX window is focused and visible; a clear is still shown", async () => {
+  const windows = [{ url: `${ORIGIN}/`, focused: true, visibilityState: "visible", postMessage() {} }];
+  const w = load({ idb: LABELS, windows });
+  const ev = { data: { json: () => ({ v: 2, s: S1, t: "TIX-42", k: "question", n: 1, c: 1 }) }, waits: [], waitUntil(p) { this.waits.push(p); } };
+  w.listeners.push(ev);
+  await Promise.all(ev.waits);
+  assert.equal(w.shown.length, 0);
+  windows[0].focused = false;
+  const ev2 = { data: { json: () => ({ v: 2, s: S1, t: "TIX-42", k: "question", n: 1, c: 1 }) }, waits: [], waitUntil(p) { this.waits.push(p); } };
+  w.listeners.push(ev2);
+  await Promise.all(ev2.waits);
+  assert.equal(w.shown.length, 1);
+});

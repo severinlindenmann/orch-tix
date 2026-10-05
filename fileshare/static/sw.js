@@ -473,6 +473,15 @@ async function setBadge(data) {
   }
 }
 
+async function appIsFocused() {
+  try {
+    const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    return wins.some((c) => c.focused === true && c.visibilityState === "visible");
+  } catch {
+    return false;
+  }
+}
+
 self.addEventListener("push", (event) => {
   let data = null;
   try {
@@ -486,6 +495,13 @@ self.addEventListener("push", (event) => {
       note = await notificationFor(data);
     } catch {
       note = GENERIC;
+    }
+    // The owner is looking at TIX right now: the page already shows it (it long-polls), so no banner (QA N-01).
+    // Only for "new thing" pushes; a clear always goes through. UNVERIFIED on iOS: WebKit may count a push that
+    // shows nothing against the subscription, so test with live-test.md step 6 before shipping.
+    if (data && data.v === 2 && data.k !== "clear" && await appIsFocused()) {
+      await setBadge(data);
+      return;
     }
     for (const x of note.close || []) x.close();
     await Promise.all([self.registration.showNotification(note.title, note.options), setBadge(data)]);
