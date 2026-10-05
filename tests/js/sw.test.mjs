@@ -764,17 +764,28 @@ test("push v2: a batch joins the workspace grouping: past three workspaces it go
   assert.deepEqual(after.options.data.ts[S4], ["TIX-8"]);                      // the clear updates the group
 });
 
-test("push v2: a message clear replaces the message notification, but never a needs notification that shares the tag", async () => {
+test("push v2: a message has its own tag, so it never replaces a needs notification, and its clear never touches one", async () => {
   const w = load({ idb: LABELS });
-  await push(w, { v: 2, s: S1, t: "", k: "message", n: 2, c: 2 });
-  const got = await push(w, { v: 2, s: S1, t: "", k: "clear", w: "message", n: 0, c: 0 });
-  assert.equal(got.options.tag, `tix:${S1}`);
-  assert.equal(got.options.silent, true);
+  await push(w, { v: 2, s: S1, t: "TIX-42", k: "question", n: 1, c: 1, cs: 1 });
+  const msg = await push(w, { v: 2, s: S1, t: "", k: "message", n: 2, c: 3 });
+  assert.equal(msg.options.tag, `tix:msg:${S1}`);
+  assert.deepEqual(w.notifications.map((n) => n.tag).sort(), [`tix:${S1}`, `tix:msg:${S1}`].sort());     // both visible
+  assert.equal(w.notifications.find((n) => n.tag === `tix:${S1}`).title, "Agent needs input");
+  const got = await push(w, { v: 2, s: S1, t: "", k: "clear", w: "message", n: 0, c: 1 });
+  assert.equal(got.options.tag, `tix:msg:${S1}`);
+  assert.equal(got.title, "Read on desktop");
   assert.equal(got.options.body, "Read on desktop · Acme Energy");
-  const w2 = load({ idb: LABELS });
-  await push(w2, { v: 2, s: S1, t: "TIX-42", k: "question", n: 1, c: 1 });
-  const kept = await push(w2, { v: 2, s: S1, t: "", k: "clear", w: "message", n: 0, c: 1 });
-  assert.equal(kept.options.body, "Acme Energy · 1 question");
+  assert.equal(w.notifications.find((n) => n.tag === `tix:${S1}`).title, "Agent needs input");           // untouched
+  const none = await push(w, { v: 2, s: "", t: "", k: "message", n: 1, c: 1 });
+  assert.equal(none.options.tag, "tix:msg");
+});
+
+test("push v2: a message does not count as a ticket of its workspace for the 'tix:all' grouping", async () => {
+  const w = load({ idb: LABELS });
+  for (const s of [S1, S2, S3]) await push(w, { v: 2, s, t: "", k: "message", n: 1, c: 3 });
+  assert.equal(w.notifications.length, 3);
+  const q = await push(w, { v: 2, s: S4, t: "TIX-1", k: "question", n: 1, c: 4, cs: 1 });
+  assert.equal(q.options.tag, `tix:${S4}`);                                                                // not folded into tix:all
 });
 
 test("push v2: the app badge follows c, and a clear to 0 removes it", async () => {
