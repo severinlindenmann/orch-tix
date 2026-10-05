@@ -109,7 +109,7 @@ TIME = ('    if abs(now_ms - h.ts_ms) > WINDOW_MS:\n'
         '        return _recorded_refusal(state, h, env, now_ms, "stale_timestamp", host_ms=now_ms)\n')
 
 SEQ_NOTE = '    # sequence BEFORE time: a stale_timestamp refusal consumes its seq, so the same bytes can never run\n'
-MAL = ('    try:\n        meta, data = unframe(pt)\n    except ValueError:\n'
+MAL = ('    try:\n        meta, data = unframe(pt, strict=True)\n    except ValueError:\n'
        '        return _recorded_refusal(state, h, env, now_ms, "malformed")\n')
 
 MUTS = {
@@ -192,9 +192,9 @@ MUTS = {
     "pending_pin_not_checked": ('    if not hmac.compare_digest(host_pin(host_pub), bytes.fromhex(ctx["host_pin"])):\n        return _drop("host_pin")\n', ""),
     "pending_signature_not_checked": ('    if not verify(host_pub, sig, signed_bytes(hb, body)):\n        return _drop("host_signature")\n    if h.seq != pend["next"]',
                                       '    if h.seq != pend["next"]'),
-    "pending_not_required": ('meta.get("pair") != "pending" or ', ""),
+    "pending_not_required": ('meta.get("state") != "pending" or ', ""),
     "status_without_scope": ('            if waiting["state"] == "approved":\n                answer["scope"] = waiting["scope"]\n', ""),
-    "pending_answer_without_host_pub": ('{"pair": "pending", "host_pub": state["host_pub"], ', '{"pair": "pending", '),
+    "pending_answer_without_host_pub": ('{"state": "pending", "host_pub": state["host_pub"], ', '{"state": "pending", '),
     "label_in_utf16_units": ("return clean_shown(s)[:MAX_LABEL]",
                              'return clean_shown(s).encode("utf-16-le")[:2 * MAX_LABEL].decode("utf-16-le", "ignore")'),
     "device_label_in_utf16_units": ("and len(s) <= MAX_LABEL", 'and len(s.encode("utf-16-le")) // 2 <= MAX_LABEL'),
@@ -218,6 +218,12 @@ MUTS = {
                              '    elif abs(now_ms + ctx.get("offset_ms", 0) - h.ts_ms) >= WINDOW_MS:'),
     "device_mailbox_stream_unchecked": ('bool(h.flags & F_STREAM)) or pend["stream"] != mailbox["stream"]:\n        return _drop("mailbox_mismatch")\n    if not verify(ctx',
                                         'mailbox["stream"]) or pend["stream"] != mailbox["stream"]:\n        return _drop("mailbox_mismatch")\n    if not verify(ctx'),
+    "meta_duplicates_allowed": ("object_pairs_hook=_no_duplicates, ", ""),
+    "meta_nan_allowed": (", parse_constant=_no_constant", ""),
+    "meta_upper_case_hex": ('compile(r"(?:[0-9a-f]{2})*")', 'compile(r"(?:[0-9a-fA-F]{2})*")'),
+    "meta_hex_any_length": ("len(v) != 2 * n_bytes or ", ""),
+    "body_not_stored_replayed": ('            if out.get("body_stored") is False:', '            if False:'),
+    "pair_status_named_pair": ('answer = {"state": waiting["state"]}', 'answer = {"pair": waiting["state"]}'),
     "device_host_ms_any_type": ('meta.get("refusal") == "stale_timestamp" and type(meta.get("host_ms")) is int:',
                                 'meta.get("refusal") == "stale_timestamp" and meta.get("host_ms") is not None:'),
     # the third review's 4 boundaries, and the pairing resend

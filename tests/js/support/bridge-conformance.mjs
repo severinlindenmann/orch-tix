@@ -143,6 +143,15 @@ export async function conformance(B, C, VEC) {
     let framed;
     try { framed = B.unframe(pt); } catch { framed = null; }
     if (framed === null) { same(e.code, "malformed", `${name} framing`); return; }
+    if (e.code === "malformed") {       // the host's strict meta (§3.5): only meta the device would never write
+      let differs = toHex(B.frame(framed.meta, framed.data)) !== toHex(pt);
+      if (!differs && framed.meta.op === "pair") {
+        const { phone_proof: _p, ...mine } = await pairMeta(framed.meta), { phone_proof: _q, ...theirs } = framed.meta;
+        differs = canonicalJson(mine) !== canonicalJson(theirs);
+      }
+      same(differs, true, `${name}: malformed, but the device could have sent it`);
+      return;
+    }
     same(toHex(B.frame(framed.meta, framed.data)), toHex(pt), `${name} canonical meta`);
     if (e.meta !== undefined) same([framed.meta, toHex(framed.data)], [e.meta, e.data], `${name} meta and data`);
     const m = framed.meta, claimed = pubOf.get(toHex(h.device));
@@ -222,7 +231,7 @@ export async function conformance(B, C, VEC) {
     let got;
     try {
       const { meta } = B.unframe(await B.openBody(kWs, header, body));
-      if (meta.pair !== "pending" || typeof meta.host_pub !== "string") throw new Error("not a pending answer");
+      if (meta.state !== "pending" || typeof meta.host_pub !== "string") throw new Error("not a pending answer");
       const key = await B.hostKeyFromPin(hex(meta.host_pub), hex(c.host_pin));
       if (!await B.verifySigned(key, sig, B.signedBytes(header, body))) throw new Error("host signature");
       const pending = new Map(Object.entries(c.pending).map(([k, v]) => [k, { ...v }]));

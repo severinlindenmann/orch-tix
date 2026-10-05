@@ -205,16 +205,39 @@ def frame(meta: dict, data: bytes = b"") -> bytes:
     return struct.pack(">I", len(m)) + m + data
 
 
-def unframe(pt: bytes) -> tuple[dict, bytes]:
+def _no_duplicates(pairs):
+    keys = [k for k, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate key")
+    return dict(pairs)
+
+
+def _no_constant(name):
+    raise ValueError(f"{name} is not JSON")
+
+
+def unframe(pt: bytes, strict: bool = False) -> tuple[dict, bytes]:
+    """strict (a request's meta, §3.5): a duplicate key, NaN or Infinity is malformed."""
     if len(pt) < 4:
         raise ValueError("short plaintext")
     n = struct.unpack(">I", pt[:4])[0]
     if n > MAX_META or 4 + n > len(pt):
         raise ValueError("bad meta length")
-    meta = json.loads(pt[4:4 + n].decode("utf-8"))
+    raw = pt[4:4 + n].decode("utf-8")
+    meta = json.loads(raw, object_pairs_hook=_no_duplicates, parse_constant=_no_constant) if strict else json.loads(raw)
     if not isinstance(meta, dict):
         raise ValueError("meta is not an object")
     return meta, pt[4 + n:]
+
+
+_HEX = __import__("re").compile(r"(?:[0-9a-f]{2})*")
+
+
+def hexfield(v, n_bytes: int) -> bytes:
+    """A hex field of a request's meta (§3.5): lower-case, exactly n_bytes. Anything else is malformed."""
+    if not isinstance(v, str) or len(v) != 2 * n_bytes or not _HEX.fullmatch(v):
+        raise ValueError("not lower-case hex of the right length")
+    return bytes.fromhex(v)
 
 
 def seal_body(k_ws: bytes, header: bytes, plaintext: bytes) -> bytes:
@@ -328,7 +351,7 @@ def host_check(env: bytes, state: dict, now_ms: int, mailbox_id: str | None = No
     dev = state["devices"].get(did)
     if dev is None:
         try:
-            meta, _ = unframe(pt)
+            meta, _ = unframe(pt, strict=True)
         except ValueError:
             return _unverified(state, now_ms, "malformed")
         if meta.get("op") == "pair":
@@ -339,7 +362,7 @@ def host_check(env: bytes, state: dict, now_ms: int, mailbox_id: str | None = No
                 return _unverified(state, now_ms, "bad_signature")
             if abs(now_ms - h.ts_ms) > WINDOW_MS:
                 return _unverified(state, now_ms, "stale_timestamp", host_ms=now_ms)
-            answer = {"pair": waiting["state"]}                                 # read-only: a replay changes nothing
+            answer = {"state": waiting["state"]}                                 # read-only: a replay changes nothing
             if waiting["state"] == "approved":
                 answer["scope"] = waiting["scope"]
             return {"result": "pair_status", "answer": answer}
@@ -363,11 +386,13 @@ def host_check(env: bytes, state: dict, now_ms: int, mailbox_id: str | None = No
                 if "high" in extra:
                     extra["high"] = dev["high"]
                 return _refuse(out["refusal"], **extra)
+            if out.get("body_stored") is False:        # over 64 KiB: only the head was kept
+                return _refuse("already_done", status=out["status"])
             return {"result": "replay", "outcome": out}
         return _refuse("rid_conflict")
     # 5. from here every refusal is recorded before it is sent
     try:
-        meta, data = unframe(pt)
+        meta, data = unframe(pt, strict=True)
     except ValueError:
         return _recorded_refusal(state, h, env, now_ms, "malformed")
     # sequence BEFORE time: a stale_timestamp refusal consumes its seq, so the same bytes can never run
@@ -387,7 +412,8 @@ def host_check(env: bytes, state: dict, now_ms: int, mailbox_id: str | None = No
 
 def _pair(state, h, hb, body, sig, meta, now_ms):
     try:
-        pid, pub, mac = meta["pairing_id"], bytes.fromhex(meta["pub"]), bytes.fromhex(meta["mac"])
+        pid, pub, mac = meta["pairing_id"], hexfield(meta["pub"], 65), hexfield(meta["mac"], 32)
+        hexfield(pid, 16)
         offer = state["offers"].get(pid)
     except (KeyError, TypeError, ValueError, AttributeError):
         return _unverified(state, now_ms, "malformed")
@@ -412,7 +438,7 @@ def _pair(state, h, hb, body, sig, meta, now_ms):
     phone_key = state.get("phones", {}).get(str(meta.get("phone_id", "")))
     if phone_key is not None:
         try:
-            proof = bytes.fromhex(meta.get("phone_proof", ""))
+            proof = hexfield(meta.get("phone_proof", ""), 32)
         except (TypeError, ValueError):
             proof = b""
         if hmac.compare_digest(phone_link_proof(bytes.fromhex(phone_key), h.device), proof):
@@ -427,7 +453,7 @@ def _pair(state, h, hb, body, sig, meta, now_ms):
 
 def pending_answer(state, pub: bytes) -> dict:
     """The meta of the `pending` response (§8.1 step 3): it carries the host key the device pins."""
-    return {"pair": "pending", "host_pub": state["host_pub"], "fingerprint": device_fingerprint(pub)}
+    return {"state": "pending", "host_pub": state["host_pub"], "fingerprint": device_fingerprint(pub)}
 
 
 def host_label(s: str) -> str:
@@ -558,7 +584,7 @@ def open_pending_answer(env: bytes, ctx: dict, mailbox: dict, now_ms: int) -> di
         host_pub = bytes.fromhex(meta["host_pub"])
     except (InvalidTag, ValueError, KeyError, TypeError):
         return _drop("tag_or_meta")
-    if meta.get("pair") != "pending" or len(host_pub) != 65:
+    if meta.get("state") != "pending" or len(host_pub) != 65:
         return _drop("not_a_pending_answer")
     if not hmac.compare_digest(host_pin(host_pub), bytes.fromhex(ctx["host_pin"])):
         return _drop("host_pin")
@@ -815,6 +841,18 @@ def build() -> dict:
     done["rids"][fake("rid-7")[:16].hex()]["outcome"] = {"status": 200}
     case("replay_of_finished_request", full, done, now + 30_000)
     host_cases.pop(-2)
+    big_done = case("replay_of_a_finished_request_whose_body_was_not_stored", full, None, now + 1500)
+    big_done["rids"][fake("rid-7")[:16].hex()]["outcome"] = {"status": 200, "body_stored": False}
+    case("replay_of_a_finished_request_whose_body_was_not_stored", full, big_done, now + 30_000)
+    host_cases.pop(-2)
+
+    def raw_meta(text):
+        b_ = text.encode()
+        return struct.pack(">I", len(b_)) + b_
+
+    case("meta_with_a_duplicate_key", req(seq=5, raw_pt=raw_meta('{"op":"http","op":"cancel"}')), None, now)
+    case("meta_with_nan", req(seq=5, raw_pt=raw_meta('{"op":"http","n":NaN}')), None, now)
+    case("meta_with_infinity", req(seq=5, raw_pt=raw_meta('{"op":"http","n":-Infinity}')), None, now)
     case("replay_from_other_device_record", full, None, now + 1500,
          lambda s: s["rids"].update({fake("rid-7")[:16].hex(): {"device": dev_b.hex(), "digest": digest(full).hex(),
                                                                 "outcome": {"status": 200}, "until": now + 900_000}}))
@@ -908,6 +946,8 @@ def build() -> dict:
 
     case("pair_request_bad_mac", pair({**pair_meta, "mac": fake("wrong")[:32].hex()}), None, now, offer)
     case("pair_request_no_offer", pair(), None, now)
+    case("pair_request_with_upper_case_hex", pair({**pair_meta, "pub": new_pub.hex().upper()}), None, now, offer)
+    case("pair_request_with_a_short_mac", pair({**pair_meta, "mac": good_mac.hex()[:62]}), None, now, offer)
     spent = lambda s: s.update(unverified=[now - i for i in range(BUDGET)])   # noqa: E731
     case("pair_refusal_for_open_offer_under_spent_host_budget", pair({**pair_meta, "mac": fake("wrong")[:32].hex()}),
          None, now, lambda s: (offer(s), spent(s)))
@@ -1056,7 +1096,7 @@ def build() -> dict:
 
     def pend_resp(host_pub_hex=keys["host"]["pub"], signer="host", key=k_ws, meta=None):
         h = Header(TO_DEVICE, F_LAST, ws, dev_a, prid, ZERO_ID, 0, now + 2000, fake(f"pend-{signer}-{host_pub_hex[:8]}")[:16])
-        m = meta if meta is not None else {"pair": "pending", "host_pub": host_pub_hex,
+        m = meta if meta is not None else {"state": "pending", "host_pub": host_pub_hex,
                                            "fingerprint": device_fingerprint(pub["device_a"])}
         return envelope(key, pk[signer], h, frame(m))
 
@@ -1075,8 +1115,8 @@ def build() -> dict:
     pcase("pending_answer_with_a_host_key_not_of_the_pin", pend_resp(keys["intruder"]["pub"], signer="intruder"))
     pcase("pending_answer_signed_by_another_key", pend_resp(signer="intruder"))
     pcase("pending_answer_sealed_under_another_key", pend_resp(key=workspace_key(mk, "0" * 32)))
-    pcase("pending_answer_without_host_pub", pend_resp(meta={"pair": "pending"}))
-    pcase("pending_answer_that_is_not_pending", pend_resp(meta={"pair": "approved", "host_pub": keys["host"]["pub"]}))
+    pcase("pending_answer_without_host_pub", pend_resp(meta={"state": "pending"}))
+    pcase("pending_answer_that_is_not_pending", pend_resp(meta={"state": "approved", "host_pub": keys["host"]["pub"]}))
     out["pending_answers"] = pend_cases
 
     # labels (§8.1 step 2): code points, not UTF-16 units
