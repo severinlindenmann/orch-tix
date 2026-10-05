@@ -6,6 +6,7 @@
 
 ## 0.2.0
 
+- A new always-on provider `needs-watch` syncs a ticket to the phone within about a second when its events change (question asked, gate waiting, decision applied) instead of at the next outbox pass (core pumps every `pull_seconds`, 60 s). The periodic pass stays as the fallback and skips what the watcher already synced. Runs while Mission Control is open or "Keep syncing while Mission Control runs" is on.
 - A ticket the server answered `gone` for is linked again on the next sync cycle as a new generation (once per cycle, when the sync policy would mirror it); by-hand unlinks and done cleanups stay retired. The link records why it was retired (`retired_why`).
 
 - The mirrored document carries orch-core's `signed` block (schema 1.6) at full and title (never key-only), cleaned to `{signed, by}` per gate and verdict; the phone names who signed each approved gate and the verdict. An older orch-core sends none and the phone keeps its "not signed here" wording.
