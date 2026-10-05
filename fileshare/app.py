@@ -11,15 +11,18 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from fileshare import messages as messages_mod
 from fileshare import mirrors as mirrors_mod
+from fileshare import presence as presence_mod
 from fileshare.bridge import Bridge
 from fileshare.blobs import BlobStore
-from fileshare.db import backfill_device_fingerprints, connect, migrate
+from fileshare.db import backfill_device_fingerprints, connect, ensure_epoch, migrate
 from fileshare.expiry import expire_files, expire_upload_links, sweep_forever
-from fileshare.headers import SecurityHeadersMiddleware
+from fileshare.headers import CompressionMiddleware, ConditionalMiddleware, SecurityHeadersMiddleware
+from fileshare.heldpush import HeldStore
 from fileshare.push import SubprocessPusher
 from fileshare.routes import auth as auth_routes
 from fileshare.routes import decisions as decisions_routes
 from fileshare.routes import bridge as bridge_routes
+from fileshare.routes import presence as presence_routes
 from fileshare.routes import devices, files, links, messages, mirrors, onboarding, uploadlinks
 from fileshare.routes import push as push_routes
 from fileshare.routes import tickets as tickets_routes
@@ -52,6 +55,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     conn = connect(settings.db_path)
     try:
         migrate(conn)
+        ensure_epoch(conn)
         backfill_device_fingerprints(conn)  # rewrite pre-2026-09-25 8-char fingerprints (§4.6)
         expire_files(conn, blobs)          # startup expiry sweep (§14 E), before the orphan sweep
         expire_upload_links(conn, blobs)  # same, for dead upload links (upload-links spec, Task 3)
@@ -71,6 +75,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI):
+        # what the previous process still held inside a push window goes out now (QA N-08)
+        await asyncio.to_thread(mirrors_mod.recover_held, app)
+        await asyncio.to_thread(messages_mod.recover_held, app)
         # the hourly expiry sweep: one task, cancelled on shutdown
         task = asyncio.create_task(sweep_forever(settings.db_path, blobs, app.state.ticket_bus))
         try:
@@ -92,15 +99,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.decision_limiter = WindowLimiter(decisions_routes.DECISIONS_PER_HOUR, 3600)  # per session (TIX §4.2)
     app.state.message_limiter = WindowLimiter(messages_mod.MESSAGES_PER_HOUR, 3600)       # per sender
     app.state.message_push_gate = messages_mod.PushGate(messages_mod.HUMAN_PUSH_EVERY_S)  # per sending device
-    app.state.needs_push_gate = mirrors_mod.NeedsPushGate(mirrors_mod.NEEDS_PUSH_EVERY_S)  # per workspace (round B)
+    app.state.held_store = HeldStore(settings.db_path)           # pushes held in a window survive a restart (QA N-08)
+    app.state.needs_push_gate = mirrors_mod.NeedsPushGate(mirrors_mod.NEEDS_PUSH_EVERY_S,
+                                                          app.state.held_store)  # per workspace (round B)
     app.state.ticket_bus = Bus(last_seq)                        # long-poll wakeups (spec T6)
     app.state.inbox_bus = Bus(last_decision)                    # decision long-poll wakeups (TIX spec §9)
     app.state.message_bus = Bus(last_message)                   # message long-poll wakeups (TIX spec §8)
-    app.state.bridge = Bridge()                                 # remote bridge mailboxes (R8)
+    app.state.presence_limiter = WindowLimiter(presence_mod.BEATS_PER_MIN, 60)   # per host device (R9)
+    app.state.bridge = Bridge()                                # remote bridge mailboxes (R8)
     app.state.pusher = SubprocessPusher(settings, settings.db_path)  # Web Push through a subprocess (spec T7)
     links.install_log_redaction()        # access lines carry /p/<token> and /api/public/<token>
+    app.add_middleware(ConditionalMiddleware)
     app.add_middleware(CookieRefreshMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(CompressionMiddleware)      # outermost: compresses what the others produced
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error(request: Request, exc: StarletteHTTPException):
@@ -130,6 +142,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(decisions_routes.router)
     app.include_router(messages.router)
     app.include_router(bridge_routes.router)
+    app.include_router(presence_routes.router)
     app.include_router(tickets_routes.router)
     app.include_router(push_routes.router)
     app.include_router(pages_routes.router)

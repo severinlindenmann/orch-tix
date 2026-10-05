@@ -3682,6 +3682,8 @@ def _mirror_body(raw: str) -> dict:
         raise UsageError("mirror file: notify must be true or false")
     if body.get("notify_seen") is not None and (type(body["notify_seen"]) is not int or body["notify_seen"] < 0):
         raise UsageError("mirror file: notify_seen must be a whole number")
+    if body.get("decided_via") not in (None, "phone"):
+        raise UsageError("mirror file: decided_via must be absent or \"phone\"")
     return body
 
 
@@ -3732,6 +3734,8 @@ def cmd_mirror_push(args) -> int:
                "open_questions": body["open_questions"], "event_uuid": mirror_event_uuid(space, key, gen, rev)}
         if body.get("notify") is not None:       # cleartext: may this ticket notify the phone (the server default is off)
             req["notify"], req["notify_seen"] = body["notify"], body.get("notify_seen") or 0
+        if body.get("decided_via"):      # Mission Control applied a phone answer: the "handled" push says so (QA #55)
+            req["decided_via"] = body["decided_via"]
         if existing is not None:         # reuse the stored DEK and key version (else 409 dek_mismatch)
             dek = open_(cfg.mk, unb64u(existing["wrapped_dek"]), aad_tdek(tu))
             req["key_version"] = existing["key_version"]

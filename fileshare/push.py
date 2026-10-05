@@ -11,7 +11,9 @@ import threading
 import hashlib
 from urllib.parse import urlsplit
 import base64
+from datetime import timedelta
 
+from fileshare import clock
 from fileshare.db import connect, get_meta, set_meta
 
 log = logging.getLogger("fileshare.push")
@@ -23,6 +25,10 @@ TTL_S = 86400
 # pushes expire at the push service after 30 minutes; a clear and the rest keep the day.
 NEEDS_TTL_S = 1800
 APPLE_PUSH_HOSTS = ("web.push.apple.com",)
+# QA N-06: a subscription is dropped when its last PRUNE_AFTER_FAILURES pushes in a row failed (not 404/410, which
+# drop it at once) AND it has not worked for PRUNE_AFTER_DAYS (a short outage must not cost the owner the phone).
+PRUNE_AFTER_FAILURES = 5
+PRUNE_AFTER_DAYS = 7
 
 
 def ensure_vapid(conn) -> str:
@@ -113,11 +119,11 @@ class SubprocessPusher:
     def notify(self, ticket: dict, event: dict) -> None:
         self._submit(self._deliver, ticket, event)
 
-    def notify_payload(self, payload: dict) -> None:
+    def notify_payload(self, payload: dict, exclude_sessions: frozenset | None = None) -> None:
         """Push v2 (TIX spec §7): one ready cleartext payload to every subscription. The caller builds it
         from cleartext routing only (space id, TIX id, kind, counts), never a title or text."""
         self._submit(self._deliver_payload, json.dumps(payload, separators=(",", ":")), topic_for(payload),
-                     ttl_for(payload), payload.get("k") == "clear")
+                     ttl_for(payload), payload.get("k") == "clear", frozenset(exclude_sessions or ()))
 
     def _deliver(self, ticket: dict, event: dict) -> None:
         """Push v1 for a legacy ticket: build the fields, then hand the payload on."""
@@ -127,10 +133,13 @@ class SubprocessPusher:
             fields["m"] = True        # a manual test: nothing ran, so not "tests passed"
         self._deliver_payload(json.dumps(fields))
 
-    def _deliver_payload(self, payload: str, topic: str | None = None, ttl: int = TTL_S, is_clear: bool = False) -> None:
+    def _deliver_payload(self, payload: str, topic: str | None = None, ttl: int = TTL_S, is_clear: bool = False,
+                         exclude_sessions: frozenset = frozenset()) -> None:
         conn = connect(self.db_path)
         try:
-            subs = conn.execute("SELECT id, endpoint, p256dh, auth FROM push_subs").fetchall()
+            subs = conn.execute("SELECT id, endpoint, p256dh, auth, session_hash FROM push_subs").fetchall()
+            if exclude_sessions:        # the phone that made the decision needs no note about it (QA #55)
+                subs = [r for r in subs if r["session_hash"] not in exclude_sessions]
             if is_clear:        # iOS cannot replace a notification by tag: a clear would only add one (see replaces_by_tag)
                 subs = [r for r in subs if replaces_by_tag(r["endpoint"])]
             if not subs:
@@ -166,6 +175,10 @@ class SubprocessPusher:
             return
         failed = result.get("failed", [])
         gone = result.get("gone", [])
+        errors = result.get("errors") if isinstance(result.get("errors"), dict) else {}
+        ok = result.get("ok")
+        if not isinstance(ok, list):             # an older worker answers only gone and failed
+            ok = [r["id"] for r in subs if r["id"] not in failed and r["id"] not in gone]
         try:
             kind = json.loads(payload).get("k")
         except (ValueError, AttributeError):
@@ -174,10 +187,37 @@ class SubprocessPusher:
         log.info("push: k=%s sent=%d failed=%d gone=%d", kind, len(subs) - len(failed) - len(gone), len(failed), len(gone))
         if failed:
             log.warning("push: %d failed", len(failed))
+            for sid in failed:
+                log.warning("push: subscription %s failed (%s)", sid, errors.get(sid, "unknown"))
+        conn = connect(self.db_path)
+        try:
+            self._record(conn, ok, failed, gone)
+        except Exception as e:      # bookkeeping never fails a push
+            log.warning("push: could not record the result: %s", type(e).__name__)
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _record(conn, ok: list, failed: list, gone: list) -> None:
+        """Success and failure bookkeeping per subscription (QA N-06): a gone one is deleted, a working one resets
+        its failure count, a failing one counts up and is dropped once it has failed repeatedly for days."""
+        now = clock.now_iso()
         if gone:
-            conn = connect(self.db_path)
-            try:
-                qs = ",".join("?" * len(gone))
-                conn.execute(f"DELETE FROM push_subs WHERE id IN ({qs})", gone)
-            finally:
-                conn.close()
+            conn.execute(f"DELETE FROM push_subs WHERE id IN ({','.join('?' * len(gone))})", gone)
+        for sid in ok:
+            conn.execute("UPDATE push_subs SET last_success_at = ?, failure_count = 0 WHERE id = ?", (now, sid))
+        for sid in failed:
+            conn.execute("UPDATE push_subs SET last_failure_at = ?, failure_count = failure_count + 1 WHERE id = ?",
+                         (now, sid))
+        prune_failing(conn)
+
+
+def prune_failing(conn) -> int:
+    """Delete subscriptions that failed PRUNE_AFTER_FAILURES pushes in a row and have not worked for
+    PRUNE_AFTER_DAYS (counted from the last success, or from creation for one that never worked)."""
+    cutoff = clock.now_iso(clock.now() - timedelta(days=PRUNE_AFTER_DAYS))
+    cur = conn.execute("DELETE FROM push_subs WHERE failure_count >= ? AND COALESCE(last_success_at, created_at) < ?",
+                       (PRUNE_AFTER_FAILURES, cutoff))
+    if cur.rowcount:
+        log.info("push: dropped %d subscription(s) that kept failing", cur.rowcount)
+    return cur.rowcount

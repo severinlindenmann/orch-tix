@@ -2,8 +2,10 @@
 import sqlite3
 
 from fastapi import APIRouter, Depends, Request, Response
+from starlette.concurrency import run_in_threadpool
 
 from fileshare import mirrors, tickets
+from fileshare.db import ensure_epoch
 from fileshare.deps import Principal, api_error, get_db, require_any, require_session
 from fileshare.ids import parse_ticket_ref
 from fileshare.routes.files import UUID_RE, WRAPPED_DEK_LEN, check_envelope, read_bounded_json
@@ -93,7 +95,8 @@ def get_join_request(space_id: str, req_id: str, principal: Principal = Depends(
 def _decide(request: Request, space_id: str, req_id: str, principal: Principal, conn, decision: str) -> dict:
     return mirrors.decide_join(conn, request.app, space_id=_space_id(space_id), req_id=_join_id(req_id),
                                decision=decision,
-                               decided_by=session_name(conn, principal.session_hash) or "browser")
+                               decided_by=session_name(conn, principal.session_hash) or "browser",
+                               session_hash=principal.session_hash)
 
 
 @router.post("/api/spaces/{space_id}/join-requests/{req_id}/approve")
@@ -119,12 +122,21 @@ async def mirror_changes(request: Request, after: str = "0", wait: str = "0"):
         return found
 
     found = await tickets.wait_for_events(request, request.app.state.ticket_bus, after_n, wait_s, fetch)
-    return {"mirrors": found, "cursor": cursor["seq"] if found else after_n}
+    # epoch and head let a client that holds a list + cursor notice a server that started over (see db.ensure_epoch):
+    # another epoch, or a head behind its cursor, means the cursor no longer belongs to this database.
+    epoch, head = await run_in_threadpool(_short, request, lambda conn: (
+        ensure_epoch(conn), conn.execute("SELECT COALESCE(MAX(seq), 0) FROM ticket_events").fetchone()[0]))
+    return {"mirrors": found, "cursor": cursor["seq"] if found else after_n, "epoch": epoch, "head": head}
 
 
 @router.get("/api/mirrors")
 def list_mirrors(space: str | None = None, _: Principal = Depends(require_any), conn: sqlite3.Connection = Depends(get_db)):
-    return {"mirrors": mirrors.list_mirrors(conn, None if space is None else _space_id(space))}
+    """The live mirrors, and `cursor`: the newest event seq at the time of the read. A client that keeps this list
+    asks /api/mirrors/changes?after=<cursor> for what changed instead of downloading the whole list again (the
+    list is read after the cursor, so a change in between is replayed, never missed)."""
+    cursor = conn.execute("SELECT COALESCE(MAX(seq), 0) FROM ticket_events").fetchone()[0]
+    return {"mirrors": mirrors.list_mirrors(conn, None if space is None else _space_id(space)), "cursor": cursor,
+            "epoch": ensure_epoch(conn)}
 
 
 @router.get("/api/mirrors/u/{uuid}")
@@ -160,6 +172,9 @@ async def put_mirror(uuid: str, request: Request, principal: Principal = Depends
     needs = raw.get("needs")
     if needs is not None and needs not in mirrors.NEEDS:
         raise api_error(400, "bad_request", "needs must be null, question, approval or verdict")
+    decided_via = raw.get("decided_via")
+    if decided_via not in (None, "phone"):
+        raise api_error(400, "bad_request", "decided_via must be null or phone")
     if raw.get("wrapped_dek") is not None:
         check_envelope(raw["wrapped_dek"], "wrapped_dek", 4096, lambda b: len(b) == WRAPPED_DEK_LEN, code="bad_request")
     check_envelope(raw.get("enc_content"), "enc_content", MAX_MIRROR_B64, lambda b: len(b) >= MIN_ENC_LEN, code="bad_request")
@@ -180,7 +195,7 @@ async def put_mirror(uuid: str, request: Request, principal: Principal = Depends
     result, before, after = mirrors.upsert_mirror(conn, request.app, device=principal.device,
                                                   uuid=_uuid(uuid, "uuid"), body=body)
     mirrors.after_needs_change(conn, request.app, space=body["space"], ticket=result["id"], before=before,
-                               after=after, open_questions=oq)
+                               after=after, open_questions=oq, decided_via=decided_via)
     return result
 
 

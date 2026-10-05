@@ -204,7 +204,7 @@ def test_a_join_request_always_notifies(space, other_device_client, pushes):
 
 # --- migration -------------------------------------------------------------------------------------------------
 
-NOTIFY_MIGRATION = 12   # 010 push health (#61) and 011 decision origin (#66) come first
+NOTIFY_MIGRATION = 13   # 010 presence, 011 push health, 012 decision origin come first
 
 
 def test_the_migration_turns_existing_mirrors_and_spaces_off(tmp_path, monkeypatch):

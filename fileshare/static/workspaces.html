@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
-<title>Needs you · tix</title>
+<title>Workspaces · tix</title>
 <link rel="icon" href="/static/img/icon.svg?v={{BUILD}}" type="image/svg+xml">
 <link rel="icon" href="/static/img/icon-32.png?v={{BUILD}}" sizes="32x32" type="image/png">
 <link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png?v={{BUILD}}">
@@ -18,16 +18,16 @@
 <link rel="stylesheet" href="/static/css/tokens.css?v={{BUILD}}">
 <link rel="stylesheet" href="/static/css/app.css?v={{BUILD}}">
 <script type="module" src="/static/js/shell.js?v={{BUILD}}"></script>
-<script type="module" src="/static/js/needs.js?v={{BUILD}}"></script>
+<script type="module" src="/static/js/workspaces.js?v={{BUILD}}"></script>
 </head>
-<body class="app page-needs phone">
+<body class="app page-workspaces phone">
 <div id="banner"></div>
 <div class="shell">
   <aside class="sidebar" aria-label="App">
     <a class="brand" href="/"><span class="brand-icon" aria-hidden="true"></span><span class="brand-main">tix</span></a>
     <nav class="appnav" aria-label="Main">
-      <a class="nav-item" href="/workspaces" data-tab="workspaces"><span class="nav-icon" data-icon="devices"></span><span class="nav-label">Workspaces</span></a>
-      <a class="nav-item" href="/" data-tab="needs" aria-current="page"><span class="nav-icon" data-icon="bell"><span id="needs-badge" class="count-badge" hidden></span></span><span class="nav-label">Needs you</span></a>
+      <a class="nav-item" href="/workspaces" data-tab="workspaces" aria-current="page"><span class="nav-icon" data-icon="devices"></span><span class="nav-label">Workspaces</span></a>
+      <a class="nav-item" href="/" data-tab="needs"><span class="nav-icon" data-icon="bell"><span id="needs-badge" class="count-badge" hidden></span></span><span class="nav-label">Needs you</span></a>
       <a class="nav-item" href="/?view=tickets" data-tab="tickets"><span class="nav-icon" data-icon="list"></span><span class="nav-label">Tickets</span></a>
       <a class="nav-item" href="/files" data-tab="files"><span class="nav-icon" data-icon="files"></span><span class="nav-label">Files</span><span class="nav-count" id="files-new" hidden></span></a>
       <a class="nav-item" href="/settings" data-tab="settings"><span class="nav-icon" data-icon="gear"><span id="devices-badge" class="count-badge" hidden></span></span><span class="nav-label">Settings</span></a>
@@ -48,16 +48,13 @@
     </header>
     <div class="page-body">
       <div class="title-row">
-        <h1 class="page-title" id="needs-title">Needs you</h1>
-        <span class="title-count" id="needs-count"></span>
+        <h1 class="page-title" id="ws-title">Workspaces</h1>
       </div>
-      <p class="hint" id="needs-sub"></p>
-      <div class="banner banner-error" id="needs-error" role="alert" hidden><span></span><button class="btn" type="button" id="needs-retry">Retry</button></div>
-      <p class="stale-line" id="needs-asof" role="status" hidden></p>
-      <p class="hint" id="needs-skipped" hidden></p>
-      <p class="muted list-msg" id="needs-loading">Loading and decrypting…</p>
-      <div class="needs-list" id="needs-list" aria-live="polite"></div>
-      <p class="hint foot">Tickets, questions and labels are end-to-end encrypted. The server sees only workspace ids, TIX ids, status and counts.</p>
+      <p class="hint" id="ws-sub"></p>
+      <div class="banner banner-error" id="ws-error" role="alert" hidden><span></span><button class="btn" type="button" id="ws-retry">Retry</button></div>
+      <p class="muted list-msg" id="ws-loading">Loading and decrypting…</p>
+      <div class="ws-list" id="ws-list" aria-live="polite"></div>
+      <p class="hint foot">Workspace names are end-to-end encrypted. The server sees workspace ids, machine names, state and counts.</p>
     </div>
   </main>
 </div>

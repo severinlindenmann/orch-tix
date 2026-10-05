@@ -99,7 +99,7 @@ def test_old_board_routes_redirect(phone_page, mirror_with_question):
 def test_the_four_tabs_and_the_tickets_view(phone_page, mirror_with_question):
     page = phone_page("light")
     nav = page.get_by_role("navigation", name="Main")
-    assert [x.strip() for x in nav.locator(".nav-label").all_inner_texts()] == ["Needs you", "Tickets", "Files", "Settings"]
+    assert [x.strip() for x in nav.locator(".nav-label").all_inner_texts()] == ["Workspaces", "Needs you", "Tickets", "Files", "Settings"]
     expect(nav.locator("#needs-badge")).to_have_text("1")                 # set once the sealed list is open
     nav.get_by_role("link", name="Tickets").click()
     page.wait_for_url("**/?view=tickets")
@@ -884,7 +884,7 @@ def test_an_unpaired_phone_says_why_its_decision_waits(phone_page, mirror_with_q
     page.get_by_role("radio", name="ISO 8601").check()
     page.get_by_role("button", name="Send answer").click()
     page.get_by_text("Sent · waiting for the desktop").wait_for()
-    page.get_by_text("isn't paired with the desktop", exact=False).wait_for()
+    page.get_by_text("Pair this phone so answers apply directly", exact=False).wait_for()
 
 
 # ---- feedback fix round F1: a held decision says why; no ack for two minutes says so ----
