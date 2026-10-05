@@ -103,12 +103,17 @@ def test_an_approval_card_is_off_offline_too(phone_page, mirror_with_question, c
         context.set_offline(False)
 
 
-def test_a_ticket_never_opened_still_says_it_loads_when_back(phone_page, mirror_with_question, context):
+def test_a_ticket_never_opened_opens_from_the_last_known_list_and_an_unknown_one_says_it_loads_when_back(
+        phone_page, mirror_with_question, context):
     m = mirror_with_question
-    page = phone_page("light")
+    page = phone_page("light")                       # Needs you stored the list; the ticket itself was never opened
+    assert page.evaluate(READ_STORE, "tickets") == {}
     context.set_offline(True)
     try:
         page.goto(f"{m.base}/t/{m.n}")
+        expect(page.locator(".offline-note")).to_contain_text("Offline · last updated")
+        expect(page.get_by_role("button", name="Send answer")).to_be_disabled()
+        page.goto(f"{m.base}/t/9999")
         page.get_by_text("You're offline. The ticket loads when you're back.").wait_for()
         expect(page.locator(".offline-note")).to_have_count(0)
     finally:
