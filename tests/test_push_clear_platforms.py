@@ -23,7 +23,7 @@ def test_cs_counts_only_the_workspace_while_c_counts_everything(frozen_clock, de
     for i in range(3):          # three needs in ANOTHER workspace
         device_client.put(f"/api/mirrors/{new_uuid()}", json={
             "space": OTHER, "mirror_rev": 1, "schema_version": "1.0.0", "status": "waiting", "priority": "normal",
-            "needs": "question", "open_questions": 1, "key_version": 1, "wrapped_dek": DEK, "enc_content": fake_env(90),
+            "needs": "question", "notify": True, "open_questions": 1, "key_version": 1, "wrapped_dek": DEK, "enc_content": fake_env(90),
             "event_uuid": f"{i:032x}"})
     u = new_uuid()
     tix = _put(device_client, u, 1, "question", 1).json()["id"]
