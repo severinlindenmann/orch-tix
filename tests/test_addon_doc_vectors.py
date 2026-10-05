@@ -1,5 +1,6 @@
 """tests/vectors/addon-docs.json is what the orch-tix addon seals at each redaction level (the PWA's tests
 read it). If the addon's mapping changes, regenerate it: tests/vectors/make_addon_docs.py."""
+import hashlib
 import json
 from pathlib import Path
 
@@ -23,6 +24,16 @@ def test_widgets_ride_along_at_full_only():
     assert all("widgets" not in lv[k] for k in ("full", "full+log", "title", "key-only"))
     core, template = VECTORS["widgets"]
     assert core["doc"].startswith("<!doctype html>") and template["file"] == "FILE8" and "doc" not in template
+
+
+def test_the_template_pin_is_the_digest_of_the_template_file_beside_it():
+    """#14: regenerating widget-template.html without the vector (or the reverse) leaves a pin no file matches,
+    and the phone then refuses to draw the template. make_addon_docs.py writes the file first, then pins it."""
+    template = (Path(__file__).parent / "vectors" / "widget-template.html").read_bytes()
+    pinned = VECTORS["widgets"][1]["sha256"]
+    assert pinned == hashlib.sha256(template).hexdigest()
+    assert VECTORS["levels"]["full+widgets"]["widgets"][1]["sha256"] == pinned
+    assert b"--term-bg" in template          # the terminal design tokens orch-core's frame assembler now carries
 
 
 def test_the_fixture_source_is_the_current_orch_schema_example():

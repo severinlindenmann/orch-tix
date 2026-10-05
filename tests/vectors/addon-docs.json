@@ -223,8 +223,9 @@
    ],
    "redaction": "full",
    "repos": [],
+   "resolution": null,
    "revalidate": null,
-   "schema_version": "1.8.0",
+   "schema_version": "1.9.0",
    "sections": {
     "Acceptance criteria": "- [ ] Opens in Excel",
     "Ask": "The client needs the readings as CSV.",
@@ -251,6 +252,7 @@
    "size": "m",
    "sprint": null,
    "status": "waiting",
+   "superseded_by": null,
    "tasks": {
     "added_since_approval": 0,
     "can_move_to_testing": false,
@@ -521,8 +523,9 @@
    ],
    "redaction": "full",
    "repos": [],
+   "resolution": null,
    "revalidate": null,
-   "schema_version": "1.8.0",
+   "schema_version": "1.9.0",
    "sections": {
     "Acceptance criteria": "- [ ] Opens in Excel",
     "Ask": "The client needs the readings as CSV.",
@@ -550,6 +553,7 @@
    "size": "m",
    "sprint": null,
    "status": "waiting",
+   "superseded_by": null,
    "tasks": {
     "added_since_approval": 0,
     "can_move_to_testing": false,
@@ -820,8 +824,9 @@
    ],
    "redaction": "full",
    "repos": [],
+   "resolution": null,
    "revalidate": null,
-   "schema_version": "1.8.0",
+   "schema_version": "1.9.0",
    "sections": {
     "Acceptance criteria": "- [ ] Opens in Excel",
     "Ask": "The client needs the readings as CSV.",
@@ -848,6 +853,7 @@
    "size": "m",
    "sprint": null,
    "status": "waiting",
+   "superseded_by": null,
    "tasks": {
     "added_since_approval": 0,
     "can_move_to_testing": false,
@@ -961,7 +967,7 @@
      "name": "decision-matrix@1",
      "raw_sha256": "3f59b970b97a86f55c545505eabbe4889b63c58fe5ff190a8a9121bc83bd8032",
      "section": "Findings",
-     "sha256": "b0dc169fef26f5ff81fbfaa94b5610d34060ecab631704c0dc18b907d3df3a1c",
+     "sha256": "5b4148b1d938fc262e63b7f890b0aee6e3220c6cea74d91ae6d78ace77718790",
      "text": "No text alternative given",
      "title": "Timestamp format"
     }
@@ -997,7 +1003,7 @@
    ],
    "open_questions": 1,
    "redaction": "key-only",
-   "schema_version": "1.8.0",
+   "schema_version": "1.9.0",
    "status": "waiting",
    "updated": "2026-10-02T09:00Z"
   },
@@ -1158,7 +1164,7 @@
     }
    ],
    "redaction": "title",
-   "schema_version": "1.8.0",
+   "schema_version": "1.9.0",
    "signed": {
     "plan": {
      "by": null,
@@ -1314,8 +1320,9 @@
    }
   ],
   "repos": [],
+  "resolution": null,
   "revalidate": null,
-  "schema_version": "1.8.0",
+  "schema_version": "1.9.0",
   "sections": {
    "Acceptance criteria": "- [ ] Opens in Excel",
    "Ask": "The client needs the readings as CSV.",
@@ -1343,6 +1350,7 @@
   "size": "m",
   "sprint": null,
   "status": "waiting",
+  "superseded_by": null,
   "tasks": {
    "added_since_approval": 0,
    "can_move_to_testing": false,
@@ -1457,7 +1465,7 @@
    "name": "decision-matrix@1",
    "raw_sha256": "3f59b970b97a86f55c545505eabbe4889b63c58fe5ff190a8a9121bc83bd8032",
    "section": "Findings",
-   "sha256": "b0dc169fef26f5ff81fbfaa94b5610d34060ecab631704c0dc18b907d3df3a1c",
+   "sha256": "5b4148b1d938fc262e63b7f890b0aee6e3220c6cea74d91ae6d78ace77718790",
    "text": "No text alternative given",
    "title": "Timestamp format"
   }

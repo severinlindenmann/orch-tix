@@ -6,7 +6,7 @@ import {
   MAX_ITEMS, MAX_BYTES, BACKOFF_MIN_MS, BACKOFF_MAX_MS, decisionRequest,
 } from "../../fileshare/static/js/outbox.js";
 import { readFileSync } from "node:fs";
-import { upgrade, KEYS, OUTBOX, LABELS, PREFS, PAIRS, SEEN, LISTS, DB_VERSION } from "../../fileshare/static/js/db.js";
+import { upgrade, KEYS, OUTBOX, LABELS, PREFS, PAIRS, SEEN, LISTS, TICKETS, DB_VERSION } from "../../fileshare/static/js/db.js";
 
 const MiB = 1024 * 1024;
 
@@ -254,8 +254,8 @@ test("onChange fires on add, send and failure", async () => {
   assert.ok(afterAdd >= 1 && changes > afterAdd);
 });
 
-test("db upgrade to v6 adds the outbox, labels, prefs, pairs, seen and lists and keeps the keys store", () => {
-  assert.equal(DB_VERSION, 6);
+test("db upgrade to v7 adds the outbox, labels, prefs, pairs, seen, lists and tickets and keeps the keys store", () => {
+  assert.equal(DB_VERSION, 7);
   const created = [];
   const fakeDb = (existing) => ({
     objectStoreNames: { contains: (n) => existing.includes(n) },
@@ -263,28 +263,31 @@ test("db upgrade to v6 adds the outbox, labels, prefs, pairs, seen and lists and
   });
   upgrade(fakeDb([KEYS])); // from v1
   assert.deepEqual(created, [[OUTBOX, { keyPath: "seq", autoIncrement: true }], [LABELS, undefined], [PREFS, undefined],
-    [PAIRS, { keyPath: "space" }], [SEEN, undefined], [LISTS, undefined]]);
+    [PAIRS, { keyPath: "space" }], [SEEN, undefined], [LISTS, undefined], [TICKETS, undefined]]);
   created.length = 0;
   upgrade(fakeDb([KEYS, OUTBOX])); // from v2
-  assert.deepEqual(created.map((c) => c[0]), [LABELS, PREFS, PAIRS, SEEN, LISTS]);
+  assert.deepEqual(created.map((c) => c[0]), [LABELS, PREFS, PAIRS, SEEN, LISTS, TICKETS]);
   created.length = 0;
   upgrade(fakeDb([KEYS, OUTBOX, LABELS, PREFS])); // from v3
-  assert.deepEqual(created, [[PAIRS, { keyPath: "space" }], [SEEN, undefined], [LISTS, undefined]]);
+  assert.deepEqual(created, [[PAIRS, { keyPath: "space" }], [SEEN, undefined], [LISTS, undefined], [TICKETS, undefined]]);
   created.length = 0;
   upgrade(fakeDb([KEYS, OUTBOX, LABELS, PREFS, PAIRS])); // from v4
-  assert.deepEqual(created, [[SEEN, undefined], [LISTS, undefined]]);
+  assert.deepEqual(created, [[SEEN, undefined], [LISTS, undefined], [TICKETS, undefined]]);
   created.length = 0;
   upgrade(fakeDb([KEYS, OUTBOX, LABELS, PREFS, PAIRS, SEEN])); // from v5
-  assert.deepEqual(created, [[LISTS, undefined]]);
+  assert.deepEqual(created, [[LISTS, undefined], [TICKETS, undefined]]);
+  created.length = 0;
+  upgrade(fakeDb([KEYS, OUTBOX, LABELS, PREFS, PAIRS, SEEN, LISTS])); // from v6
+  assert.deepEqual(created, [[TICKETS, undefined]]);
   created.length = 0;
   upgrade(fakeDb([])); // a fresh browser
-  assert.deepEqual(created.map((c) => c[0]), [KEYS, OUTBOX, LABELS, PREFS, PAIRS, SEEN, LISTS]);
+  assert.deepEqual(created.map((c) => c[0]), [KEYS, OUTBOX, LABELS, PREFS, PAIRS, SEEN, LISTS, TICKETS]);
 });
 
 test("the service worker opens the same database version with the same stores", () => {
   const sw = readFileSync(new URL("../../fileshare/static/sw.js", import.meta.url), "utf8");
   assert.match(sw, new RegExp(`const DB_VERSION = ${DB_VERSION};`));
-  assert.match(sw, /\["keys", null\], \["outbox", \{ keyPath: "seq", autoIncrement: true \}\], \["labels", null\], \["prefs", null\],\n  \["pairs", \{ keyPath: "space" \}\], \["seen", null\], \["lists", null\]\]/);
+  assert.match(sw, /\["keys", null\], \["outbox", \{ keyPath: "seq", autoIncrement: true \}\], \["labels", null\], \["prefs", null\],\n  \["pairs", \{ keyPath: "space" \}\], \["seen", null\], \["lists", null\], \["tickets", null\]\]/);
 });
 
 test("add runs the limit check and the insert as one step (addChecked)", async () => {

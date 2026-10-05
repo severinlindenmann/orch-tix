@@ -366,8 +366,8 @@ def test_the_outbox_status_shows_even_when_the_ticket_does_not_load(phone_page, 
     page.get_by_role("radio", name="ISO 8601").check()
     page.get_by_role("button", name="Send answer").click()
     page.get_by_text("Queued · sends when you're online").wait_for()
-    page.reload()                                   # offline: the shell opens, the mirror GET fails; the phone has the list (QA T08)
-    page.get_by_text("You're offline. This is the copy from", exact=False).wait_for()
+    page.reload()                                   # offline: the shell opens, the mirror GET fails, the stored copy shows (#73)
+    page.get_by_text("Offline · last updated").wait_for()
     page.get_by_text("Queued · sends when you're online").wait_for()
 
 

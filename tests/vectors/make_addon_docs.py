@@ -141,8 +141,8 @@ def main() -> None:
                          capture_output=True, text=True, stdin=subprocess.DEVNULL).stdout
     source = source_from(json.loads(raw))
     context = [{"name": "report.md", "file": "FILE7"}]
+    TEMPLATE_OUT.write_text(template_doc(core), encoding="utf-8")   # first: widgets_from pins this file's digest
     widgets = widgets_from(core)
-    TEMPLATE_OUT.write_text(template_doc(core), encoding="utf-8")
     OUT.write_text(json.dumps({"source": source, "context_artifacts": context, "widgets": widgets, "history": HISTORY,
                                "levels": levels(source, context, widgets)},
                               indent=1, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")

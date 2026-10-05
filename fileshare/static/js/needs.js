@@ -218,6 +218,12 @@ function cardAct(row, doc) {
   const action = cardAction(row, doc);
   if (!action) return null;
   const line = cardLine(row, doc);
+  if (offline && Number.isInteger(row.n)) {
+    // The card is drawn from the stored copy, which the ticket page opens offline with its actions off.
+    return el("div", { class: "card-act" }, line ? el("p", { class: "ncard-meta" }, line) : null,
+      el("a", { class: "btn btn-block card-go", href: `/t/${row.n}`, dataset: { offline: "1" } },
+        el("span", {}, "Open the saved copy · actions are off until you are back"), el("span", { "aria-hidden": "true" }, "›")));
+  }
   if (offline) {
     return el("div", { class: "card-act" }, line ? el("p", { class: "ncard-meta" }, line) : null,
       el("button", { type: "button", class: "btn btn-block card-go", disabled: true, dataset: { offline: "1" } },

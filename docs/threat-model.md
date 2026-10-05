@@ -111,6 +111,23 @@ What TIX protects, what it does not, and exactly which fields the server can rea
   `type`, priority, labels, due, parent and blockers, `created_by_name` (the creating device or session),
   claims and timestamps; titles, bodies, questions and answers stay encrypted. Since 2.0.0 the CLI no
   longer runs a ticket's `testing.run` commands.
+- **What the phone keeps locally (IndexedDB "fileshare").** Besides the keys (non-extractable CryptoKeys), the
+  outbox and the pairing keys, the PWA stores, so Needs you and an opened ticket work with no network:
+  `lists` (the last `GET /api/spaces` and `/api/mirrors` bodies exactly as the server sent them: sealed labels,
+  wrapped keys and sealed docs, plus the cursor), `tickets` (each ticket you opened, as the mirror row the server
+  sent: the same sealed content, never opened or re-written; at most 40 tickets and 6 MiB, least recently used
+  dropped first), `seen` (per ticket, the newest snapshot generation and revision this browser opened) and a
+  `keymap` (local key to TIX number, sealed under the master key with its own AAD, so a ticket page can link
+  `DEMO-0042` without opening every mirror) and a `needsmemo` (per mirror, a digest of its sealed content and
+  whether it needs you, sealed the same way, so the tab-bar badge opens only rows that changed). `labels` holds the decrypted space labels and a titles flag for the
+  lock screen. So the readable text kept on the phone is the space labels (as before); ticket titles, text, keys
+  and answers are stored only as ciphertext, readable only with the non-extractable master key in the same browser
+  profile. Nothing in this cache is sent anywhere: it is read back through the
+  same checks as a fresh answer (the sealed doc must name the row it came in, the cached copy must not be older
+  than the `seen` mark, which is how a server or a tampered store handing back an old snapshot is caught) and
+  an offline ticket never moves the mark. Offline the page says "Offline · last updated <time>" and every action is
+  off, because the copy may be stale. `lists`, `tickets` and the key map are cleared on sign-out, on an expired
+  session, and when another key signs in; `seen` stays so a later rollback is still noticed.
 - **Ticket HTML attachments run in an isolated sandbox** (`/sandbox/html`): an opaque
   origin, no cookies, no IndexedDB, no access to tix's DOM or keys, and `connect-src 'none'` (no
   fetch, XHR, WebSocket or beacons). Its only network paths are loading scripts, styles and fonts

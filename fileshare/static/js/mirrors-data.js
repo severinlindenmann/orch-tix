@@ -14,6 +14,7 @@ import { clearKeys, loadKeys } from "./keystore.js";
 import { boundToRow, openDecision, openMirror, openSpaceLabel } from "./mirror-crypto.js";
 import { hexToBytes } from "./crypto.js";
 import { loginHref } from "./nav.js";
+import { keyMapOf, saveKeyMap } from "./ticket-cache.js";
 
 const POLL_WAIT_S = 25;
 const POLL_BACKOFF_MS = 5000;
@@ -62,7 +63,10 @@ async function openSpaces(mk, spaces = []) {
 export async function loadMirrors(mk, space = null) {
   // The whole list comes from the stored copy plus what changed since (mirrors-sync.js); one space is asked for.
   const body = space ? await api("GET", `/api/mirrors?space=${encodeURIComponent(space)}`) : await syncedMirrors();
-  return mapLimit(body?.mirrors || [], 4, (m) => openRow(mk, m));
+  const rows = await mapLimit(body?.mirrors || [], 4, (m) => openRow(mk, m));
+  // The whole list was just opened: keep its key -> number map (sealed) so a ticket page links keys without opening it.
+  if (!space) await saveKeyMap(mk, keyMapOf(rows));
+  return rows;
 }
 
 // ---- the last-known lists (db.js "lists")
@@ -111,6 +115,16 @@ export async function cachedRow(mk, n) {
   if (!m) return null;
   const row = await openRow(mk, m, { cached: true });
   return row && row.doc ? { row, at: mirrors.at } : null;
+}
+
+// The last-known spaces alone, opened with MK (the labels for an offline ticket page): a Map like loadSpaces, or null.
+export async function loadCachedSpaces(mk) {
+  try {
+    const s = listOf(await getValue(LISTS, "spaces"), "spaces");
+    return s ? await openSpaces(mk, s) : null;
+  } catch {
+    return null;
+  }
 }
 
 // A row whose doc is older than the newest this browser opened for that ticket (the "seen" high-water

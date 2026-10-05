@@ -16,7 +16,7 @@ import { openRecorder } from "./recorder.js";
 import { maxUpload, uploadFiles } from "./upload.js";
 import { sendDecisions } from "./decision-send.js";
 import { pairingFor } from "./pairing.js";
-import { cacheLabels, cachedRow, keysOrLogin, loadCachedLists, loadDecisions, loadSpaces, openRow, signInAgain, watchMirrors } from "./mirrors-data.js";
+import { cacheLabels, cachedRow, keysOrLogin, loadCachedSpaces, loadDecisions, loadSpaces, openRow, signInAgain, watchMirrors } from "./mirrors-data.js";
 import {
   NEEDS_LABEL, QUEUED_TEXT, SENT_PAIRED_TEXT, SENT_TEXT, UNKNOWN_SPACE, VERDICT_VALUE, VOICE_TTL, approvalGate, canApproveOnPhone,
   approveTogether, gateCovers, normalizedGateText, history, verdictCanonical, verdictHash, verdictView, decisionValue, notSentText, splitQueued, canSendAnswer, cardTitle,
@@ -29,6 +29,7 @@ import {
 } from "./ticket-card.js";
 import { pinnedFigure } from "./images.js";
 import { moveChipEl, needsPill, pill, stripEl } from "./needs.js";
+import { cachedTicket, forgetTicket, loadKeyMap, offlineText, rememberTicket } from "./ticket-cache.js";
 import { sectionBody } from "./widgets.js";
 
 const VOICE_TAG = "voice";
@@ -132,7 +133,9 @@ function noteField(draft, label, onChange) {
 // ---- the page
 
 const state = { n: null, keys: null, row: null, doc: null, space: null, decisions: [], queued: [], failed: [], draft: newDraft(),
-  mode: null, focusOnRender: false, keyHrefs: new Map() };
+  mode: null, focusOnRender: false, keyHrefs: new Map(),
+  // offline: {at} while the page shows the stored copy of the ticket (the network is out); actions are off
+  offline: null };
 
 function modeOf(row, doc) {
   if (!doc) return "none";
@@ -182,7 +185,7 @@ function latestFor(mode) {
 
 async function send(kind, items) {
   const { row, doc, draft } = state;
-  if (draft.busy) return false;
+  if (draft.busy || state.offline) return false;
   draft.busy = true;
   paintBar();
   let ok = false;
@@ -216,7 +219,7 @@ let bar = null;
 function paintBar() {
   if (!bar) return;
   const { mode, draft } = state;
-  const busy = draft.busy || state.queued.length > 0;
+  const busy = draft.busy || state.queued.length > 0 || Boolean(state.offline);
   const btn = (label, cls, onClick, disabled = false) => el("button", { type: "button", class: `btn btn-big ${cls}`, disabled: disabled || busy ? "" : null, onClick }, label);
   let kids = [];
   if (mode === "answer") {
@@ -245,7 +248,7 @@ function paintBar() {
         btn("Send back", "", () => send("verdict", [{ target: targetFor(state.doc, "verdict"), value: VERDICT_VALUE.send_back }]), !draft.note.trim()))];
     }
   }
-  const hint = mode === "approval" ? "If the plan changes first, nothing is approved" : mode === "none" || mode === "keyonly" ? "" : "Applies when your desktop picks it up";
+  const hint = state.offline ? "Offline: actions are off until you are back" : mode === "approval" ? "If the plan changes first, nothing is approved" : mode === "none" || mode === "keyonly" ? "" : "Applies when your desktop picks it up";
   bar.replaceChildren(...kids, hint ? el("p", { class: "bar-hint" }, hint) : "");
   bar.hidden = kids.length === 0;
 }
@@ -297,7 +300,7 @@ function gateVerified(doc) {
 // The gate's confirm sheet names what is approved: the step count and the hash the phone shows. A hash that
 // changed while the sheet was open (the desktop pushed a new text) sends nothing: review again.
 async function confirmApprove(gate, target) {
-  if (!target || state.draft.busy) return;
+  if (!target || state.draft.busy || state.offline) return;
   if (!gateVerified(state.doc)) return;
   const together = Boolean(target.plan_hash);
   const what = together ? "the requirements and the plan" : `the ${gate}`;
@@ -347,7 +350,7 @@ function verdictVerified(doc) {
 }
 
 async function confirmDone() {
-  if (state.draft.busy || state.mode !== "verdict" || !verdictVerified(state.doc)) return;
+  if (state.draft.busy || state.offline || state.mode !== "verdict" || !verdictVerified(state.doc)) return;
   const key = state.doc?.id || state.row?.id;
   const target = targetFor(state.doc, "verdict");
   const ok = await confirmSheet({
@@ -558,13 +561,12 @@ function linkedText(text) {
   return keySplit(text, hrefOf).flatMap((p) => (p.key ? [el("a", { class: "key-link", href: p.href }, p.key)] : shown(p.text)));
 }
 
-// Which of the mirrored tickets has which phone page, from the last-known list (no extra request); best effort.
+// Which of the mirrored tickets has which phone page, from the sealed key map saved with the last-known list: one
+// small decrypt, not one per mirrored ticket, and no request; best effort.
 async function loadKeyLinks() {
-  const cached = await loadCachedLists(state.keys?.mk).catch(() => null);
+  const keys = await loadKeyMap(state.keys?.mk);
   const map = new Map();
-  for (const r of cached?.rows || []) {
-    if (typeof r?.doc?.id === "string" && Number.isInteger(r.n)) map.set(r.doc.id.toUpperCase(), `/t/${r.n}`);
-  }
+  for (const [k, n] of keys || []) map.set(k, `/t/${n}`);
   if (!map.size) return;
   state.keyHrefs = map;
   // Draw again only when this ticket's text names another mirrored ticket, and never under a focused control (a
@@ -693,6 +695,8 @@ function render() {
       el("p", { class: "t-meta" }, [row.updated_at ? `Updated ${shortAge(row.updated_at)}` : "",
         row.needs ? "" : "nothing waits on you"].filter(Boolean).join(" · ")),
       doc && idleNote(doc) ? el("p", { class: "t-meta t-idle" }, idleNote(doc)) : null),
+    state.offline ? el("p", { class: "banner banner-network offline-note", role: "status" }, icon("clock"),
+      el("span", {}, offlineText(state.offline.at), el("br"), "Actions are off until you are back online.")) : "",
     state.rollback ? el("p", { class: "banner banner-decrypt", role: "alert" }, doc
       ? "The server sent an older copy of this ticket. Showing the newer one."
       : "The server sent an older copy of this ticket than this phone already saw. Open it again later.") : "",
@@ -700,6 +704,7 @@ function render() {
       ? "The server's routing for this ticket doesn't match its sealed content. Nothing can be sent from here; check it on the desktop."
       : "This ticket doesn't open with this browser's key."),
     ...[sentList(), doc ? notifyRow() : null, ...(doc ? extras() : [])].filter(Boolean));
+  if (state.offline) for (const c of main.querySelectorAll("#decision input, #decision textarea, #decision button, #notify-toggle")) c.disabled = true;
   paintBar();
   if (state.focusOnRender) {
     state.focusOnRender = false;
@@ -728,19 +733,37 @@ async function refreshDecisions() {
   }
 }
 
+// The network is out and no ticket is on screen: show the stored row of this ticket, opened like a fresh one but as a
+// cached copy (an older one than this browser already saw is refused). Actions stay off until the network is back.
+async function showOffline() {
+  if (state.row && state.doc) return false;
+  // This ticket's own sealed copy first; else the row in the last-known list (a ticket never opened here, #86).
+  const own = await cachedTicket(state.n);
+  const fromOwn = own ? await openRow(state.keys.mk, own.row, { cached: true }) : null;
+  const hit = fromOwn?.doc ? { at: own.at } : await cachedRow(state.keys.mk, state.n);
+  const row = fromOwn?.doc ? fromOwn : hit?.row;
+  if (!row?.doc) return false;
+  state.row = row;
+  state.doc = row.doc;
+  state.rollback = false;
+  state.offline = { at: hit.at };
+  state.paired = Boolean(await pairingFor(null, row.space).catch(() => null));
+  state.space = (await loadCachedSpaces(state.keys.mk))?.get(row.space) || null;
+  await refreshDecisions();
+  return true;
+}
+
 async function load() {
-  let r, row;
-  state.cachedAt = null;
+  let r;
   try {
     r = await api("GET", `/api/mirrors/TIX-${state.n}`);
-    row = await openRow(state.keys.mk, r);
   } catch (e) {
-    // No network (QA T08): a ticket the phone already has opens from the last-known list, marked as such.
-    const c = e?.status === 0 && !state.row ? await cachedRow(state.keys.mk, state.n) : null;
-    if (!c) throw e;
-    row = c.row;
-    state.cachedAt = c.at;
+    if (e?.status === 404) await forgetTicket(state.n);
+    if (e?.status === 0 && await showOffline()) return;
+    throw e;
   }
+  state.offline = null;
+  const row = await openRow(state.keys.mk, r);
   const prevHash = JSON.stringify(state.doc?.questions?.map((q) => q.hash) ?? null) + JSON.stringify(state.doc?.gates ?? null);
   // An older snapshot than the one on screen, or than the newest this browser opened (openRow's
   // high-water mark): keep the newer one on screen, or show none.
@@ -749,6 +772,9 @@ async function load() {
   if (state.rollback) { state.row = row; state.doc = null; return; }
   state.row = row;
   state.doc = state.row.doc;
+  if (state.doc) {
+    await rememberTicket(state.n, r);       // only a row that just opened and is no rollback
+  }
   state.paired = Boolean(await pairingFor(null, row.space).catch(() => null));
   const nextHash = JSON.stringify(state.doc?.questions?.map((q) => q.hash) ?? null) + JSON.stringify(state.doc?.gates ?? null);
   if (prevHash !== nextHash) state.draft = { ...newDraft(), values: state.draft.values, note: state.draft.note };
@@ -785,11 +811,15 @@ export async function start() {
         again = false;
         try {
           await load();
-          retries = 0;
-          const err = document.getElementById("ticket-error");
-          err.hidden = !state.cachedAt;
-          if (state.cachedAt) err.querySelector("span").textContent = `You're offline. This is the copy from ${new Date(state.cachedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`;
+          document.getElementById("ticket-error").hidden = true;
           render();
+          if (!state.offline) retries = 0;
+          // The stored copy is shown although the browser says it is online (a request that started offline and
+          // failed late): look again shortly, a few times, instead of waiting for an `online` that already fired.
+          else if (navigator.onLine !== false && retries < RETRY_MAX && !retryTimer) {
+            retries += 1;
+            retryTimer = setTimeout(() => { retryTimer = null; reload(); }, RETRY_MS * retries);
+          }
         } catch (e) {
           // The service worker answers with the cached shell, so a gone session shows here: sign in again.
           // Only before anything was shown, never over a draft.

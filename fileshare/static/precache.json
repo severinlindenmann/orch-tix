@@ -82,6 +82,7 @@
     "/static/js/tags-ui.js",
     "/static/js/tags.js",
     "/static/js/textsafe.js",
+    "/static/js/ticket-cache.js",
     "/static/js/ticket-card.js",
     "/static/js/ticket.js",
     "/static/js/ticketreply-model.js",
