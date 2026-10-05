@@ -228,7 +228,7 @@
     copy(text) {
       return new Promise((resolve, reject) => {
         const id = ++seq;
-        const timer = setTimeout(() => { copies.delete(id); reject(new Error("no answer")); }, 5000);
+        const timer = setTimeout(() => { copies.delete(id); reject(new Error("no answer")); }, 40000);   // the TIX page asks the person first (a real click there)
         copies.set(id, (ok) => { clearTimeout(timer); (ok ? resolve : reject)(ok ? undefined : new Error("not copied")); });
         post({ t: "copy", id, text: String(text) });
       });
@@ -285,13 +285,29 @@
   }
 
   // ---- writing a page ----------------------------------------------------------------------------------------
+  // The page is changed as a DOM and moved into the live document with importNode: it is never serialised and parsed a
+  // second time, so the parser that cleaned it and the parser that renders it cannot disagree (mutation XSS). Every
+  // element, in any namespace (svg and math scripts too) and inside templates, loses scripts, handlers, javascript: and
+  // similar URLs, srcdoc and any nonce attribute.
+  const URL_ATTRS = /^(href|src|action|formaction|xlink:href|data|poster|background|ping|srcset|srcdoc|nonce)$/i;
+  const BAD_URL = /^(javascript|vbscript|data:text\/html|data:application\/xhtml)/i;
+  function sanitize(root) {
+    root.querySelectorAll("script,noscript").forEach((n) => n.remove());
+    root.querySelectorAll("*").forEach((n) => {
+      for (const a of [...n.attributes]) {
+        const squashed = a.value.replace(/[\u0000-\u0020\u007f-\u009f]/g, "");
+        if (/^on/i.test(a.name) || /^(srcdoc|ping|nonce)$/i.test(a.name) || (URL_ATTRS.test(a.name) && BAD_URL.test(squashed))) n.removeAttribute(a.name);
+      }
+      if (n.localName === "template" && n.content) sanitize(n.content);
+    });
+  }
+
   async function render(html, pagePath, hash, push, mine) {
     const pageBase = ORIGIN + pagePath;
     const doc = new DOMParser().parseFromString(html, "text/html");      // inert: nothing runs, nothing loads
     const jobs = [];
     const scripts = [];
     doc.querySelectorAll("base,object,embed,applet,frame,frameset,meta[http-equiv],link[rel~=icon],link[rel~=preload],link[rel~=modulepreload],link[rel~=prefetch],link[rel~=manifest]").forEach((n) => n.remove());
-    doc.querySelectorAll("*").forEach((n) => { for (const a of [...n.attributes]) if (/^on/i.test(a.name)) n.removeAttribute(a.name); });
     // a nested frame (an artifact, a widget) cannot run here: a link that opens it in the TIX viewer takes its place
     doc.querySelectorAll("iframe").forEach((f) => {
       const p = toPath(f.getAttribute("src") || "", pageBase);
@@ -329,6 +345,7 @@
         else jobs.push(blobUrl(p).then((u) => n.setAttribute(attr, u), () => n.removeAttribute(attr)));
       }
     });
+    sanitize(doc);   // after the scripts were collected (they are re-created below), before anything is awaited
     await Promise.all(jobs);
     const code = await Promise.all(scripts);
     if (mine !== navSeq) return;                                           // a newer navigation took over meanwhile
@@ -340,7 +357,8 @@
     current = pagePath + hash;
     document.open();
     arm();
-    document.write("<!doctype html>" + doc.documentElement.outerHTML);
+    document.write("<!doctype html><html><head></head><body></body></html>");   // a fixed skeleton; the page is moved in as nodes
+    document.replaceChild(document.importNode(doc.documentElement, true), document.documentElement);
     for (const text of code) {                                             // after the page exists, before it is closed, in order
       if (text === null || !document.body) continue;
       const s = document.createElement("script");

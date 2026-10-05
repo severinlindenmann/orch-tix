@@ -21,11 +21,14 @@ export const LIMITS = {
   floodSeconds: 3,       // seconds over the rate before the frame is destroyed
   response: 8 * 1024 * 1024,   // one buffered answer
   page: 4 * 1024 * 1024,       // one dashboard page
-  copy: 100 * 1024,
+  copy: 2000,            // characters the dashboard may ask to copy (and the person sees all of them)
+  copyMs: 30000,         // how long the question stays up
+  copyGapMs: 2000,       // between two questions
   rebuilds: 5,           // rebuilds per minute before the frame is left stopped
   pongMs: 1500,
   writeLoads: 2,         // loads one document write of the shim may cause (Chromium and WebKit fire one more)
   writeMs: 1500,
+  graceMs: 150,          // an unannounced load waits this long for the shim's announcement before it is treated as a navigation
 };
 const REPLY_HEADERS = ["content-type", "etag", "last-modified", "cache-control", "content-language"];
 const THEMES = ["light", "dark", "system"];
@@ -66,6 +69,7 @@ export function createFrameHost(opts) {
   let writeUntil = 0;
   let loadsExpected = 0;   // the load of the document this host asked for
   let lastPing = 0;
+  let graceTimer = null;
   let flooding = false;
   let current = opts.start || "/";
   let destroyed = false;
@@ -77,8 +81,37 @@ export function createFrameHost(opts) {
   let windowCount = 0;
   let overSeconds = 0;
 
+  // The clipboard. The frame can only ASK; the text is shown in the TIX page and written only by a click there (a real
+  // gesture), once, for the document the app just wrote. There is no way to read the clipboard.
+  let copyBox = null;
+  let lastCopy = 0;
+  function clearCopy(ok) {
+    if (!copyBox) return;
+    clearTimeout(copyBox.timer);
+    copyBox.node.remove();
+    const { id } = copyBox;
+    copyBox = null;
+    send({ t: "copied", id, ok: ok === true });
+  }
+  function askCopy(id, text) {
+    const now = Date.now();
+    if (suspect || copyBox || now - lastCopy < limits.copyGapMs) return send({ t: "copied", id, ok: false });
+    lastCopy = now;
+    const write = async () => {
+      let ok = false;
+      try { await cb.copy(text); ok = true; } catch { /* the page is told it failed */ }
+      clearCopy(ok);
+    };
+    const node = el("div", { class: "frame-copy", role: "group", "aria-label": "Copy from the dashboard" },
+      el("p", {}, "The dashboard asks to copy this text:"), el("pre", {}, text),
+      el("button", { type: "button", class: "btn", onclick: write }, "Copy"),
+      el("button", { type: "button", class: "btn", onclick: () => clearCopy(false) }, "Dismiss"));
+    wrap.insertBefore(node, frame);
+    copyBox = { id, node, timer: setTimeout(() => clearCopy(false), limits.copyMs) };
+  }
+
   const abortAll = () => { for (const ac of inflight.values()) ac.abort(); inflight.clear(); streams.clear(); };
-  const clearTimers = () => { clearTimeout(pongTimer); clearTimeout(helloTimer); pongTimer = helloTimer = null; };
+  const clearTimers = () => { clearTimeout(pongTimer); clearTimeout(helloTimer); clearTimeout(graceTimer); pongTimer = helloTimer = graceTimer = null; };
 
   function send(msg, transfer) {
     if (destroyed || !frame || sid === null) return;
@@ -108,6 +141,7 @@ export function createFrameHost(opts) {
     if (destroyed) return;
     clearTimers();
     abortAll();
+    clearCopy(false);
     frame?.remove();
     frame = null;
     const now = Date.now();
@@ -122,10 +156,20 @@ export function createFrameHost(opts) {
     if (destroyed || !frame) return;
     if (loadsExpected > 0) { loadsExpected -= 1; return; }   // the document this host asked for: the hello vouches for it
     suspect = true;
-    // a later load: the shim's own document write announces up to a few, anything else is the page leaving
-    if (writeLoads > 0 && Date.now() < writeUntil) writeLoads -= 1;
-    else { rebuild("unexpected load"); return; }
+    // A later load: the shim's own document write announces up to a few, anything else is the page leaving. The
+    // announcement (a message) and the load are separate tasks and may arrive in either order, so an unannounced
+    // load gets a short grace for the announcement; nothing is trusted meanwhile, and without it the frame is rebuilt.
+    if (!takeWriteLoad()) {
+      clearTimeout(graceTimer);
+      graceTimer = setTimeout(() => { graceTimer = null; if (takeWriteLoad()) ping(); else rebuild("unexpected load"); }, limits.graceMs);
+      return;
+    }
     ping();
+  }
+
+  function takeWriteLoad() {
+    if (writeLoads > 0 && Date.now() < writeUntil) { writeLoads -= 1; return true; }
+    return false;
   }
 
   function ping() {
@@ -267,11 +311,11 @@ export function createFrameHost(opts) {
   function onMessage(event) {
     if (destroyed) { removeEventListener("message", onMessage); return; }
     if (!frame || !frame.isConnected) return;
-    if (event.source !== frame.contentWindow) return;      // any other window: not ours, not even counted
+    if (!event.source || event.source !== frame.contentWindow) return;      // any other window (or none): not ours, not even counted
     if (event.origin !== "null") return;                    // a sandboxed document has the opaque origin
     if (!rateOk()) return;
     const m = event.data;
-    if (m === null || typeof m !== "object" || m.k !== PROTOCOL || typeof m.t !== "string") return;
+    if (m === null || typeof m !== "object" || Object.getPrototypeOf(m) !== Object.prototype || m.k !== PROTOCOL || typeof m.t !== "string") return;
     if (m.t === "hello") {
       if (tok === null || sid !== null || m.tok !== tok) return;   // one time: the token is spent by the first proof
       tok = null;
@@ -287,8 +331,10 @@ export function createFrameHost(opts) {
       case "pong": if (m.n === lastPing) { clearTimeout(pongTimer); trusted(); } return;
       case "write":
         abortAll();
+        clearCopy(false);
         writeLoads = limits.writeLoads;
         writeUntil = Date.now() + limits.writeMs;
+        if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; if (takeWriteLoad()) ping(); }   // its load came first
         return;
       case "req": case "sopen": {
         const r = checkRequest(m, scopes, { bodyMax: BODY_MAX });
@@ -319,9 +365,9 @@ export function createFrameHost(opts) {
       }
       case "theme": if (THEMES.includes(m.value)) cb.theme(m.value); return;
       case "copy": {
-        if (typeof m.text !== "string" || m.text.length > limits.copy || !Number.isSafeInteger(m.id)) return;
-        Promise.resolve().then(() => cb.copy(m.text)).then(() => true, () => false)
-          .then((ok) => send({ t: "copied", id: m.id, ok }));
+        if (!Number.isSafeInteger(m.id)) return;
+        if (typeof m.text !== "string" || m.text.length < 1 || m.text.length > limits.copy) return send({ t: "copied", id: m.id, ok: false });
+        askCopy(m.id, m.text);
         return;
       }
       case "open": {
@@ -362,6 +408,7 @@ export function createFrameHost(opts) {
       clearTimers();
       abortAll();
       removeEventListener("message", onMessage);
+      clearCopy(false);
       frame?.remove();
       frame = null;
       wrap.remove();

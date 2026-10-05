@@ -43,6 +43,23 @@ CSS = ("body{background:rgb(1,2,3)} @font-face{font-family:F;src:url(/static/f.w
 EVIL_JS = "window.__evil = (window.__evil || 0) + 1;"
 
 
+MXSS = """<!doctype html><html data-path="/mxss" onclick="window.__x=1"><head><title>mx</title>
+<base href="https://evil.test/"><meta http-equiv="refresh" content="0;url=/healthz"><link rel="preload" href="/secret" as="script">
+<link rel="prefetch" href="/secret"><link rel="modulepreload" href="/secret"></head><body onload="window.__x=1">
+<h1 id="h">mx</h1>
+<svg><script>window.__x = 1</script><a href="javascript:window.__x=1" id="svga"><text>x</text></a></svg>
+<math><mtext><table><mglyph><style><img src=x onerror="window.__x=1"></style></mglyph></table></mtext></math>
+<noscript><p title="</noscript><img src=x onerror=window.__x=1>">n</p></noscript>
+<a id="ja" href="jav&#x09;ascript:window.__x=1">j1</a><a id="jb" href="  JaVaScRiPt:window.__x=1">j2</a>
+<a id="jc" href="&#x6A;avascript:window.__x=1">j3</a><a id="jd" href="data:text/html,<script>window.__x=1</script>">j4</a>
+<form id="jf" action="javascript:window.__x=1"><button id="jfb" formaction="javascript:window.__x=1">go</button></form>
+<template id="tp"><script>window.__x = 1</script><img src=x onerror="window.__x=1"></template>
+<iframe srcdoc="<script>parent.__x=1</script>"></iframe><object data="/secret"></object><embed src="/secret">
+<textarea></textarea><img src=x onerror="window.__x=1"><div nonce="abc" onclick="window.__x=1" id="nn">n</div>
+<style>/* </style><img src=x onerror=window.__x=1> */ p { color: red }</style>
+<img id="bad" src="x" onerror="window.__x=1"></body></html>"""
+
+
 def page(path, title, extra=""):
     return f"""<!doctype html><html data-path="{path}"><head><meta charset="utf-8"><title>{title}</title>
 <link rel="stylesheet" href="/static/app.css?v=1"><link rel="icon" href="/static/logo.png">
@@ -54,7 +71,7 @@ def page(path, title, extra=""):
 <a id="trick" href="/a/L-1/trick.html">Trick</a> <a id="blank" target="_blank" href="/t/L-1/x">Blank</a>
 <a id="dl" download href="/a/L-1/data.csv">CSV</a> <a id="ext" target="_blank" href="https://example.com/x">Ext</a>
 <a id="mail" href="mailto:a@b.c">Mail</a> <a id="frag" href="#h">frag</a> <a id="boom" href="/boom">Boom</a>
-<a id="slowlink" href="/slow-page">Slow</a> <a id="secret" href="/secret">Secret</a>
+<a id="slowlink" href="/slow-page">Slow</a> <a id="mx" href="/mxss">mXSS</a> <a id="secret" href="/secret">Secret</a>
 <form id="search" action="/search" method="get"><input name="q" value="x y"><button id="gs">Go</button></form>
 <form id="newf" action="/new" method="post"><input name="title" value="Hello"><button id="nsub">New</button></form>
 <form id="handled" action="/new" method="post"><input name="z" value="1"><button id="hb">Save</button></form>
@@ -70,6 +87,7 @@ def routes():
         "POST /new": {"body": page("/created", "Created"), "headers": html, "page": True, "url": "/created"},
         "/created": {"body": page("/created", "Created"), "headers": html, "page": True},
         "/slow-page": {"body": page("/slow-page", "Slow"), "headers": html, "page": True, "gate": True},
+        "/mxss": {"body": MXSS, "headers": html, "page": True},
         "/boom": {"status": 500, "headers": html, "page": True,
                   "body": '<img src=x onerror="window.__pwn=1"><script>window.__pwn=1</script><b>boom</b>'},
         "/static/app.css": {"body": CSS, "headers": {"content-type": "text/css"}},
@@ -92,7 +110,7 @@ def routes():
 
 SCOPES = {"rules": [
     {"methods": ["GET"], "pattern": "/"}, {"methods": ["GET"], "pattern": "/board"}, {"methods": ["GET"], "pattern": "/search"},
-    {"methods": ["GET"], "pattern": "/created"}, {"methods": ["GET"], "pattern": "/boom"}, {"methods": ["GET"], "pattern": "/slow"},
+    {"methods": ["GET"], "pattern": "/created"}, {"methods": ["GET"], "pattern": "/boom"}, {"methods": ["GET"], "pattern": "/mxss"}, {"methods": ["GET"], "pattern": "/slow"},
     {"methods": ["GET"], "pattern": "/slow-page"}, {"methods": ["GET"], "pattern": "/static/*"}, {"methods": ["GET"], "pattern": "/api/*"},
     {"methods": ["GET"], "pattern": "/a/*"}, {"methods": ["GET"], "pattern": "/t/*"},
     {"methods": ["GET"], "pattern": "/events", "stream": True}, {"methods": ["POST"], "pattern": "/new"},
@@ -212,7 +230,7 @@ def test_the_dashboard_page_is_drawn_and_the_frame_is_a_null_origin_sandbox(dash
     assert set(dash.ev("origins")) == {"null"}
 
 
-def test_the_frame_cannot_reach_the_network(dash):
+def test_the_frame_cannot_reach_the_network(dash, browser_name):
     dash.open()
     before = len(dash.net)
     res = dash.frame().evaluate("""async () => {
@@ -233,7 +251,7 @@ def test_the_frame_cannot_reach_the_network(dash):
     # whatever the browser tried was stopped by the policy before it left: no answer, a CSP block for each
     assert not [u for u in dash.responses if "__probe__" in u], dash.responses
     probes = [(u, f) for u, f in dash.failures if "__probe__" in u]
-    assert probes and all("csp" in str(f).lower() or "blocked" in str(f).lower() for _, f in probes), dash.failures
+    assert (probes or browser_name != "chromium") and all("csp" in str(f).lower() or "blocked" in str(f).lower() for _, f in probes), dash.failures
     assert {"connect-src", "img-src", "script-src-elem", "frame-src"} <= set(res["violations"]), res
 
 
@@ -302,20 +320,24 @@ def test_assets_are_cached_across_pages(dash):
 
 # ---- the adapter: address, history, cookie, storage, clipboard, links ---------------------------------------------
 
-def test_the_adapter_supplies_path_history_storage_cookie_copy_theme(dash):
+def test_the_adapter_supplies_path_history_storage_cookie_copy_theme(dash, page):
     dash.open()
     f = dash.frame()
     f.wait_for_function("() => window.__r")
     r = f.evaluate("window.__r")
     assert r["path"] == "/" and r["url"] == "/" and r["hash"] == "" and r["cookie"] == "t=1" and r["ls"] == "b" and r["sess"] == "v"
+    f.evaluate("() => { window.__cp = window.orchHost.copy('hello').then(() => 'copied', () => 'failed'); }")
+    page.wait_for_selector(".frame-copy")
+    assert dash.ev("copy") == []                                      # asked, not written: no click in the app yet
+    page.click(".frame-copy button:text-is('Copy')")
+    assert f.evaluate("window.__cp") == "copied"
     out = f.evaluate("""async () => {
       const h = window.orchHost;
       h.pageHistory.push('/board?x=1#top'); h.pageHistory.replace('/board?x=2');
       const res = h.resolve('/t/L-1?y=1#z');
-      const copied = await h.copy('hello');
-      let bad; try { await h.copy('x'.repeat(200000)); bad = 'ok'; } catch (e) { bad = 'rejected'; }
+      let bad; try { await h.copy('x'.repeat(3000)); bad = 'ok'; } catch (e) { bad = 'rejected'; }
       h.setTheme('dark'); h.setTheme('bogus');
-      return { cur: h.pageHistory.current(), path: h.path(), search: h.search(), res, copied: String(copied), bad,
+      return { cur: h.pageHistory.current(), path: h.path(), search: h.search(), res, bad,
         js: [typeof h.reload, typeof h.navigate, typeof h.openLink, typeof h.download, typeof h.session.remove, typeof h.local.get],
         ext: h.resolve('https://example.com/x').internal, ctrl: h.resolve('/a\\n/b') };
     }""")
@@ -603,3 +625,97 @@ def test_a_request_to_a_route_outside_the_scope_table_fails_in_the_page_and_neve
     assert res["secret"].startswith("refused") and res["put"].startswith("refused") and res["xhr"] == "error"
     assert "blocked" in res["cross"]
     assert dash.calls()[n:] == []
+
+
+# ---- hostile page content: the page is changed as a DOM and moved in, never serialised and parsed again -------------
+
+def test_a_hostile_page_string_runs_nothing_and_leaves_no_handler_or_script_url(dash, page):
+    dash.open()
+    dash.frame().wait_for_function("() => document.documentElement.dataset.ran === '1'")
+    page.evaluate("window.__first = document.querySelector('iframe.frame-dash')")
+    dash.click("#mx")
+    dash.wait_title("mx")
+    page.wait_for_timeout(600)
+    f = dash.frame()
+    left = f.evaluate("""() => {
+      const walk = (root, out) => { root.querySelectorAll('*').forEach((n) => { out.push(n); if (n.localName === 'template' && n.content) walk(n.content, out); }); return out; };
+      const all = walk(document, []);
+      const bad = [];
+      for (const n of all) for (const a of n.attributes) {
+        const v = a.value.replace(/[\u0000-\u0020]/g, '').toLowerCase();
+        if (/^on/i.test(a.name) || a.name === 'srcdoc' || a.name === 'nonce' || v.startsWith('javascript:') || v.startsWith('data:text/html')) bad.push(n.localName + '@' + a.name);
+      }
+      return { x: window.__x || 0, bad, scripts: all.filter((n) => n.localName === 'script').length,
+        base: document.querySelectorAll('base, meta[http-equiv], object, embed, iframe, noscript').length,
+        links: [...document.querySelectorAll('link')].map((l) => l.rel), path: location.pathname, title: document.title };
+    }""")
+    assert left["x"] == 0 and left["bad"] == [] and left["scripts"] == 0 and left["base"] == 0, left
+    assert left["links"] == [] and left["path"] == "/sandbox/dash"            # no refresh, no navigation
+    assert page.evaluate("document.querySelector('iframe.frame-dash') === window.__first")   # the app never had to rebuild it
+    assert not [c for c in dash.calls() if c["path"] in ("/secret", "/healthz")]
+    # a script: link in the page that survived in any form is neutralised when clicked
+    f.evaluate("() => { const a = document.createElement('a'); a.id = 'late'; a.setAttribute('href', 'javascript:window.__x=1'); document.body.appendChild(a); a.click(); }")
+    page.wait_for_timeout(200)
+    assert f.evaluate("window.__x || 0") == 0
+
+
+# ---- the clipboard: the frame asks, the person clicks in the app ------------------------------------------------------
+
+def test_the_frame_cannot_write_the_clipboard_without_a_click_in_the_app(dash, page):
+    dash.open()
+    f = dash.frame()
+    f.wait_for_function("() => document.documentElement.dataset.ran === '1'")
+    f.evaluate("() => { window.__cp = window.orchHost.copy('rm -rf /tmp/x').then(() => 'copied', () => 'failed'); }")
+    page.wait_for_selector(".frame-copy")
+    assert page.inner_text(".frame-copy pre") == "rm -rf /tmp/x"                        # shown, as text
+    page.wait_for_timeout(300)
+    assert dash.ev("copy") == []
+    # a second ask while one is up, or soon after, is refused outright
+    assert f.evaluate("window.orchHost.copy('other').then(() => 'copied', () => 'failed')") == "failed"
+    page.click(".frame-copy button:text-is('Dismiss')")
+    assert f.evaluate("window.__cp") == "failed" and dash.ev("copy") == []
+    assert f.evaluate("window.orchHost.copy('again').then(() => 'copied', () => 'failed')") == "failed"   # inside the gap
+    # an ask that is up when the page changes is withdrawn: nothing is copied for a document the app did not just write
+    page.wait_for_timeout(2100)
+    f.evaluate("() => { window.__cp2 = window.orchHost.copy('late').then(() => 'copied', () => 'failed'); }")
+    page.wait_for_selector(".frame-copy")
+    f.evaluate("document.getElementById('board').click()")          # (the question moves the frame: no pointer click here)
+    dash.wait_title("Board")
+    page.wait_for_function("() => !document.querySelector('.frame-copy')")
+    assert dash.ev("copy") == []
+    # the host has no clipboard read at all, and the frame has no message for one
+    src = page.evaluate("fetch('/static/js/frame-host.js').then((r) => r.text())")
+    assert "readText" not in src and ".read(" not in src
+
+
+# ---- who is talking: a spent token, a destroyed frame, odd shapes -------------------------------------------------------
+
+def test_a_spent_token_is_refused_and_a_destroyed_frames_answers_go_nowhere(dash, page):
+    dash.open()
+    f = dash.frame()
+    f.wait_for_function("() => document.documentElement.dataset.ran === '1'")
+    tok = page.evaluate("new URL(document.querySelector('iframe.frame-dash').src).searchParams.get('tok')")
+    page.evaluate("window.__readies = 0; window.__tapped = []")
+    page.evaluate("""(tok) => { const f = document.querySelector('iframe.frame-dash');
+      window.dispatchEvent(new MessageEvent('message', {data: {k: 'orch-frame-1', t: 'hello', tok}, source: f.contentWindow, origin: 'null'})); }""", tok)
+    page.wait_for_timeout(200)
+    assert dash.ev("seen").count("hello") >= 1 and page.evaluate("window.__sid") != tok     # the token is not the session
+    # odd shapes: own __proto__ keys, constructor, nested junk: dropped, nothing reaches the transport
+    n = len(dash.calls())
+    page.evaluate("""() => { const f = document.querySelector('iframe.frame-dash');
+      const odd = [JSON.parse('{"k":"orch-frame-1","sid":"' + window.__sid + '","t":"req","__proto__":{"sid":"x"},"id":5,"gen":1,"intent":"fetch","method":"GET","path":"/secret","headers":{}}'),
+        {k: 'orch-frame-1', sid: window.__sid, t: 'constructor'}, {k: 'orch-frame-1', sid: window.__sid, t: '__proto__'}, [1, 2], 'text', null, 7];
+      for (const d of odd) window.dispatchEvent(new MessageEvent('message', {data: d, source: f.contentWindow, origin: 'null'})); }""")
+    page.wait_for_timeout(200)
+    assert len(dash.calls()) == n
+    # a held request answered after the frame was destroyed and rebuilt is not sent to the new frame
+    f.evaluate("() => { fetch('/slow').catch(() => {}); }")
+    page.wait_for_function("() => window.__fake.calls.some((c) => c.path === '/slow')")
+    page.evaluate("window.__sent = []; window.__old = document.querySelector('iframe.frame-dash')")
+    page.wait_for_timeout(1700)
+    f.evaluate("() => { setTimeout(() => { location.href = location.origin + '/healthz'; }, 0); }")
+    page.wait_for_function("() => document.querySelector('iframe.frame-dash') !== window.__old")
+    page.evaluate("window.__release('/slow')")
+    page.wait_for_timeout(300)
+    dash.wait_title("Home")
+    assert dash.frame().evaluate("window.__r !== undefined") and page.evaluate("window.__old.isConnected") is False

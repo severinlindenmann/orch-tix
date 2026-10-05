@@ -64,7 +64,7 @@ every reply while a load it did not vouch for is unproven.
 
 Loads. The host expects exactly one load (the document it asked for). Later loads are legitimate only inside the
 window that the shim opens by announcing `write` (it writes each page into the same window, which fires one more
-load in Chromium and WebKit): at most two within 1.5 s. After each of those the host sends `ping`, and the frame is
+load in Chromium and WebKit): at most two within 1.5 s (the announcement and the load are separate tasks and may arrive in either order, so an unannounced load gets 150 ms of grace for its announcement; nothing is trusted meanwhile). After each of those the host sends `ping`, and the frame is
 trusted again only when the shim answers `pong` with the session id. **Any other load, a missing hello after 6 s or a
 missing pong after 1.5 s destroys the iframe and builds a new one** (new token, new nonce, the last page the host
 knows, at most 5 rebuilds a minute, then the frame stays stopped). This is what makes a page that navigates its own
@@ -85,7 +85,7 @@ All messages carry `k: "orch-frame-1"`. Frame to host (each with `sid` after `re
 | `rendered` | `path`, `push`, `title` | a page was written; `push` when a user's click started it |
 | `hist` | `op` (`push`, `replace`, `back`, `forward`, `go`), `path` or `n` | the dashboard's `pageHistory` |
 | `theme` | `value` (`light`, `dark`, `system`) | `setTheme` |
-| `copy` | `id`, `text` (at most 100 KiB) | `copy` |
+| `copy` | `id`, `text` (1 to 2000 characters) | `copy`: only a question, see "The clipboard" |
 | `open` | `href` (http or https) or `path` | a link that opens a new tab; internal ones go to the viewer |
 | `download` | `path` | a `download` link |
 | `log` | `m` | a script error, 200 characters at most |
@@ -135,6 +135,13 @@ text; `tests/js/frame-scope.test.mjs` checks that the host modules contain no `i
 `insertAdjacentHTML` or `document.write`. The shim's one `document.write` writes the page it rebuilt from an inert
 parse (below).
 
+## The clipboard
+
+The frame can only ask. A `copy` message shows the full text (at most 2000 characters) in the TIX page, as text, with
+Copy and Dismiss buttons; it is written to the clipboard only by a click on Copy there, which is a real gesture in
+the TIX page. One question at a time, 2 seconds apart, withdrawn after 30 seconds, when the page changes or when the
+frame is rebuilt; nothing is accepted while a load is unproven. There is no clipboard read and no message for one.
+
 ## What the shim does
 
 - Replaces `fetch`, `XMLHttpRequest`, `EventSource`, `window.open`, link clicks and form submits with messages. A
@@ -145,12 +152,14 @@ parse (below).
   `resolve`, `navigate`, `reload`, `pageHistory`, `setTheme`, `session` and `local` (replaced as wholes, in memory),
   `copy`, `openLink`, `download`. In-memory stand-ins for `cookie`, `localStorage`, `sessionStorage`. The page's
   address is the shim's own `current`; the frame's real URL (it carries the token) is never consulted.
-- Writes a page: parse inertly (`DOMParser`), strip `base`, `object`, `embed`, `meta http-equiv`, icons, preloads, every
-  `on*` attribute, every inline script and every module script; re-create each classic same-origin `script src` from
+- Writes a page: parse inertly (`DOMParser`), strip `base`, `object`, `embed`, `meta http-equiv`, icons, preloads, `noscript`, every script in any namespace (svg, math,
+  templates), every `on*`, `srcdoc`, `ping` and `nonce` attribute, every `javascript:`, `vbscript:` and `data:text/html` URL
+  (after dropping whitespace and control characters), every inline script and every module script; re-create each classic same-origin `script src` from
   fetched text, **only when the SHA-256 of the file starts with the `?v=` of its URL** (the dashboard's content stamp;
   a script without a valid `?v=` does not run); turn stylesheets into `<style>` (CSS `url()` into blob URLs,
   `@import` removed), images and media sources into blob URLs; replace iframes by viewer links. It then announces `write`,
-  **closes all open streams**, rejects everything pending, bumps the page generation, writes the skeleton, appends the
+  **closes all open streams**, rejects everything pending, bumps the page generation, writes a fixed empty skeleton, moves the cleaned page in as nodes (`importNode`: it is never serialised and parsed a
+  second time, so the cleaning parser and the rendering parser cannot disagree), appends the
   scripts with the nonce in order (each removed after it ran, so nothing in the DOM carries the nonce) and closes the document.
 - **Generations.** Every request carries the page generation (`gen`); every answer echoes it. An answer for an older
   page is dropped and its promise rejected; of two navigations only the newest is written.
