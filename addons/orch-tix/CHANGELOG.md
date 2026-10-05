@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The code for a TIX section on orch-core's How it works page (`guide.section`) is in, but the manifest does not declare the slot yet: orch-core validates a manifest strictly and an orch-core without that slot rejects the whole addon, so declaring it now would break everyone who updates the addon before orch-core. To switch it on, once the orch-core release that adds `guide.section` is out: add `"guide.section"` to `slots` in `orch-addon.json` and bump the version to 0.3.0. Until then the section never shows and nothing changes.
+
 ## 0.2.0
 
 - A ticket the server answered `gone` for is linked again on the next sync cycle as a new generation (once per cycle, when the sync policy would mirror it); by-hand unlinks and done cleanups stay retired. The link records why it was retired (`retired_why`).
