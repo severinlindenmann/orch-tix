@@ -1,19 +1,12 @@
-// fileshare/static/js/ticket-cache.js — the sealed local cache of this phone (TIX on orch-core). One design, two uses:
-//   * tickets  (db.js "tickets"): each ticket the phone opened is kept as the mirror row the server sent, exactly as it
-//     came (wrapped DEK and sealed content, never opened), so /t/<n> still opens with no network. A cached row is
-//     opened on every read through openRow(..., {cached: true}): the same MK/DEK checks, the same binding to the row and
-//     the same "seen" high-water mark as the lists (an older copy than this browser already saw is refused, never
-//     shown). Bounded (MAX_TICKETS rows, MAX_BYTES of sealed text) with least-recently-used eviction; cleared on
-//     sign-out with the lists (db.js clearLists).
-//   * keymap   (db.js "lists"): the local key -> TIX number map of the mirror list, sealed under MK (AAD
-//     "sharing/keymap/v1"), so a ticket page links the keys it names without opening every row of the list.
-// Nothing here is plaintext except what the server's own cleartext routing already carries (space, n, status, needs,
-// updated_at); nothing leaves the device.
+// The sealed local cache of this phone. tickets (db.js "tickets"): each opened ticket's mirror row exactly as the server
+// sent it (sealed, never opened); read back through openRow(..., {cached: true}), so an older copy than the "seen" mark is
+// refused. Bounded (LRU), cleared on sign-out with the lists. keymap/needsmemo (db.js "lists"): sealed under MK. Nothing here
+// is plaintext beyond the server's own cleartext routing; nothing leaves the device.
 import { LISTS, TICKETS, allValues, deleteValue, getValue, putValue } from "./db.js";
 import { b64u, canonicalJson, open, seal, unb64u } from "./crypto.js";
 
 export const MAX_TICKETS = 40;
-export const MAX_BYTES = 6 * 1024 * 1024;       // of sealed row text across all cached tickets (~1 MB is a very large ticket)
+export const MAX_BYTES = 6 * 1024 * 1024;       // of sealed row text, all cached tickets
 const MAX_ROW_BYTES = 2 * 1024 * 1024;          // one row bigger than this is not kept
 
 const te = new TextEncoder();
@@ -49,7 +42,7 @@ export function evictions(entries, { maxTickets = MAX_TICKETS, maxBytes = MAX_BY
   return out;
 }
 
-// Keeps the row of an opened ticket (call only for a row that passed openRow's checks). Best effort.
+// Keeps an opened ticket's row (only one that passed openRow). Best effort.
 export async function rememberTicket(n, row) {
   try {
     if (!shaped(row, n)) return;
@@ -67,7 +60,7 @@ export async function rememberTicket(n, row) {
   }
 }
 
-// {row, at}: the stored row of ticket n and when the network last gave it, or null. Marks it as just used.
+// {row, at} of ticket n, or null; marks it used.
 export async function cachedTicket(n) {
   try {
     const e = await getValue(TICKETS, String(n));
@@ -131,8 +124,7 @@ async function digest(text) {
   return Array.from(d.subarray(0, 12), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-// Map uuid -> {h, need}: h is a digest of the sealed content the answer was read from, so a changed row is opened
-// again; the map itself is sealed under MK. Lets the tab-bar badge skip opening rows that did not change.
+// uuid -> {h, need}: h digests the sealed content, so a changed row is opened again; sealed under MK.
 export async function loadNeedsMemo(mk) {
   try {
     const e = await getValue(LISTS, "needsmemo");
@@ -155,7 +147,7 @@ export async function saveNeedsMemo(mk, memo) {
 
 export const contentDigest = (row) => digest(`${row.uuid}|${row.wrapped_dek}|${row.enc_content}`);
 
-// Rows as nav's badge wants them ({doc, needs}): a memo hit stands in for the opened row, anything else is opened.
+// Rows for the badge ({doc, needs}): a memo hit stands in for the opened row, anything else is opened.
 export async function rowsWithMemo(mk, mirrors, openRow) {
   const memo = await loadNeedsMemo(mk);
   const next = new Map();
