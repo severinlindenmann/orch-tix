@@ -4,10 +4,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import * as B from "../../fileshare/static/js/bridge-crypto.js";
-import * as C from "../../fileshare/static/js/crypto.js";
-import { DeviceSession, PIN_FAILURES, STREAM_SILENCE_MS } from "../../fileshare/static/js/bridge-session.js";
-import * as S from "../../fileshare/static/js/bridge-store.js";
+import { pathToFileURL } from "node:url";
+// The production modules; tests/js/bridge-mutations.test.mjs points BRIDGE_JS_DIR at a mutated copy of them.
+const JS = process.env.BRIDGE_JS_DIR ? pathToFileURL(process.env.BRIDGE_JS_DIR + "/") : new URL("../../fileshare/static/js/", import.meta.url);
+const B = await import(new URL("bridge-crypto.js", JS));
+const C = await import(new URL("crypto.js", JS));
+const { DeviceSession, PIN_FAILURES, STREAM_SILENCE_MS } = await import(new URL("bridge-session.js", JS));
+const S = await import(new URL("bridge-store.js", JS));
 import { conformance, fakeWindow, ownChecks } from "./support/bridge-conformance.mjs";
 import { fakeIndexedDB } from "./support/fake-idb.mjs";
 
@@ -26,7 +29,7 @@ test("every vector, through the production module", async () => {
 });
 
 test("the §7 and link rules the vectors have no device case for", async () => {
-  assert.equal(await ownChecks(B, C, VEC), 19);
+  assert.equal(await ownChecks(B, C, VEC), 22);
 });
 
 // ---- helpers: the host side, from the FAKE vector keys -------------------------------------------------------------
@@ -144,6 +147,32 @@ test("chunks failing the pinned key: dropped; after several in a row the session
   assert.equal(s.pending.size, 0);
   assert.equal((await s.receive(await chunk({ rid: r1 }), mbox(r1))).result, "drop");     // even a correctly signed one now
   await assert.rejects(s.request({ meta: { op: "http", method: "GET", path: "/" } }), B.HostKeyError);
+});
+
+test("a keyless server cannot raise the pin alarm: chunks from cleartext fields with random body and signature never count", async () => {
+  // The forgery the review reproduced: every field checked before the host signature is cleartext.
+  const { s } = await session();
+  const { id } = await s.request({ meta: { op: "http", method: "GET", path: "/" } });
+  for (let i = 0; i < PIN_FAILURES * 3; i++) {
+    const h = B.encodeHeader({ direction: B.TO_DEVICE, flags: B.F_LAST, keyVersion: 1, workspace: ws, deviceId: hex(DEV_A), rid: hex(id),
+      stream: B.ZERO_ID, seq: 0, tsMs: NOW, salt: crypto.getRandomValues(new Uint8Array(16)) });
+    const env = B.cat(h, crypto.getRandomValues(new Uint8Array(40)), crypto.getRandomValues(new Uint8Array(64)));
+    const r = await s.receive(env, { id, idx: 0, last: true, stream: false });
+    assert.deepEqual([r.result, r.why, r.pinFailure, r.message], ["drop", "host_signature", false, undefined]);
+  }
+  assert.equal(s.hostKeyChanged, false);
+  assert.equal(s.pending.size, 1);
+  // forged chunks between keyed ones neither count nor reset: three keyed failures still raise it
+  for (let i = 0; i < PIN_FAILURES; i++) {
+    await s.receive(await chunk({ rid: hex(id), signer: "intruder" }), mbox(hex(id)));
+    if (i < PIN_FAILURES - 1) {
+      assert.equal(s.hostKeyChanged, false);
+      const h = B.encodeHeader({ direction: B.TO_DEVICE, flags: B.F_LAST, keyVersion: 1, workspace: ws, deviceId: hex(DEV_A), rid: hex(id),
+        stream: B.ZERO_ID, seq: 0, tsMs: NOW, salt: crypto.getRandomValues(new Uint8Array(16)) });
+      await s.receive(B.cat(h, crypto.getRandomValues(new Uint8Array(104))), { id, idx: 0, last: true, stream: false });
+    }
+  }
+  assert.equal(s.hostKeyChanged, true);
 });
 
 // ---- order, retries and streams (§4, §5.3) -------------------------------------------------------------------------
@@ -307,6 +336,21 @@ test("the counter refuses to pass 2^53 - 1, and a workspace without a key has no
   await c.atLeast(Number.MAX_SAFE_INTEGER);
   await assert.rejects(c.next(), /pair again/);
   await assert.rejects(c.atLeast(2 ** 53 + 2), /pair again/);
+}));
+
+test("the counter's transactions ask for strict durability; an engine that ignores the option still counts", () => withIdb(async (idb) => {
+  await S.saveWorkspaceKey(WS, await kWs(), 1);
+  const c = S.sequenceCounter(WS);
+  assert.deepEqual([await c.next(), await c.next()], [1, 2]);    // the fake records the option and otherwise ignores it
+  await c.atLeast(10);
+  const hosts = idb.dbs.get("fileshare-bridge").opened.filter((t) => t.name === "hosts" && t.mode === "readwrite");
+  assert.deepEqual(hosts.map((t) => t.options), [undefined, { durability: "strict" }, { durability: "strict" }, { durability: "strict" }]);
+}));
+
+test("an extractable K_ws is never stored", () => withIdb(async () => {
+  const aes = await subtle.importKey("raw", new Uint8Array(32), "AES-GCM", true, ["encrypt"]);
+  for (const k of [aes, { extractable: true }, {}, null]) await assert.rejects(S.saveWorkspaceKey(WS, k, 1), /extractable|Cannot/);
+  assert.equal(await S.workspaceRecord(WS), null);
 }));
 
 test("without IndexedDB, or when it refuses to open, every call fails clearly and nothing falls back", async () => {

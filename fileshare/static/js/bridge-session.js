@@ -6,7 +6,8 @@ import { F_STREAM, HostKeyError, MESSAGES, ZERO_ID, openResponse, sealRequest } 
 import { sequenceCounter } from "./bridge-store.js";
 
 export const STREAM_SILENCE_MS = 60_000;   // §4: a stream with no chunk for more than this is closed
-export const PIN_FAILURES = 3;             // §7: this many host-signature failures in a row, none verified between
+export const PIN_FAILURES = 3;             // §7: this many pin failures (tag verifies, host signature does not) in a row,
+                                           // none verified between; a chunk forged without K_ws never counts
 
 export class DeviceSession {
   // workspace: hex; kWs, keyVersion: from bridge-store.js; deviceId: 16 bytes; signKey: the device's private key;
@@ -42,7 +43,7 @@ export class DeviceSession {
     if (this.hostKeyChanged) return { result: "drop", why: "host_key_changed", message: MESSAGES.hostKeyChanged };
     const r = await openResponse(this, env, mailbox, this.now());
     if (r.result === "drop") {
-      if (r.why === "host_signature" && ++this.pinFailures >= PIN_FAILURES) {
+      if (r.pinFailure && ++this.pinFailures >= PIN_FAILURES) {
         this.hostKeyChanged = true;      // drop everything; only a new pairing link replaces the pin
         this.pending.clear();
         r.message = MESSAGES.hostKeyChanged;

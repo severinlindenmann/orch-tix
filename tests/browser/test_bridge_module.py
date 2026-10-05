@@ -81,7 +81,7 @@ def test_the_module_loads_under_the_app_policy_and_passes_every_vector(bridge_pa
                            "host_cases": len(VECTORS["host_cases"]), "host_steps": host_steps,
                            "device_cases": len(VECTORS["device_cases"]), "shown": len(VECTORS["shown"]),
                            "assertion_cases": len(VECTORS["assertion"]["cases"]), "assertion_challenges": 3}
-    assert r["own"] == 19
+    assert r["own"] == 22
     assert r["extractable"] is False and r["exported"] == [] and sorted(r["usages"]) == ["sign"]
     assert r["session"] == "function"
 

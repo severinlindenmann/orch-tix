@@ -14,7 +14,7 @@ export function fakeIndexedDB({ failOpen = false } = {}) {
         if (failOpen) { req.error = new Error("open failed"); req.onerror?.(); return; }
         let db = dbs.get(name);
         const fresh = !db;
-        if (fresh) { db = { version, stores: new Map(), queues: new Map() }; dbs.set(name, db); }
+        if (fresh) { db = { version, stores: new Map(), queues: new Map(), opened: [] }; dbs.set(name, db); }
         req.result = connection(db);
         if (fresh) req.onupgradeneeded?.();
         req.onsuccess?.();
@@ -28,7 +28,8 @@ function connection(db) {
   return {
     createObjectStore(name, opts = {}) { db.stores.set(name, { keyPath: opts.keyPath, data: new Map() }); },
     close() {},
-    transaction(name, mode) {
+    transaction(name, mode, options) {             // options recorded, otherwise ignored (as by an engine without them)
+      db.opened.push({ name, mode, options });
       const store = db.stores.get(name);
       const queue = [];
       let work;                                    // the store as it is when this transaction starts

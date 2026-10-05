@@ -35,12 +35,12 @@ function openDb() {
 // One transaction. fn(store, done, fail) issues requests; the promise settles only after the transaction committed
 // (or aborted), so a value is never used unless it is on disk. readwrite transactions on one store run one after the
 // other, in every tab of this origin: that is what makes the counter atomic (§5.2).
-async function tx(name, mode, fn) {
+async function tx(name, mode, fn, options) {
   const db = await openDb();
   try {
     return await new Promise((resolve, reject) => {
       let out, err;
-      const t = db.transaction(name, mode);
+      const t = db.transaction(name, mode, options);   // a browser without the options argument ignores it
       const fail = (e) => { err = e; try { t.abort(); } catch { /* already finished */ } };
       t.oncomplete = () => (err ? reject(err) : resolve(out));
       t.onabort = t.onerror = () => reject(err || new BridgeStorageError("IndexedDB transaction failed", t.error));
@@ -81,9 +81,9 @@ export async function openWorkspaceKey(workspace, { keys = loadKeys, keyblob = (
 }
 
 // Keeps the counter: re-deriving K_ws never resets a sequence number.
-export function saveWorkspaceKey(workspace, kWs, keyVersion) {
+export async function saveWorkspaceKey(workspace, kWs, keyVersion) {
   checkWs(workspace);
-  if (kWs.extractable) throw new Error("refusing to store an extractable key");
+  if (kWs?.extractable !== false) throw new Error("refusing to store an extractable key");
   return tx(HOSTS, "readwrite", (s, done, fail) => step(s.get(workspace), fail, (cur) => {
     s.put({ workspace, hostPub: null, next: 1, ...cur, kWs, keyVersion });
     done();
@@ -119,7 +119,7 @@ export function sequenceCounter(workspace) {
     if (!Number.isSafeInteger(next) || next > MAX_SEQ) throw new BridgeStorageError("sequence exhausted: pair again");
     s.put({ ...cur, next });
     done(value);
-  }));
+  }), { durability: "strict" });             // a handed-out number is flushed to disk, not only to the OS cache
   return {
     next: () => update((n) => ({ next: n + 1, value: n })),
     atLeast: (v) => update((n) => ({ next: Math.max(n, v), value: undefined })),

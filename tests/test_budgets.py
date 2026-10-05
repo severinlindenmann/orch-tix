@@ -8,8 +8,8 @@ SHELL_BUDGET = 1_020_000           # bytes, uncompressed: the whole offline shel
                                    # raised by 20 kB for the phone UI round (#71: update prompt, offline cards, settings folds, labels)
 PHONE_JS_BUDGET = 160_000          # bytes, uncompressed: Needs you, Board and ticket modules
 # The bridge's device module (R10a, docs/bridge-protocol.md) has its own allowance on top of the shell's, so it can
-# neither eat the shell's budget nor grow unnoticed. OWNER DECISION PENDING (PR for #78): accept this allowance, raise
-# SHELL_BUDGET instead, or keep the bridge (online only) out of the offline shell.
+# neither eat the shell's budget nor grow unnoticed. The owner chose this separate allowance (PR #81, for #78) over
+# raising SHELL_BUDGET or keeping the bridge out of the offline shell.
 BRIDGE_JS = ["bridge-crypto.js", "bridge-session.js", "bridge-store.js"]
 BRIDGE_JS_BUDGET = 30_000          # bytes, uncompressed
 

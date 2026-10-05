@@ -3,10 +3,11 @@
 // the vectors have no device case for (both in tests/js/support/bridge-conformance.mjs), must fail on it.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { copyFileSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import * as C from "../../fileshare/static/js/crypto.js";
 import { conformance, ownChecks } from "./support/bridge-conformance.mjs";
 
@@ -55,6 +56,12 @@ const MUTATIONS = [
   ["a chunk sent to the host accepted", "|| h.direction !== TO_DEVICE ", ""],
   ["another version accepted", "|| h.version !== 1 ", ""],
   ["an unknown flag accepted", "|| h.flags & ~(F_LAST | F_STREAM | F_REFUSAL)", ""],
+  ["a chunk forged without K_ws counts as a pin failure", "let pinFailure = false;", "let pinFailure = true;"],
+  ["a K_ws-sealed chunk with a bad signature is not a pin failure", "pinFailure = true; } catch", "} catch"],
+  ["upper-case workspace hex accepted in the link", "/^#?v1\\.([0-9a-f]{32})", "/^#?v1\\.([0-9a-fA-F]{32})"],
+  ["upper-case pairing id hex accepted in the link", "\\.([0-9a-f]{32})\\.([A-Za-z0-9_-]{43})", "\\.([0-9a-fA-F]{32})\\.([A-Za-z0-9_-]{43})"],
+  ["the label counted in UTF-16 units", "[...name].length > 80", "name.length > 80"],
+  ["a label of 81 code points accepted", "[...name].length > 80", "[...name].length > 81"],
   ["a chunk over 256 KiB accepted", "|| env.length > MAX_CHUNK", ""],
   ["another key version accepted", "h.keyVersion !== ctx.keyVersion || ", ""],
   ["another workspace accepted", "bytesToHex(h.workspace) !== ctx.workspace || ", ""],
@@ -82,6 +89,42 @@ test("every mutation of the device module is caught by the vectors", async () =>
         await ownChecks(mutant, C, VEC);
         survivors.push(why);
       } catch { /* caught */ }
+    }
+    assert.deepEqual(survivors, []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The session's and the store's rules: [file, what it breaks, text, replacement]. Each mutant runs
+// tests/js/bridge-conformance.test.mjs against a mutated copy of fileshare/static/js, which must fail.
+const RULE_MUTATIONS = [
+  ["bridge-session.js", "any host-signature failure counts (a keyless server raises the alarm)", "if (r.pinFailure &&", 'if (r.why === "host_signature" &&'],
+  ["bridge-session.js", "a verified chunk does not reset the pin-failure run", "    this.pinFailures = 0;\n    const pend", "    const pend"],
+  ["bridge-session.js", "the adopted offset not used", "if (r.offsetMs !== undefined) this.offsetMs = r.offsetMs;", ""],
+  ["bridge-session.js", "resync to high instead of high + 1", "atLeast(high + 1)", "atLeast(high)"],
+  ["bridge-session.js", "a stream closed at exactly 60 s", "t - p.lastAt > STREAM_SILENCE_MS", "t - p.lastAt >= STREAM_SILENCE_MS"],
+  ["bridge-store.js", "the counter hands out a number twice", "next: n + 1, value: n", "next: n, value: n"],
+  ["bridge-store.js", "the counter's durability not strict", '{ durability: "strict" }', "undefined"],
+  ["bridge-store.js", "an extractable K_ws stored", 'if (kWs?.extractable !== false) throw new Error("refusing to store an extractable key");', ""],
+];
+
+test("every mutation of the session's and the store's rules is caught", () => {
+  const dir = mkdtempSync(join(tmpdir(), "bridge-rule-mutants-"));
+  const testFile = fileURLToPath(new URL("bridge-conformance.test.mjs", import.meta.url));
+  const env = { ...process.env, BRIDGE_JS_DIR: dir };
+  delete env.NODE_TEST_CONTEXT;                    // a child of the test runner would otherwise report to it, not exit
+  const passes = () => spawnSync(process.execPath, ["--test", "--test-timeout=60000", testFile], { env, encoding: "utf8" }).status === 0;
+  try {
+    cpSync(fileURLToPath(JS), dir, { recursive: true });
+    assert.ok(passes(), "the unmutated copy must pass");
+    const survivors = [];
+    for (const [file, why, from, to] of RULE_MUTATIONS) {
+      cpSync(fileURLToPath(JS), dir, { recursive: true });
+      const source = readFileSync(join(dir, file), "utf8");
+      assert.ok(source.includes(from), `mutation "${why}" no longer matches ${file}`);
+      writeFileSync(join(dir, file), source.replace(from, to));
+      if (passes()) survivors.push(why);
     }
     assert.deepEqual(survivors, []);
   } finally {

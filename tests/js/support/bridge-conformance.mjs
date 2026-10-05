@@ -280,10 +280,30 @@ export async function ownChecks(B, C, VEC) {
     pending: new Map([[toHex(rid), { next: 0, stream: true }]]) };
   if ((await B.openResponse(streamCtx, await chunk({}), mb, now)).result !== "drop") fail("a stream's rid answered without STREAM");
   const f = VEC.pairing.link_fragment;
-  for (const bad of [f.replace("v1.", "v2."), f.replace("v1.", "v11."), f.replace("v1.", "")]) {
-    if (B.parsePairFragment(bad) !== null) fail(`link ${bad.slice(0, 4)} parsed`);
+  for (const bad of [f.replace("v1.", "v2."), f.replace("v1.", "v11."), f.replace("v1.", ""),
+    f.replace(VEC.pairing.workspace, VEC.pairing.workspace.toUpperCase()), f.replace(VEC.pairing.pairing_id, VEC.pairing.pairing_id.toUpperCase())]) {
+    if (B.parsePairFragment(bad) !== null) fail(`link ${bad.slice(0, 40)} parsed`);
   }
-  return cases.length + 2;
+
+  // The pin alarm (§7): a chunk only a K_ws holder could make (tag verifies, host signature does not) is a pin failure;
+  // one built from the cleartext fields with random body and signature, which the TIX server can make, is not.
+  const ctx = () => ({ workspace: VEC.keys.workspace, kWs, keyVersion: 1, device: toHex(dev), hostKey, offsetMs: 0,
+    pending: new Map([[toHex(rid), { next: 0, stream: false }]]) });
+  const good = await chunk({}), keyed = good.slice();
+  keyed.set(crypto.getRandomValues(new Uint8Array(64)), keyed.length - 64);
+  const r1 = await B.openResponse(ctx(), keyed, mb, now);
+  if (r1.why !== "host_signature" || r1.pinFailure !== true) fail("a K_ws-sealed chunk with a bad signature is not a pin failure");
+  const forged = B.cat(good.subarray(0, 104), crypto.getRandomValues(new Uint8Array(good.length - 104)));
+  const r2 = await B.openResponse(ctx(), forged, mb, now);
+  if (r2.why !== "host_signature" || r2.pinFailure !== false) fail("a chunk forged without K_ws counts as a pin failure");
+
+  // A label is limited in code points, not UTF-16 units: 80 with an astral character (81 units) passes, 81 does not.
+  const link = () => B.parsePairFragment(f), pub = hex(VEC.pairing.device_pub), at80 = "\u{1F44D}" + "x".repeat(79);
+  if ((await B.pairRequestMeta({ link: link(), pub, label: at80 })).label !== at80) fail("label of 80 code points refused");
+  let refused = false;
+  try { await B.pairRequestMeta({ link: link(), pub, label: at80 + "x" }); } catch { refused = true; }
+  if (!refused) fail("label of 81 code points accepted");
+  return cases.length + 5;
 }
 
 // A top-level window whose authenticator answers with the vector's bytes.

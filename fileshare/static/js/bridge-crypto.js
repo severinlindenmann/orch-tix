@@ -196,7 +196,13 @@ export async function openResponse(ctx, env, mailbox, nowMs) {
   const last = !!(h.flags & F_LAST), stream = !!(h.flags & F_STREAM);
   if (mailbox?.id !== rid || !Number.isSafeInteger(mailbox.idx) || BigInt(mailbox.idx) !== h.seq || mailbox.last !== last
       || mailbox.stream !== stream || pend.stream !== stream) return drop("mailbox_mismatch");
-  if (!await verifySigned(ctx.hostKey, sig, signedBytes(header, body))) return drop("host_signature");
+  if (!await verifySigned(ctx.hostKey, sig, signedBytes(header, body))) {
+    // Every field checked so far is cleartext, so anyone can get this far. Only a K_ws holder can make the tag verify:
+    // only such a chunk is evidence that the host key changed (pinFailure). Dropped either way.
+    let pinFailure = false;
+    try { await openBody(ctx.kWs, header, body); pinFailure = true; } catch { /* forged without K_ws */ }
+    return { ...drop("host_signature"), pinFailure };
+  }
   let meta, data;
   try { ({ meta, data } = unframe(await openBody(ctx.kWs, header, body))); } catch { return drop("tag"); }
   if (h.seq !== BigInt(pend.next)) return drop("out_of_order");
