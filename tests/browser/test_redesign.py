@@ -273,7 +273,7 @@ def test_tab_bar_on_every_signed_in_page_at_390(phone, live_server, path):
     ready(phone)
     nav = phone.get_by_role("navigation", name="Main")
     expect(nav).to_be_visible()
-    expect(nav.get_by_role("link")).to_have_text(["Needs you", "Tickets", "Files", "Settings"])
+    expect(nav.get_by_role("link")).to_have_text(["Workspaces", "Needs you", "Tickets", "Files", "Settings"])
     box = nav.bounding_box()
     assert abs(box["y"] + box["height"] + 6 - PHONE["height"]) < 2  # fixed to the bottom (6 px padding)
     current = nav.locator('[aria-current="page"]')

@@ -99,7 +99,7 @@ def test_old_board_routes_redirect(phone_page, mirror_with_question):
 def test_the_four_tabs_and_the_tickets_view(phone_page, mirror_with_question):
     page = phone_page("light")
     nav = page.get_by_role("navigation", name="Main")
-    assert [x.strip() for x in nav.locator(".nav-label").all_inner_texts()] == ["Needs you", "Tickets", "Files", "Settings"]
+    assert [x.strip() for x in nav.locator(".nav-label").all_inner_texts()] == ["Workspaces", "Needs you", "Tickets", "Files", "Settings"]
     expect(nav.locator("#needs-badge")).to_have_text("1")                 # set once the sealed list is open
     nav.get_by_role("link", name="Tickets").click()
     page.wait_for_url("**/?view=tickets")
