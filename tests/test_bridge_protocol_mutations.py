@@ -32,7 +32,7 @@ def run(ref):
             except Exception:
                 fails.append(c["name"]); break
             rec = s["rids"].get(st["mailbox_id"])
-            if {k: v for k, v in r.items() if k in st["expect"]} != st["expect"] or r["result"] != st["expect"]["result"] \
+            if {k: v for k, v in r.items() if k in ref.HOST_EXPECT_KEYS} != st["expect"] \
                     or (rec["until"] if rec else None) != st["record_until"]:
                 fails.append(c["name"]); break
     for c in VEC["device_cases"]:
@@ -109,6 +109,9 @@ TIME = ('    if abs(now_ms - h.ts_ms) > WINDOW_MS:\n'
         '        return _recorded_refusal(state, h, env, now_ms, "stale_timestamp", host_ms=now_ms)\n')
 
 SEQ_NOTE = '    # sequence BEFORE time: a stale_timestamp refusal consumes its seq, so the same bytes can never run\n'
+BUSY = ('    # 4b. the device\'s quota, before framing and sequence: `busy` does not consume the seq (§5.3)\n'
+        '    if _count_for(state, did, now_ms) >= _limits(state)["per_device"]:\n'
+        '        return _recorded_refusal(state, h, env, now_ms, "busy")\n')
 MAL = ('    try:\n        meta, data = unframe(pt, strict=True)\n    except ValueError:\n'
        '        return _recorded_refusal(state, h, env, now_ms, "malformed")\n')
 
@@ -236,6 +239,30 @@ MUTS = {
     "pair_refusal_without_last_accepted": ("h.flags not in (F_LAST, F_LAST | F_REFUSAL)", "h.flags not in (F_LAST, F_REFUSAL, F_LAST | F_REFUSAL)"),
     "pair_refusal_needs_no_code": ('(meta.get("refusal") is None if refusal else', '(False if refusal else'),
     "link_host_pin_not_canonical": ("b64u(pin) != m.group(4)", "False"),
+    # the recheck of #87: the pin stops an offset from a K_ws holder's own key; once per request
+    "pin_unchecked_for_stale_timestamp_refusals": ('    if not hmac.compare_digest(host_pin(host_pub), bytes.fromhex(ctx["host_pin"])):',
+                                                   '    if not (refusal and meta.get("refusal") == "stale_timestamp") and not hmac.compare_digest(host_pin(host_pub), bytes.fromhex(ctx["host_pin"])):'),
+    "pair_refusal_offset_adopted_every_time": ('        if not pend.get("offset_adopted"):         # verified',
+                                               '        if True:         # verified'),
+    # busy and the store limits (§5.3)
+    "busy_never": ('    if _count_for(state, did, now_ms) >= _limits(state)["per_device"]:\n        return _recorded_refusal(state, h, env, now_ms, "busy")',
+                   '    if False:\n        return _recorded_refusal(state, h, env, now_ms, "busy")'),
+    "busy_at_one_below_the_quota": ('    if _count_for(state, did, now_ms) >= _limits(state)["per_device"]:',
+                                    '    if _count_for(state, did, now_ms) >= _limits(state)["per_device"] - 1:'),
+    "busy_not_recorded": ('        return _recorded_refusal(state, h, env, now_ms, "busy")', '        return _refuse("busy")'),
+    "busy_with_a_field": ('        return _recorded_refusal(state, h, env, now_ms, "busy")',
+                          '        return _recorded_refusal(state, h, env, now_ms, "busy", host_ms=now_ms)'),
+    "busy_after_the_sequence": (BUSY + "    # 5. framing\n" + MAL + SEQ_NOTE + SEQ,
+                                "    # 5. framing\n" + MAL + SEQ_NOTE + SEQ + BUSY),
+    "busy_counts_every_device": ('    return sum(1 for rec in state["rids"].values() if rec["device"] == device and now_ms < rec["until"])',
+                                 '    return sum(1 for rec in state["rids"].values() if now_ms < rec["until"])'),
+    "busy_counts_expired_records": ('if rec["device"] == device and now_ms < rec["until"])', 'if rec["device"] == device)'),
+    "no_busy_allowance": ('    if _count_for(state, h.device.hex(), now_ms) >= lim["per_device"] + lim["busy_allowance"]:\n        raise DeviceFull()',
+                          '    if False:\n        raise DeviceFull()'),
+    "no_global_cap": ('if sum(1 for rec in state["rids"].values() if now_ms < rec["until"]) >= lim["max_records"]:\n        raise StoreFull()',
+                      'if False:\n        raise StoreFull()'),
+    "store_full_refuses_instead_of_drop": ('        return _drop("store_full")', '        return _refuse("busy")'),
+    "device_full_refuses_instead_of_drop": ('        return _drop("busy_unrecordable")', '        return _refuse("busy")'),
     "meta_duplicates_allowed": ("object_pairs_hook=_no_duplicates, ", ""),
     "meta_nan_allowed": (", parse_constant=_no_constant", ""),
     "meta_upper_case_hex": ('compile(r"(?:[0-9a-f]{2})*")', 'compile(r"(?:[0-9a-fA-F]{2})*")'),

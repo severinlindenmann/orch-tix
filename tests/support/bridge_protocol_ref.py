@@ -40,6 +40,9 @@ MAX_META = 64 * 1024
 WINDOW_MS = 300_000                                  # each way
 SEQ_WINDOW = 64
 RID_RETENTION_MS = 900_000
+PER_DEVICE = 1024                                    # unexpired records of one device before it is refused `busy`
+MAX_RECORDS = 16384                                  # unexpired records in total; past that the host drops
+BUSY_ALLOWANCE = 64                                  # recorded `busy` refusals a device may hold above PER_DEVICE
 BUDGET = 10                                          # unverified refusals per minute, host-wide (§6.1)
 OFFER_BUDGET = 5                                     # refusals per minute for one open pairing offer (§8.1)
 MAX_OFFSET_MS = 24 * 3600 * 1000                     # a device adopts at most this clock offset (§5.1)
@@ -293,8 +296,31 @@ def _unverified(state: dict, now_ms: int, code: str, bucket: dict | None = None,
     return _refuse(code, **extra)
 
 
+class StoreFull(Exception):
+    """MAX_RECORDS unexpired records exist: nothing new can be recorded, so nothing new may be sent or run."""
+
+
+class DeviceFull(Exception):
+    """This device holds PER_DEVICE + BUSY_ALLOWANCE unexpired records: nothing more of it can be recorded."""
+
+
+def _limits(state) -> dict:
+    """The store limits (§5.3). A vector may set smaller ones in its state; the protocol's are the defaults."""
+    return {"per_device": PER_DEVICE, "max_records": MAX_RECORDS, "busy_allowance": BUSY_ALLOWANCE,
+            **state.get("limits", {})}
+
+
+def _count_for(state, device: str, now_ms: int) -> int:
+    return sum(1 for rec in state["rids"].values() if rec["device"] == device and now_ms < rec["until"])
+
+
 def _record(state, h: Header, env: bytes, now_ms: int, outcome) -> None:
     """Persisted (on a real host) before the refusal is sent or the request runs."""
+    lim = _limits(state)
+    if sum(1 for rec in state["rids"].values() if now_ms < rec["until"]) >= lim["max_records"]:
+        raise StoreFull()
+    if _count_for(state, h.device.hex(), now_ms) >= lim["per_device"] + lim["busy_allowance"]:
+        raise DeviceFull()
     state["rids"][h.rid.hex()] = {"device": h.device.hex(), "digest": digest(env).hex(), "outcome": outcome,
                                   "until": now_ms + RID_RETENTION_MS}       # never from the sender's ts_ms
 
@@ -390,7 +416,20 @@ def host_check(env: bytes, state: dict, now_ms: int, mailbox_id: str | None = No
                 return _refuse("already_done", status=out["status"])
             return {"result": "replay", "outcome": out}
         return _refuse("rid_conflict")
-    # 5. from here every refusal is recorded before it is sent
+    # from here every refusal is recorded before it is sent; a host that cannot record drops
+    try:
+        return _record_and_run(state, h, env, pt, dev, did, rid, now_ms)
+    except StoreFull:
+        return _drop("store_full")
+    except DeviceFull:
+        return _drop("busy_unrecordable")      # an unrecorded refusal could let the same bytes run later
+
+
+def _record_and_run(state, h, env, pt, dev, did, rid, now_ms):
+    # 4b. the device's quota, before framing and sequence: `busy` does not consume the seq (§5.3)
+    if _count_for(state, did, now_ms) >= _limits(state)["per_device"]:
+        return _recorded_refusal(state, h, env, now_ms, "busy")
+    # 5. framing
     try:
         meta, data = unframe(pt, strict=True)
     except ValueError:
@@ -692,6 +731,9 @@ def verify_assertion(cred: dict, pending: dict, sender_device: str, a: dict, now
     return {"result": "verified"}
 
 
+# Every key of a host_check result that a vector's `expect` pins: an expect lists ALL of them the result has.
+HOST_EXPECT_KEYS = ("result", "code", "scope", "meta", "data", "outcome", "high", "fingerprint", "answer", "label", "status", "host_pub", "phone_link", "host_ms")
+
 # --- the vector file ------------------------------------------------------------------------------
 
 VECTORS = Path(__file__).resolve().parents[1] / "bridge_vectors.json"
@@ -804,9 +846,7 @@ def build() -> dict:
     full = req(meta={"op": "http", "method": "POST", "path": "/api/tickets/T-1/move",
                      "headers": {"content-type": "application/json"}}, data=b'{"to":"testing"}', seq=7)
     host_cases = []
-    keep = ("result", "code", "scope", "meta", "data", "outcome", "high", "fingerprint", "answer", "label", "status",
-            "host_pub",
-            "phone_link", "host_ms")
+    keep = HOST_EXPECT_KEYS
 
     def case(name, env, st, now_ms, mutate=None, mailbox_id=None):
         s = st if st is not None else state()
@@ -928,6 +968,46 @@ def build() -> dict:
                                              (req(seq=69, rid=fake("rid-69")[:16]), now + 20),
                                              (req(seq=69, rid=fake("rid-69b")[:16]), now + 30)], da(high=6, bitmap=1))
     case("oversize", b"\x00" * (MAX_REQUEST + 1), None, now)
+
+    # the request store's quotas (§5.3), with small limits in the vector's state
+    def held(device, n, until, tag):
+        """n unexpired records of `device` (other requests, still within their retention)."""
+        def f(s):
+            for i in range(n):
+                s["rids"][fake(f"held-{tag}-{device.hex()}-{i}")[:16].hex()] = {
+                    "device": device.hex(), "digest": "00" * 32, "outcome": {"status": 200}, "until": until}
+        return f
+
+    def limits(**kw):
+        return lambda s: s.update(limits=kw)
+
+    def both(*fs):
+        return lambda s: [f(s) for f in fs]
+
+    q = limits(per_device=2, max_records=16, busy_allowance=1)
+    case("quota_under_runs", req(seq=3), None, now, both(q, held(dev_a, 1, now + 500_000, "u")))
+    case("quota_at_limit_refused_busy", req(seq=3), None, now, both(q, held(dev_a, 2, now + 500_000, "q")))
+    case("quota_other_device_unaffected", req(signer="device_b", device=dev_b, seq=1), None, now,
+         both(q, held(dev_a, 2, now + 500_000, "o")))
+    busy_req = req(seq=3, rid=fake("busy-rid")[:16])
+    # busy is recorded and replayable; after the quota frees, a redelivery replays the stored busy and never runs
+    chain("quota_busy_recorded_then_replayed_after_the_quota_frees",
+          [(busy_req, now), (busy_req, now + 1000), (busy_req, now + 600_000)],
+          both(q, held(dev_a, 2, now + 500_000, "r")))
+    # busy does not consume the seq: once the quota frees, another request with the same seq runs
+    chain("quota_busy_does_not_consume_the_seq",
+          [(busy_req, now), (req(seq=3, rid=fake("after-busy")[:16], ts=now + 600_000), now + 600_000)],
+          both(q, held(dev_a, 2, now + 500_000, "s")))
+    # past the allowance the request is dropped: its busy could not be recorded
+    case("quota_past_the_busy_allowance_dropped", req(seq=3), None, now, both(q, held(dev_a, 3, now + 500_000, "p")))
+    case("quota_past_the_allowance_other_device_still_runs", req(signer="device_b", device=dev_b, seq=1), None, now,
+         both(q, held(dev_a, 3, now + 500_000, "pb")))
+    # the global cap: a host that cannot record drops, whoever sends
+    case("quota_store_full_drops", req(signer="device_b", device=dev_b, seq=1), None, now,
+         both(limits(per_device=2, max_records=3, busy_allowance=1), held(dev_a, 2, now + 500_000, "g"),
+              held(dev_b, 1, now + 500_000, "gb")))
+    case("quota_expired_records_do_not_count", req(seq=3), None, now,
+         both(q, held(dev_a, 2, now, "e")))
 
     # streams belong to the device that opened them (§4)
     term = fake("terminal-stream")[:16]
@@ -1122,14 +1202,15 @@ def build() -> dict:
 
     pend_cases = []
 
-    def pcase(name, env, now_ms=now + 2500, mailbox=None):
+    def pcase(name, env, now_ms=now + 2500, mailbox=None, adopted=False):
+        pend0 = {"next": 0, "stream": False, **({"offset_adopted": True} if adopted else {})}
         c = {"workspace": ws_hex, "k_ws": k_ws, "key_version": 1, "device": dev_a.hex(), "host_pin": host_pin(pub["host"]).hex(),
-             "pending": {prid.hex(): {"next": 0, "stream": False}}, "offset_ms": 0}
+             "pending": {prid.hex(): dict(pend0)}, "offset_ms": 0}
         hh = Header.decode(env)
         mbp = mailbox or {"id": hh.rid.hex(), "idx": hh.seq, "last": bool(hh.flags & F_LAST), "stream": False}
         res = open_pending_answer(env, c, mbp, now_ms)
         pend_cases.append({"name": name, "envelope": env.hex(), "mailbox": mbp, "host_pin": c["host_pin"],
-                           "pending": {prid.hex(): {"next": 0, "stream": False}}, "now_ms": now_ms,
+                           "pending": {prid.hex(): pend0}, "now_ms": now_ms,
                            "expect": {k: v for k, v in res.items() if k != "why"}})
 
     pcase("pending_answer_accepted", pend_resp())
@@ -1156,6 +1237,11 @@ def build() -> dict:
           refusal("pairing_closed", signer="intruder", host_pub_hex=keys["intruder"]["pub"]))
     pcase("pair_refusal_signed_by_another_key", refusal("pairing_closed", signer="intruder"))
     pcase("pair_refusal_without_host_pub", pend_resp(flags=F_LAST | F_REFUSAL, meta={"refusal": "pairing_closed"}))
+    pcase("stale_timestamp_pair_refusal_with_its_own_host_key_gives_no_offset",       # the attack the pin stops
+          refusal("stale_timestamp", signer="intruder", host_pub_hex=keys["intruder"]["pub"], host_ms=now + 2000),
+          now_ms=skewed)
+    pcase("stale_timestamp_pair_refusal_adopted_once_per_request", refusal("stale_timestamp", host_ms=now + 2000),
+          now_ms=skewed, adopted=True)
     pcase("pair_refusal_stale_timestamp_unverified_does_not_adopt",
           refusal("stale_timestamp", signer="intruder", host_ms=now + 2000), now_ms=skewed)
     pcase("pair_refusal_for_a_request_not_pending", pend_resp(flags=F_LAST | F_REFUSAL, r=fake("old-pair")[:16],

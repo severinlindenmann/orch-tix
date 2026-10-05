@@ -2140,6 +2140,628 @@
    "record_until": null
   },
   {
+   "name": "quota_under_runs",
+   "envelope": "53485242010100013e7afa7ff8e262a2b4d26f4442d0b8908f7a92c06ffaacf8077bf2c7e764fdbd434c189f5a1de63b379237f153cf4ef2000000000000000000000000000000000000000000000003000001a0c4506c006f4b5faf0a33deed191939efe0207b842a3e70464a11ca4ad41eaed7d504fff3058b389557cb0e3920c4fce1bae0419d14770f0bcf276634692dc37a433921c4d4d04ae0b9a1495d99870be0bccaf0d39d5ef1a764fd81bd20d0346e87682df6ceb77b9473cc3ee13302b3163306fa0316bb66c43f8e27151ac27ee5eb5e367d988a8c17c9dd279b5b0528",
+   "mailbox_id": "434c189f5a1de63b379237f153cf4ef2",
+   "state": {
+    "workspace": "3e7afa7ff8e262a2b4d26f4442d0b890",
+    "key_version": 1,
+    "devices": {
+     "8f7a92c06ffaacf8077bf2c7e764fdbd": {
+      "pub": "04f8723041e769dc9b8ed9aedf924f05b6962c3e77f0c945c7cd7848df16a1b6233c9653c06a4d3526201351a838bf496668abd08c97b99a7841b625b69ad7222d",
+      "scope": "operate",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     },
+     "c97c83c6fe2bb707e6a45dba5b4f1367": {
+      "pub": "0494b9b21a496f05c380623ddb32f87bf806d09eace8e465dcaffb530fb20c92e48f2c4cf35b4ce71722d6f07e7020ab7558f73e6b82d97c7a036f5793cbc08f11",
+      "scope": "look",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     }
+    },
+    "rids": {
+     "19eca8e24f83b4ae1d555971c1d7967b": {
+      "device": "8f7a92c06ffaacf8077bf2c7e764fdbd",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "outcome": {
+       "status": 200
+      },
+      "until": 1790000500000
+     }
+    },
+    "offers": {},
+    "pending_pairs": {},
+    "phones": {},
+    "streams": {},
+    "unverified": [],
+    "host_pub": "0465ef41535ff6ebd8e4ff80f258ecd8ec981a033f606f93d3d8b74eab907d45fdf84e206fdc047c1bed1b9fad5b6a71900b39b26f7c5a190ed41d2155c38786b0",
+    "limits": {
+     "per_device": 2,
+     "max_records": 16,
+     "busy_allowance": 1
+    }
+   },
+   "now_ms": 1790000000000,
+   "expect": {
+    "result": "accept",
+    "scope": "operate",
+    "meta": {
+     "method": "GET",
+     "op": "http",
+     "path": "/"
+    },
+    "data": ""
+   },
+   "record_until": 1790000900000
+  },
+  {
+   "name": "quota_at_limit_refused_busy",
+   "envelope": "53485242010100013e7afa7ff8e262a2b4d26f4442d0b8908f7a92c06ffaacf8077bf2c7e764fdbd434c189f5a1de63b379237f153cf4ef2000000000000000000000000000000000000000000000003000001a0c4506c006f4b5faf0a33deed191939efe0207b842a3e70464a11ca4ad41eaed7d504fff3058b389557cb0e3920c4fce1bae0419d14770f0bcf276634692dc37a433921c4d4d04ae0b9a1495d99870be0bccaf0d39d5ef1a764fd81bd20d0346e87682df6ceb77b9473cc3ee13302b3163306fa0316bb66c43f8e27151ac27ee5eb5e367d988a8c17c9dd279b5b0528",
+   "mailbox_id": "434c189f5a1de63b379237f153cf4ef2",
+   "state": {
+    "workspace": "3e7afa7ff8e262a2b4d26f4442d0b890",
+    "key_version": 1,
+    "devices": {
+     "8f7a92c06ffaacf8077bf2c7e764fdbd": {
+      "pub": "04f8723041e769dc9b8ed9aedf924f05b6962c3e77f0c945c7cd7848df16a1b6233c9653c06a4d3526201351a838bf496668abd08c97b99a7841b625b69ad7222d",
+      "scope": "operate",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     },
+     "c97c83c6fe2bb707e6a45dba5b4f1367": {
+      "pub": "0494b9b21a496f05c380623ddb32f87bf806d09eace8e465dcaffb530fb20c92e48f2c4cf35b4ce71722d6f07e7020ab7558f73e6b82d97c7a036f5793cbc08f11",
+      "scope": "look",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     }
+    },
+    "rids": {
+     "b4864ec40667ab4f5514982ebc0db1f8": {
+      "device": "8f7a92c06ffaacf8077bf2c7e764fdbd",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "outcome": {
+       "status": 200
+      },
+      "until": 1790000500000
+     },
+     "434ede89a8c5d1f24eddc6d4ab845fc5": {
+      "device": "8f7a92c06ffaacf8077bf2c7e764fdbd",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "outcome": {
+       "status": 200
+      },
+      "until": 1790000500000
+     }
+    },
+    "offers": {},
+    "pending_pairs": {},
+    "phones": {},
+    "streams": {},
+    "unverified": [],
+    "host_pub": "0465ef41535ff6ebd8e4ff80f258ecd8ec981a033f606f93d3d8b74eab907d45fdf84e206fdc047c1bed1b9fad5b6a71900b39b26f7c5a190ed41d2155c38786b0",
+    "limits": {
+     "per_device": 2,
+     "max_records": 16,
+     "busy_allowance": 1
+    }
+   },
+   "now_ms": 1790000000000,
+   "expect": {
+    "result": "refuse",
+    "code": "busy"
+   },
+   "record_until": 1790000900000
+  },
+  {
+   "name": "quota_other_device_unaffected",
+   "envelope": "53485242010100013e7afa7ff8e262a2b4d26f4442d0b890c97c83c6fe2bb707e6a45dba5b4f1367520eef07028bab0aba7e811e6d7bba79000000000000000000000000000000000000000000000001000001a0c4506c0065ab862cf07b0242bb9aac7223a5ca22692fa2ff8e5a88a8201637d5e2db996cf425f3373b5dfc4138d545f3721cc95d3b4e0b81e160b7080f07587be4e8682d9623b573fc9d4de8e35ae1f2d1e62eebd98ad0fe36f0453a3bc2e6e0ff0ef9e4504b738a013c81b9235d3069fe4d518c6bcfde8c6ae146343410e93ff481d182aecd860e9ea98d0044ef87",
+   "mailbox_id": "520eef07028bab0aba7e811e6d7bba79",
+   "state": {
+    "workspace": "3e7afa7ff8e262a2b4d26f4442d0b890",
+    "key_version": 1,
+    "devices": {
+     "8f7a92c06ffaacf8077bf2c7e764fdbd": {
+      "pub": "04f8723041e769dc9b8ed9aedf924f05b6962c3e77f0c945c7cd7848df16a1b6233c9653c06a4d3526201351a838bf496668abd08c97b99a7841b625b69ad7222d",
+      "scope": "operate",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     },
+     "c97c83c6fe2bb707e6a45dba5b4f1367": {
+      "pub": "0494b9b21a496f05c380623ddb32f87bf806d09eace8e465dcaffb530fb20c92e48f2c4cf35b4ce71722d6f07e7020ab7558f73e6b82d97c7a036f5793cbc08f11",
+      "scope": "look",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     }
+    },
+    "rids": {
+     "74dee331557b9b323cca8819aa9ca123": {
+      "device": "8f7a92c06ffaacf8077bf2c7e764fdbd",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "outcome": {
+       "status": 200
+      },
+      "until": 1790000500000
+     },
+     "f5fdf0c772b642598ef5e5aa85e1bfeb": {
+      "device": "8f7a92c06ffaacf8077bf2c7e764fdbd",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "outcome": {
+       "status": 200
+      },
+      "until": 1790000500000
+     }
+    },
+    "offers": {},
+    "pending_pairs": {},
+    "phones": {},
+    "streams": {},
+    "unverified": [],
+    "host_pub": "0465ef41535ff6ebd8e4ff80f258ecd8ec981a033f606f93d3d8b74eab907d45fdf84e206fdc047c1bed1b9fad5b6a71900b39b26f7c5a190ed41d2155c38786b0",
+    "limits": {
+     "per_device": 2,
+     "max_records": 16,
+     "busy_allowance": 1
+    }
+   },
+   "now_ms": 1790000000000,
+   "expect": {
+    "result": "accept",
+    "scope": "look",
+    "meta": {
+     "method": "GET",
+     "op": "http",
+     "path": "/"
+    },
+    "data": ""
+   },
+   "record_until": 1790000900000
+  },
+  {
+   "name": "quota_busy_recorded_then_replayed_after_the_quota_frees",
+   "state": {
+    "workspace": "3e7afa7ff8e262a2b4d26f4442d0b890",
+    "key_version": 1,
+    "devices": {
+     "8f7a92c06ffaacf8077bf2c7e764fdbd": {
+      "pub": "04f8723041e769dc9b8ed9aedf924f05b6962c3e77f0c945c7cd7848df16a1b6233c9653c06a4d3526201351a838bf496668abd08c97b99a7841b625b69ad7222d",
+      "scope": "operate",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     },
+     "c97c83c6fe2bb707e6a45dba5b4f1367": {
+      "pub": "0494b9b21a496f05c380623ddb32f87bf806d09eace8e465dcaffb530fb20c92e48f2c4cf35b4ce71722d6f07e7020ab7558f73e6b82d97c7a036f5793cbc08f11",
+      "scope": "look",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     }
+    },
+    "rids": {
+     "fa8cd61c017acaa82b2d8a64299d9061": {
+      "device": "8f7a92c06ffaacf8077bf2c7e764fdbd",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "outcome": {
+       "status": 200
+      },
+      "until": 1790000500000
+     },
+     "0c3bacd47d30d20e55f350b1f256432e": {
+      "device": "8f7a92c06ffaacf8077bf2c7e764fdbd",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "outcome": {
+       "status": 200
+      },
+      "until": 1790000500000
+     }
+    },
+    "offers": {},
+    "pending_pairs": {},
+    "phones": {},
+    "streams": {},
+    "unverified": [],
+    "host_pub": "0465ef41535ff6ebd8e4ff80f258ecd8ec981a033f606f93d3d8b74eab907d45fdf84e206fdc047c1bed1b9fad5b6a71900b39b26f7c5a190ed41d2155c38786b0",
+    "limits": {
+     "per_device": 2,
+     "max_records": 16,
+     "busy_allowance": 1
+    }
+   },
+   "steps": [
+    {
+     "envelope": "53485242010100013e7afa7ff8e262a2b4d26f4442d0b8908f7a92c06ffaacf8077bf2c7e764fdbd3ad9306644ee82d6a865576aa8a4666e000000000000000000000000000000000000000000000003000001a0c4506c006f4b5faf0a33deed191939efe0207b842a3e70464a11ca4ad41eaed7d504fff3058b389557cb0e3920c4fce1bae0419d14770f0bcf276634692dc3c5f7bbae0b440cfeaaf2b740fdb17680eb2227c407c7ec33683e400fc8c2eeda5cee451210270eaf9ce9193f73bb1ba76b2b6f20abb734b9d2498ac0950b961a78165e952ec1782b66ba49aa4b42148a",
+     "mailbox_id": "3ad9306644ee82d6a865576aa8a4666e",
+     "now_ms": 1790000000000,
+     "expect": {
+      "result": "refuse",
+      "code": "busy"
+     },
+     "record_until": 1790000900000
+    },
+    {
+     "envelope": "53485242010100013e7afa7ff8e262a2b4d26f4442d0b8908f7a92c06ffaacf8077bf2c7e764fdbd3ad9306644ee82d6a865576aa8a4666e000000000000000000000000000000000000000000000003000001a0c4506c006f4b5faf0a33deed191939efe0207b842a3e70464a11ca4ad41eaed7d504fff3058b389557cb0e3920c4fce1bae0419d14770f0bcf276634692dc3c5f7bbae0b440cfeaaf2b740fdb17680eb2227c407c7ec33683e400fc8c2eeda5cee451210270eaf9ce9193f73bb1ba76b2b6f20abb734b9d2498ac0950b961a78165e952ec1782b66ba49aa4b42148a",
+     "mailbox_id": "3ad9306644ee82d6a865576aa8a4666e",
+     "now_ms": 1790000001000,
+     "expect": {
+      "result": "refuse",
+      "code": "busy"
+     },
+     "record_until": 1790000900000
+    },
+    {
+     "envelope": "53485242010100013e7afa7ff8e262a2b4d26f4442d0b8908f7a92c06ffaacf8077bf2c7e764fdbd3ad9306644ee82d6a865576aa8a4666e000000000000000000000000000000000000000000000003000001a0c4506c006f4b5faf0a33deed191939efe0207b842a3e70464a11ca4ad41eaed7d504fff3058b389557cb0e3920c4fce1bae0419d14770f0bcf276634692dc3c5f7bbae0b440cfeaaf2b740fdb17680eb2227c407c7ec33683e400fc8c2eeda5cee451210270eaf9ce9193f73bb1ba76b2b6f20abb734b9d2498ac0950b961a78165e952ec1782b66ba49aa4b42148a",
+     "mailbox_id": "3ad9306644ee82d6a865576aa8a4666e",
+     "now_ms": 1790000600000,
+     "expect": {
+      "result": "refuse",
+      "code": "busy"
+     },
+     "record_until": 1790000900000
+    }
+   ]
+  },
+  {
+   "name": "quota_busy_does_not_consume_the_seq",
+   "state": {
+    "workspace": "3e7afa7ff8e262a2b4d26f4442d0b890",
+    "key_version": 1,
+    "devices": {
+     "8f7a92c06ffaacf8077bf2c7e764fdbd": {
+      "pub": "04f8723041e769dc9b8ed9aedf924f05b6962c3e77f0c945c7cd7848df16a1b6233c9653c06a4d3526201351a838bf496668abd08c97b99a7841b625b69ad7222d",
+      "scope": "operate",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     },
+     "c97c83c6fe2bb707e6a45dba5b4f1367": {
+      "pub": "0494b9b21a496f05c380623ddb32f87bf806d09eace8e465dcaffb530fb20c92e48f2c4cf35b4ce71722d6f07e7020ab7558f73e6b82d97c7a036f5793cbc08f11",
+      "scope": "look",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     }
+    },
+    "rids": {
+     "f44b10afab234b10862060549d17bfc1": {
+      "device": "8f7a92c06ffaacf8077bf2c7e764fdbd",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "outcome": {
+       "status": 200
+      },
+      "until": 1790000500000
+     },
+     "8ed96e1b206c4c528679714e640b7f41": {
+      "device": "8f7a92c06ffaacf8077bf2c7e764fdbd",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "outcome": {
+       "status": 200
+      },
+      "until": 1790000500000
+     }
+    },
+    "offers": {},
+    "pending_pairs": {},
+    "phones": {},
+    "streams": {},
+    "unverified": [],
+    "host_pub": "0465ef41535ff6ebd8e4ff80f258ecd8ec981a033f606f93d3d8b74eab907d45fdf84e206fdc047c1bed1b9fad5b6a71900b39b26f7c5a190ed41d2155c38786b0",
+    "limits": {
+     "per_device": 2,
+     "max_records": 16,
+     "busy_allowance": 1
+    }
+   },
+   "steps": [
+    {
+     "envelope": "53485242010100013e7afa7ff8e262a2b4d26f4442d0b8908f7a92c06ffaacf8077bf2c7e764fdbd3ad9306644ee82d6a865576aa8a4666e000000000000000000000000000000000000000000000003000001a0c4506c006f4b5faf0a33deed191939efe0207b842a3e70464a11ca4ad41eaed7d504fff3058b389557cb0e3920c4fce1bae0419d14770f0bcf276634692dc3c5f7bbae0b440cfeaaf2b740fdb17680eb2227c407c7ec33683e400fc8c2eeda5cee451210270eaf9ce9193f73bb1ba76b2b6f20abb734b9d2498ac0950b961a78165e952ec1782b66ba49aa4b42148a",
+     "mailbox_id": "3ad9306644ee82d6a865576aa8a4666e",
+     "now_ms": 1790000000000,
+     "expect": {
+      "result": "refuse",
+      "code": "busy"
+     },
+     "record_until": 1790000900000
+    },
+    {
+     "envelope": "53485242010100013e7afa7ff8e262a2b4d26f4442d0b8908f7a92c06ffaacf8077bf2c7e764fdbd02fc2eccc25a6368a0c1d55f169af6ae000000000000000000000000000000000000000000000003000001a0c45993c06287906b3136f61c20eae7ad890af64f7650ae5b9f2d6d6f33a063e9052ea847d8762f2f2dd1db1001d1be19fb790a2fd2edb29aa668deff3288efc9f58caf05d6960ed3b871d0b97993e2f84ecf2e5f2fe6406f2e948dfb004c57da6327ba3db566eaaece0b7c29c6fda46ab0fef3b049a7ed5a343cd147571032d3597937726806d0591c8677099997fa",
+     "mailbox_id": "02fc2eccc25a6368a0c1d55f169af6ae",
+     "now_ms": 1790000600000,
+     "expect": {
+      "result": "accept",
+      "scope": "operate",
+      "meta": {
+       "method": "GET",
+       "op": "http",
+       "path": "/"
+      },
+      "data": ""
+     },
+     "record_until": 1790001500000
+    }
+   ]
+  },
+  {
+   "name": "quota_past_the_busy_allowance_dropped",
+   "envelope": "53485242010100013e7afa7ff8e262a2b4d26f4442d0b8908f7a92c06ffaacf8077bf2c7e764fdbd434c189f5a1de63b379237f153cf4ef2000000000000000000000000000000000000000000000003000001a0c4506c006f4b5faf0a33deed191939efe0207b842a3e70464a11ca4ad41eaed7d504fff3058b389557cb0e3920c4fce1bae0419d14770f0bcf276634692dc37a433921c4d4d04ae0b9a1495d99870be0bccaf0d39d5ef1a764fd81bd20d0346e87682df6ceb77b9473cc3ee13302b3163306fa0316bb66c43f8e27151ac27ee5eb5e367d988a8c17c9dd279b5b0528",
+   "mailbox_id": "434c189f5a1de63b379237f153cf4ef2",
+   "state": {
+    "workspace": "3e7afa7ff8e262a2b4d26f4442d0b890",
+    "key_version": 1,
+    "devices": {
+     "8f7a92c06ffaacf8077bf2c7e764fdbd": {
+      "pub": "04f8723041e769dc9b8ed9aedf924f05b6962c3e77f0c945c7cd7848df16a1b6233c9653c06a4d3526201351a838bf496668abd08c97b99a7841b625b69ad7222d",
+      "scope": "operate",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     },
+     "c97c83c6fe2bb707e6a45dba5b4f1367": {
+      "pub": "0494b9b21a496f05c380623ddb32f87bf806d09eace8e465dcaffb530fb20c92e48f2c4cf35b4ce71722d6f07e7020ab7558f73e6b82d97c7a036f5793cbc08f11",
+      "scope": "look",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     }
+    },
+    "rids": {
+     "335e2a6070ba556fa6f40df2b9c78d70": {
+      "device": "8f7a92c06ffaacf8077bf2c7e764fdbd",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "outcome": {
+       "status": 200
+      },
+      "until": 1790000500000
+     },
+     "d80c274266c37db1c0da324f80029229": {
+      "device": "8f7a92c06ffaacf8077bf2c7e764fdbd",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "outcome": {
+       "status": 200
+      },
+      "until": 1790000500000
+     },
+     "bc1bac2adf7b9e4292f9b5128dad48d2": {
+      "device": "8f7a92c06ffaacf8077bf2c7e764fdbd",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "outcome": {
+       "status": 200
+      },
+      "until": 1790000500000
+     }
+    },
+    "offers": {},
+    "pending_pairs": {},
+    "phones": {},
+    "streams": {},
+    "unverified": [],
+    "host_pub": "0465ef41535ff6ebd8e4ff80f258ecd8ec981a033f606f93d3d8b74eab907d45fdf84e206fdc047c1bed1b9fad5b6a71900b39b26f7c5a190ed41d2155c38786b0",
+    "limits": {
+     "per_device": 2,
+     "max_records": 16,
+     "busy_allowance": 1
+    }
+   },
+   "now_ms": 1790000000000,
+   "expect": {
+    "result": "drop"
+   },
+   "record_until": null
+  },
+  {
+   "name": "quota_past_the_allowance_other_device_still_runs",
+   "envelope": "53485242010100013e7afa7ff8e262a2b4d26f4442d0b890c97c83c6fe2bb707e6a45dba5b4f1367520eef07028bab0aba7e811e6d7bba79000000000000000000000000000000000000000000000001000001a0c4506c0065ab862cf07b0242bb9aac7223a5ca22692fa2ff8e5a88a8201637d5e2db996cf425f3373b5dfc4138d545f3721cc95d3b4e0b81e160b7080f07587be4e8682d9623b573fc9d4de8e35ae1f2d1e62eebd98ad0fe36f0453a3bc2e6e0ff0ef9e4504b738a013c81b9235d3069fe4d518c6bcfde8c6ae146343410e93ff481d182aecd860e9ea98d0044ef87",
+   "mailbox_id": "520eef07028bab0aba7e811e6d7bba79",
+   "state": {
+    "workspace": "3e7afa7ff8e262a2b4d26f4442d0b890",
+    "key_version": 1,
+    "devices": {
+     "8f7a92c06ffaacf8077bf2c7e764fdbd": {
+      "pub": "04f8723041e769dc9b8ed9aedf924f05b6962c3e77f0c945c7cd7848df16a1b6233c9653c06a4d3526201351a838bf496668abd08c97b99a7841b625b69ad7222d",
+      "scope": "operate",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     },
+     "c97c83c6fe2bb707e6a45dba5b4f1367": {
+      "pub": "0494b9b21a496f05c380623ddb32f87bf806d09eace8e465dcaffb530fb20c92e48f2c4cf35b4ce71722d6f07e7020ab7558f73e6b82d97c7a036f5793cbc08f11",
+      "scope": "look",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     }
+    },
+    "rids": {
+     "c8d29097ebe73a655b6ce30f55ed6490": {
+      "device": "8f7a92c06ffaacf8077bf2c7e764fdbd",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "outcome": {
+       "status": 200
+      },
+      "until": 1790000500000
+     },
+     "c78a12c90c904d64cb82601c44bcd5fd": {
+      "device": "8f7a92c06ffaacf8077bf2c7e764fdbd",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "outcome": {
+       "status": 200
+      },
+      "until": 1790000500000
+     },
+     "c747849ca64eace8d7f6f5c68e2f39e5": {
+      "device": "8f7a92c06ffaacf8077bf2c7e764fdbd",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "outcome": {
+       "status": 200
+      },
+      "until": 1790000500000
+     }
+    },
+    "offers": {},
+    "pending_pairs": {},
+    "phones": {},
+    "streams": {},
+    "unverified": [],
+    "host_pub": "0465ef41535ff6ebd8e4ff80f258ecd8ec981a033f606f93d3d8b74eab907d45fdf84e206fdc047c1bed1b9fad5b6a71900b39b26f7c5a190ed41d2155c38786b0",
+    "limits": {
+     "per_device": 2,
+     "max_records": 16,
+     "busy_allowance": 1
+    }
+   },
+   "now_ms": 1790000000000,
+   "expect": {
+    "result": "accept",
+    "scope": "look",
+    "meta": {
+     "method": "GET",
+     "op": "http",
+     "path": "/"
+    },
+    "data": ""
+   },
+   "record_until": 1790000900000
+  },
+  {
+   "name": "quota_store_full_drops",
+   "envelope": "53485242010100013e7afa7ff8e262a2b4d26f4442d0b890c97c83c6fe2bb707e6a45dba5b4f1367520eef07028bab0aba7e811e6d7bba79000000000000000000000000000000000000000000000001000001a0c4506c0065ab862cf07b0242bb9aac7223a5ca22692fa2ff8e5a88a8201637d5e2db996cf425f3373b5dfc4138d545f3721cc95d3b4e0b81e160b7080f07587be4e8682d9623b573fc9d4de8e35ae1f2d1e62eebd98ad0fe36f0453a3bc2e6e0ff0ef9e4504b738a013c81b9235d3069fe4d518c6bcfde8c6ae146343410e93ff481d182aecd860e9ea98d0044ef87",
+   "mailbox_id": "520eef07028bab0aba7e811e6d7bba79",
+   "state": {
+    "workspace": "3e7afa7ff8e262a2b4d26f4442d0b890",
+    "key_version": 1,
+    "devices": {
+     "8f7a92c06ffaacf8077bf2c7e764fdbd": {
+      "pub": "04f8723041e769dc9b8ed9aedf924f05b6962c3e77f0c945c7cd7848df16a1b6233c9653c06a4d3526201351a838bf496668abd08c97b99a7841b625b69ad7222d",
+      "scope": "operate",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     },
+     "c97c83c6fe2bb707e6a45dba5b4f1367": {
+      "pub": "0494b9b21a496f05c380623ddb32f87bf806d09eace8e465dcaffb530fb20c92e48f2c4cf35b4ce71722d6f07e7020ab7558f73e6b82d97c7a036f5793cbc08f11",
+      "scope": "look",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     }
+    },
+    "rids": {
+     "5d35e70810710d325f683572bdf56131": {
+      "device": "8f7a92c06ffaacf8077bf2c7e764fdbd",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "outcome": {
+       "status": 200
+      },
+      "until": 1790000500000
+     },
+     "0b201de2148c1498e73304850798a301": {
+      "device": "8f7a92c06ffaacf8077bf2c7e764fdbd",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "outcome": {
+       "status": 200
+      },
+      "until": 1790000500000
+     },
+     "736f6cd00cd008065757cec25d0addc3": {
+      "device": "c97c83c6fe2bb707e6a45dba5b4f1367",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "outcome": {
+       "status": 200
+      },
+      "until": 1790000500000
+     }
+    },
+    "offers": {},
+    "pending_pairs": {},
+    "phones": {},
+    "streams": {},
+    "unverified": [],
+    "host_pub": "0465ef41535ff6ebd8e4ff80f258ecd8ec981a033f606f93d3d8b74eab907d45fdf84e206fdc047c1bed1b9fad5b6a71900b39b26f7c5a190ed41d2155c38786b0",
+    "limits": {
+     "per_device": 2,
+     "max_records": 3,
+     "busy_allowance": 1
+    }
+   },
+   "now_ms": 1790000000000,
+   "expect": {
+    "result": "drop"
+   },
+   "record_until": null
+  },
+  {
+   "name": "quota_expired_records_do_not_count",
+   "envelope": "53485242010100013e7afa7ff8e262a2b4d26f4442d0b8908f7a92c06ffaacf8077bf2c7e764fdbd434c189f5a1de63b379237f153cf4ef2000000000000000000000000000000000000000000000003000001a0c4506c006f4b5faf0a33deed191939efe0207b842a3e70464a11ca4ad41eaed7d504fff3058b389557cb0e3920c4fce1bae0419d14770f0bcf276634692dc37a433921c4d4d04ae0b9a1495d99870be0bccaf0d39d5ef1a764fd81bd20d0346e87682df6ceb77b9473cc3ee13302b3163306fa0316bb66c43f8e27151ac27ee5eb5e367d988a8c17c9dd279b5b0528",
+   "mailbox_id": "434c189f5a1de63b379237f153cf4ef2",
+   "state": {
+    "workspace": "3e7afa7ff8e262a2b4d26f4442d0b890",
+    "key_version": 1,
+    "devices": {
+     "8f7a92c06ffaacf8077bf2c7e764fdbd": {
+      "pub": "04f8723041e769dc9b8ed9aedf924f05b6962c3e77f0c945c7cd7848df16a1b6233c9653c06a4d3526201351a838bf496668abd08c97b99a7841b625b69ad7222d",
+      "scope": "operate",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     },
+     "c97c83c6fe2bb707e6a45dba5b4f1367": {
+      "pub": "0494b9b21a496f05c380623ddb32f87bf806d09eace8e465dcaffb530fb20c92e48f2c4cf35b4ce71722d6f07e7020ab7558f73e6b82d97c7a036f5793cbc08f11",
+      "scope": "look",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     }
+    },
+    "rids": {
+     "f589b02d66ff9a0f4b0a763e25ed1192": {
+      "device": "8f7a92c06ffaacf8077bf2c7e764fdbd",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "outcome": {
+       "status": 200
+      },
+      "until": 1790000000000
+     },
+     "987e0841a425458de9689e89f63d4b0c": {
+      "device": "8f7a92c06ffaacf8077bf2c7e764fdbd",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "outcome": {
+       "status": 200
+      },
+      "until": 1790000000000
+     }
+    },
+    "offers": {},
+    "pending_pairs": {},
+    "phones": {},
+    "streams": {},
+    "unverified": [],
+    "host_pub": "0465ef41535ff6ebd8e4ff80f258ecd8ec981a033f606f93d3d8b74eab907d45fdf84e206fdc047c1bed1b9fad5b6a71900b39b26f7c5a190ed41d2155c38786b0",
+    "limits": {
+     "per_device": 2,
+     "max_records": 16,
+     "busy_allowance": 1
+    }
+   },
+   "now_ms": 1790000000000,
+   "expect": {
+    "result": "accept",
+    "scope": "operate",
+    "meta": {
+     "method": "GET",
+     "op": "http",
+     "path": "/"
+    },
+    "data": ""
+   },
+   "record_until": 1790000900000
+  },
+  {
    "name": "streams_belong_to_the_device_that_opened_them",
    "state": {
     "workspace": "3e7afa7ff8e262a2b4d26f4442d0b890",
@@ -4505,6 +5127,54 @@
    "now_ms": 1790000002500,
    "expect": {
     "result": "drop"
+   }
+  },
+  {
+   "name": "stale_timestamp_pair_refusal_with_its_own_host_key_gives_no_offset",
+   "envelope": "53485242010205013e7afa7ff8e262a2b4d26f4442d0b8908f7a92c06ffaacf8077bf2c7e764fdbdb329beefe7ddfe482739ae52d1612980000000000000000000000000000000000000000000000000000001a0c45073d0335bd22d732fbdfeadbd70fa68237cab20ff97cf864d72f4cfa3e29fb09642be500b4cd681cb1fddb2be6b64d049bffe96943e6f65bde16cb66b3917056b75ab28709a3b324c58956b53e3a57da0d5b8e1ebcb64c322bfa2de0583b78eb749b6c4724119b11eae89dd3946b0bbb92e8dbd3d9f07a31c4f611d70b2c7a88fd368e44f9199eb3fdd6eaabd746d402f019b59af974070151e1d9a019b9ce750ef647be06888a2b2b7a90a34db00ef108ef3e066fa07b2469cc9e9dd3396159139d908e246795a59a9a6567657a61a426a84731deab42a7d272ca87c8e795e1c26cc86f032389a17dcdd6f3bcf549078bb7133f921fb8395de997b33f486e3d2e5c08b91ca17881cf93bd8fd015ae810dc0fa45776a3f6f43587332fe4e0681d0f17bcdb9cdb8803892fe6",
+   "mailbox": {
+    "id": "b329beefe7ddfe482739ae52d1612980",
+    "idx": 0,
+    "last": true,
+    "stream": false
+   },
+   "host_pin": "10e80d1f982cc47e28763317cead1e3f80f5363e2253cb02d9ac6024e003b6b3",
+   "pending": {
+    "b329beefe7ddfe482739ae52d1612980": {
+     "next": 0,
+     "stream": false
+    }
+   },
+   "now_ms": 1790000402000,
+   "expect": {
+    "result": "drop"
+   }
+  },
+  {
+   "name": "stale_timestamp_pair_refusal_adopted_once_per_request",
+   "envelope": "53485242010205013e7afa7ff8e262a2b4d26f4442d0b8908f7a92c06ffaacf8077bf2c7e764fdbdb329beefe7ddfe482739ae52d1612980000000000000000000000000000000000000000000000000000001a0c45073d0748afa76123f638034026703fcfa7d1526da92e6f4c822ee9aa1d1300506676835971f9911a0d98cd944d53d39fc3795131abd8ab05092926be7cfe0142f28c856fec7f3936a6571e7ad4cfe7ce200e1ea7e244883a5475892743eaa536b097a521f6e794e874d0c3b85154441f9763f487e10eea59f79b220ea53e22d4c687fdb010b1ece2e5d58ad5c752265d4ef76f51a71b91c2ee7f0627545837692e73a9fd3e8d0ee084366aa5789c5a812e384ee323f3d3466f4b90320c2f39d91c6e3d6da7d28b5d3cf8c1fd5a594f6217ed1f9f586b7e989a2c51246f8b205ba1bee3500cfb8b861b110099eb22c2cebb18dc3d6546077ffae51f82b401a86f42c7856fa057662d00342616004a96598aef1d039cacd30c1ac6b0a8e577e911426c22990cb1e626351c43f",
+   "mailbox": {
+    "id": "b329beefe7ddfe482739ae52d1612980",
+    "idx": 0,
+    "last": true,
+    "stream": false
+   },
+   "host_pin": "10e80d1f982cc47e28763317cead1e3f80f5363e2253cb02d9ac6024e003b6b3",
+   "pending": {
+    "b329beefe7ddfe482739ae52d1612980": {
+     "next": 0,
+     "stream": false,
+     "offset_adopted": true
+    }
+   },
+   "now_ms": 1790000402000,
+   "expect": {
+    "result": "accept",
+    "host_pub": "0465ef41535ff6ebd8e4ff80f258ecd8ec981a033f606f93d3d8b74eab907d45fdf84e206fdc047c1bed1b9fad5b6a71900b39b26f7c5a190ed41d2155c38786b0",
+    "fingerprint": null,
+    "refusal": "stale_timestamp",
+    "offset_ms": null,
+    "clock_wrong": null
    }
   },
   {

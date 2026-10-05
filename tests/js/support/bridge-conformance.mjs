@@ -238,7 +238,7 @@ export async function conformance(B, C, VEC) {
       }
       const key = await B.hostKeyFromPin(hex(meta.host_pub), hex(c.host_pin));
       if (!await B.verifySigned(key, sig, B.signedBytes(header, body))) throw new Error("host signature");
-      const pending = new Map(Object.entries(c.pending).map(([k, v]) => [k, { ...v }]));
+      const pending = new Map(Object.entries(c.pending).map(([k, v]) => [k, { ...v, offsetAdopted: v.offset_adopted }]));
       const r = await B.openResponse({ workspace: VEC.keys.workspace, kWs, keyVersion: 1, device: VEC.ids.device_a.device_id,
         hostKey: key, pending, offsetMs: 0 }, env, c.mailbox, c.now_ms);
       got = r.result !== "accept" ? { result: "drop" } : { result: "accept", host_pub: meta.host_pub,

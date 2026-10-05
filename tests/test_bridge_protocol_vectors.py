@@ -118,7 +118,7 @@ def test_host_case(c):
     s = host_state(c)
     for i, st in enumerate(steps_of(c)):
         res = ref.host_check(envelope_of(st), s, st["now_ms"], st["mailbox_id"])
-        assert {k: v for k, v in res.items() if k in st["expect"]} == st["expect"], f"step {i}"
+        assert {k: v for k, v in res.items() if k in ref.HOST_EXPECT_KEYS} == st["expect"], f"step {i}"   # exact
         assert res["result"] == st["expect"]["result"], f"step {i}"
         rec = s["rids"].get(st["mailbox_id"])
         assert (rec["until"] if rec else None) == st["record_until"], f"step {i}: retention"

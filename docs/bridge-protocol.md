@@ -37,7 +37,8 @@ differently.
 - §3.5: a request's meta with a duplicate key, NaN or Infinity, a non-canonical b64u field or upper-case
   hex is `malformed`.
 - §5.3: a finished record whose body was over 64 KiB answers a replay `already_done` with its stored
-  `status`. Per-device store quotas with a `busy` refusal (wire details pending).
+  `status`. Per-device store quotas with a recorded `busy` refusal, and a global cap past which the host
+  drops (§5.3, §6.1 step 4b).
 - §6.2: a refusal's meta carries only its code and the fields documented for it.
 - §9.2: a failed `credential_finish` is `assertion_failed` and consumes its challenge; `fmt` and `attStmt`
   are ignored. §9.4: a fresh grant must start before `expires_ms`.
@@ -464,12 +465,28 @@ Once the record has expired, the envelope's seq is consumed, so it is refused an
 (`test_replay_never_runs_twice`). The signature is not in the digest because it is malleable
 (§3.4).
 
-**Store limits. PENDING:** the `busy` refusal's exact wire details come from the host library (orch-core#142,
-PR #144); until then this paragraph is not normative for the wire, and it has no vectors (F8). The request store
-keeps at most **1024** unexpired records per device and **16384** in total. A device over its quota is
-refused `busy` (recorded, signed, no text); other devices are unaffected. A host that cannot record drops.
-One host-wide cap is not enough: ordinary typing (one request per keystroke) or a Look-scope device could
-fill it and so silence every device.
+**Store limits.** The request store keeps at most **1024** unexpired records per device (`PER_DEVICE`) and
+**16384** in total (`MAX_RECORDS`). Both count only unexpired records.
+
+- A device that already holds `PER_DEVICE` unexpired records is refused **`busy`** at §6.1 step 4b, right
+  after the replay step and before framing, so `busy` does **not** consume the sequence number. The refusal
+  is recorded like every refusal and then sent: one response chunk with flags `LAST | REFUSAL`, seq 0, the
+  host's clock and a fresh salt, sealed and signed with the host key. Its meta is exactly
+  `{"refusal": "busy"}`, with no other field and no text. A replay re-sends the stored refusal unchanged;
+  it has no `host_ms` or `high` to re-stamp. A redelivery after the quota has freed still gets the stored
+  `busy` and never runs.
+- A device may hold up to **64** recorded `busy` refusals above its quota (`BUSY_ALLOWANCE`, so at most
+  `PER_DEVICE + BUSY_ALLOWANCE` records in all). Past that its requests are **dropped**: a refusal that
+  could not be recorded would let the same bytes run later.
+- When the store holds `MAX_RECORDS` unexpired records, a host that cannot record **drops**, whoever
+  sends. Other devices are never refused `busy` because of one device's quota.
+
+One host-wide cap alone is not enough: ordinary typing or a Look-scope device could fill it and so silence
+every device. With 1024 records and 900 s of retention, one device sustains only about 1.1 requests per
+second, so typing one request per keystroke reaches `busy` within minutes (F4).
+
+Vectors use smaller limits, given as `state.limits` (`per_device`, `max_records`, `busy_allowance`): the
+host cases whose names start with `quota_`.
 
 ## 6. What the host does with a request
 
@@ -510,6 +527,10 @@ mailbox already shows that a response exists and its size.
    `pair_refusal_for_open_offer_under_spent_host_budget`, `pair_refusal_without_offer_under_spent_host_budget`,
    `pair_refusals_spent_the_offers_own_budget`, `pair_request_under_spent_host_budget_succeeds`).
 4. **Replay.** A known rid gets §5.3's answer.
+
+   4b. **Quota.** A device holding `PER_DEVICE` unexpired records: record, then refuse `busy` (§5.3). A
+   host that cannot record (the device past its allowance, or the store at `MAX_RECORDS`) drops, at this
+   step and at every later step that records.
 5. **Framing.** If the plaintext framing or the meta JSON is invalid: record, then refuse `malformed`.
    This comes before step 6, so a malformed envelope does **not** consume its seq (vector
    `malformed_does_not_consume_its_seq`).
@@ -531,7 +552,7 @@ to 20 requests per second, which bounds that work.
 
 `malformed`, `not_paired`, `revoked`, `bad_signature`, `rid_conflict`, `already_done`,
 `stale_timestamp`, `stale_sequence`, `pairing_closed`, `forbidden_scope`, `assertion_required`,
-`lease_required`, `assertion_failed`, `scope_changed`, `stopped`, and `busy` (§5.3, pending). A refusal's
+`lease_required`, `assertion_failed`, `scope_changed`, `stopped`, and `busy` (§5.3, no fields). A refusal's
 meta is `{"refusal": code}` plus only the fields documented for that code: `host_ms` (`stale_timestamp`),
 `high` (`stale_sequence`), `status` (`already_done`), the challenge fields of `assertion_required` /
 `lease_required` (§9.4), and `host_pub` on **every refusal to an `op = "pair"` request** (§8.1). It carries
@@ -636,7 +657,13 @@ host key on first use, and never replaces the pin without a new pairing link (D6
    before acting on the refusal, including adopting the clock offset from `stale_timestamp` (§5.1, once per
    pending rid, at most 24 h). A refusal it cannot verify counts as **no answer** (§8.1's 60 s rule). Without
    this, a device with a skewed clock could never pair, and adopting an unverified offset would let any
-   K_ws holder shift its clock by up to 24 h.
+   K_ws holder shift its clock by up to 24 h. The pin check is what stops this attack: a K_ws holder can
+   seal a `stale_timestamp` refusal with its **own** key as `host_pub` and sign it with that key, and the
+   signature verifies; only the pin tells the device it is not the host's (vector
+   `stale_timestamp_pair_refusal_with_its_own_host_key_gives_no_offset`). The offset is adopted once per
+   pending rid (vector `stale_timestamp_pair_refusal_adopted_once_per_request`). A `host_pub` that is not
+   65 bytes is dropped too; it can never match the pin of a 65-byte key, so no separate vector tells that
+   check apart from the pin check (an equivalent mutant).
 
    Vectors `pending_answers`: accepted; with an extra field; a host key not of the pin; signed by another
    key; sealed under another key; no `host_pub`; not `pending`; outside the window; out of order; the
@@ -1017,7 +1044,7 @@ checked too. The `why` fields are informative and not part of the contract.
 | `seal` | header encoding, K_msg, zero nonce, AAD, `ciphertext || tag` |
 | `sign`, `sig_scalars` | valid, wrong key, changed message, the malleable twin, `r = 0`, `r = n`, `s = n`, `r = n + 1`, `r = n − 1`, short |
 | `ids` | device ids (and that another workspace gives another id), fingerprints, the host pin |
-| `host_cases` | full request; a replay of a finished request whose body was not stored; meta with a duplicate key, NaN, Infinity; a pair request with upper-case hex or a short MAC; replay without an outcome, of a finished request, from another device's record; same rid with other content; old, future and edge timestamps; a future-dated envelope refused and then in the window; tampered tag and header; mailbox id mismatch; wrong-device signature; unknown device; refusal budget (unverified dropped, signed still runs); unknown version, direction, flag; another workspace's key; revoked; meta over 64 KiB; seq 0, repeated, below the window, reordered, the sliding window, stored refusal versus a moved window; a far-future `ts_ms` with bounded retention; a re-stamped replay; a stream opened through `STREAM`, used by its own device and refused to another; a stream never opened; oversize; budgets (any claimed device, an open offer's own budget, pairing under a spent host budget); pairing (first, twice, status, other key, bad MAC, no offer, stale, device id not of the key, phone link with and without proof) |
+| `host_cases` | the store quotas (`quota_*`: under, at the limit, another device unaffected, busy recorded and replayed after the quota frees, busy does not consume the seq, past the allowance, the global cap, expired records); full request; a replay of a finished request whose body was not stored; meta with a duplicate key, NaN, Infinity; a pair request with upper-case hex or a short MAC; replay without an outcome, of a finished request, from another device's record; same rid with other content; old, future and edge timestamps; a future-dated envelope refused and then in the window; tampered tag and header; mailbox id mismatch; wrong-device signature; unknown device; refusal budget (unverified dropped, signed still runs); unknown version, direction, flag; another workspace's key; revoked; meta over 64 KiB; seq 0, repeated, below the window, reordered, the sliding window, stored refusal versus a moved window; a far-future `ts_ms` with bounded retention; a re-stamped replay; a stream opened through `STREAM`, used by its own device and refused to another; a stream never opened; oversize; budgets (any claimed device, an open offer's own budget, pairing under a spent host budget); pairing (first, twice, status, other key, bad MAC, no offer, stale, device id not of the key, phone link with and without proof) |
 | `device_cases` | full response chunk; signed by a device key; for another device; for an unknown request; tampered tag; old timestamp, and corrected by the offset; out of order; mailbox mismatch; refusal chunk; refusal without `LAST`; a `stale_timestamp` refusal to a skewed clock, adopted once per request, out of range, for a request not pending; another refusal code to a skewed clock (not exempt); direction 1; version 2; an unknown flag; over 256 KiB; another key version; another workspace; exactly 300 s old and ahead, and 300 s and 1 ms ahead; mailbox id, idx (another, and not an integer) and stream mismatches; a stream's rid answered without STREAM; a `stale_timestamp` with a non-integer `host_ms`; random body and signature (no pin failure) |
 | `pairing` | the link fragment, host pin, pairing MAC, device id, fingerprint, phone-link proof |
 | `pin_runs` | three pin failures in a row; forged chunks never count; a verified chunk resets; forged chunks neither count nor reset |
@@ -1030,8 +1057,8 @@ checked too. The `why` fields are informative and not part of the contract.
 
 Every MUST in §3–§9 that the reference implements has a negative vector. Every host case and step also
 pins the rid record's `until` (`record_until`), and every assertion case the stored count afterwards
-(`sign_count_after`). `tests/test_bridge_protocol_mutations.py` applies 104 mutations to the reference
-(the first review's 16, the second review's 12, the third review's boundaries, the amendment's 43, and one
+(`sign_count_after`). `tests/test_bridge_protocol_mutations.py` applies 117 mutations to the reference
+(the first review's 16, the second review's 12, the third review's boundaries, the amendment's 56, and one
 or more for each rule added since) and fails unless the vectors catch every one. The browser module's
 `tests/js/bridge-mutations.test.mjs` applies its own mutations to the production device code, and the
 vectors alone catch every one of them.
@@ -1124,7 +1151,8 @@ exception (D4).
   - assertion and registration challenges: 120 s;
   - rid records: `received_at + 900 s`, refusals included (never from `ts_ms`);
   - stored replay body: 64 KiB (beyond it only the head, `body_stored: false`);
-  - request store: 1024 unexpired records per device, 16384 in total (`busy`; PENDING, F8);
+  - request store: 1024 unexpired records per device, 16384 in total; 64 recorded `busy` refusals above a
+    device's quota, then its requests are dropped (§5.3);
   - refusal budget: 10 per minute, host-wide; 5 per minute for each open pairing offer;
   - clock offset a device adopts: at most 24 h, once per pending request;
   - a pairing with no answer: 60 s, then the "used by someone else" warning;
@@ -1139,8 +1167,11 @@ exception (D4).
   `credential_begin` / `credential_finish`, with R3.
 - **F3:** the HTTP mapping inside `meta` (method, path, header allow-list, the remote client address) is
   R2/R3's; this document fixes only the envelope around it.
-- **F4:** keystroke requests show typing rhythm and length to the server (§4); R6 should batch or pad
-  them.
+- **F4 (R6, the terminal client), MUST:** the terminal client MUST batch input, or use a stream with its
+  own accounting. With 1024 records per device and 900 s of retention, a device sustains only about 1.1
+  requests per second, so unbatched typing (one request per keystroke) reaches `busy` within minutes.
+  Keystroke requests also show typing rhythm and length to the server (§4), which batching or padding
+  reduces.
 - **F5:** update `docs/threat-model.md` with the bridge's cleartext header fields once R3 and R10 ship.
 - **F6:** a KEK with the `unwrapKey` usage, so that raw MK never reaches JavaScript (§10.1).
 - **F7 (R3b, the host's dispatcher):**
@@ -1150,9 +1181,8 @@ exception (D4).
   - offers, approvals and rejections run under the host lock;
   - the random source is `os.urandom`;
   - a damaged registry or store is shown to the owner, not just dropped.
-- **F8 (PENDING):** the `busy` refusal's wire details and its vectors, and the store quotas (§5.3, D9),
-  once the host-library builder (orch-core#142, PR #144) reports them. Until then they are not normative for
-  the wire.
+- **F8 (done):** the `busy` refusal's wire details and the store quotas are normative in §5.3, aligned with
+  the host library (orch-core PR #144), and have vectors (`quota_*`).
 - **F9 (R10b, the TIX app), MUSTs:** R10b parses `nonce` with `/^[0-9a-f]{64}$/` and `expires_ms` with
   `Number.isSafeInteger(x) && x >= 0` before calling `assertionChallenge` or `registrationChallenge`;
   `crypto.js` `hexToBytes` accepts upper case and must not be used unguarded. R10b opens every answer to a
