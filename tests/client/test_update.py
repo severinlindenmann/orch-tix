@@ -16,8 +16,8 @@ def skill_v2(tmp_path):
     shutil.copytree(REPO / "skill" / "sharing", dst)
     p = dst / "sharing.py"
     text = p.read_text()
-    assert 'VERSION = "2.2.0"' in text
-    p.write_text(text.replace('VERSION = "2.2.0"', 'VERSION = "9.9.9"', 1))
+    assert 'VERSION = "2.3.0"' in text
+    p.write_text(text.replace('VERSION = "2.3.0"', 'VERSION = "9.9.9"', 1))
     (dst / "SKILL.md").write_text("# sharing 9.9.9\n")
     (dst / "tickets-SKILL.md").write_text("---\nname: sharing-tickets\n---\n# tickets 9.9.9\n")
     return dst
@@ -44,7 +44,7 @@ def _snapshot(d: Path) -> dict:
 
 def test_whoami_reports_update_available(cli, installed):
     j = cli(installed.root, "whoami", "--json").json()
-    assert j["skill_version"] == "2.2.0"
+    assert j["skill_version"] == "2.3.0"
     assert j["latest_skill_version"] == "9.9.9" and j["update_available"] is True
     assert "update available: 9.9.9" in cli(installed.root, "whoami").out
 
@@ -53,7 +53,7 @@ def test_check_only_changes_nothing(cli, installed):
     skill = installed.config_path.parent
     before = _snapshot(skill)
     r = cli(installed.root, "update", "--check")
-    assert r.code == 0 and "update available: 2.2.0 → 9.9.9" in r.out
+    assert r.code == 0 and "update available: 2.3.0 → 9.9.9" in r.out
     assert _snapshot(skill) == before
 
 
@@ -72,7 +72,7 @@ def test_update_replaces_files_verifies_hashes_and_keeps_config(cli, installed, 
     r = cli(installed.root, "update")
     monkeypatch.undo()
     assert r.code == 0, r.err
-    assert "updated 2.2.0 → 9.9.9" in r.out and "new Claude Code session" in r.out
+    assert "updated 2.3.0 → 9.9.9" in r.out and "new Claude Code session" in r.out
     for name in ("SKILL.md", "tickets-SKILL.md", "sharing", "sharing.py"):
         assert (skill / name).read_bytes() == (skill_v2 / name).read_bytes()
     assert order[-1] == "sharing.py"

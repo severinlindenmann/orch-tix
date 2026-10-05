@@ -54,9 +54,11 @@ What TIX protects, what it does not, and exactly which fields the server can rea
 - **Losing both the passphrase and the recovery key loses the files.** Nobody,
   including root on the server, can undo that.
 - **Mirrors: what the server sees in cleartext.**
-  - Per space: its id, the owner device and when the desktop was last seen.
+  - Per space: its id, the owner device, when the desktop was last seen and **`notify_messages`**: whether agent
+    messages that name no ticket may notify your phone (a yes/no, off by default).
   - Per mirror: `status`, `priority`, `needs` (question, approval or verdict), the number of open questions,
-    the schema version, the mirror rev and timestamps. It also stores the pushing device's `project` and its
+    the schema version, the mirror rev and timestamps, and **`notify`**: whether this ticket may notify your phone
+    (a yes/no, off by default; see Push notifications). It also stores the pushing device's `project` and its
     name as `created_by_name`, and a `type` column (always `feature` for a mirror).
   - Per decision: the space id, its kind, the TIX number, the browser session's name that sent it, its key
     version, timestamps and the ack.
@@ -92,6 +94,16 @@ What TIX protects, what it does not, and exactly which fields the server can rea
   the browser vendor's push service (Apple, Google or Mozilla), encrypted to the subscription. The **VAPID
   private key** sits in the server database; it only lets someone send notifications to your subscribed
   browsers.
+- **Push notifications are per ticket and off by default.** The server sends a push for a mirror only while its
+  cleartext `notify` is on, and for an agent message only when its ticket's `notify` is on or, with no ticket, its
+  space's `notify_messages` is on. A workspace join request ("<device> wants to sync") always notifies, because it
+  is a security prompt. The switch is the owner's: Mission Control (new ticket, the approve card, the ticket page)
+  sets it through the addon, and the app's "Notify me about this ticket" sets it through a browser-session-only
+  endpoint (a device gets 403). Honest limit: the desktop's device credential, which the `sharing` CLI uses for
+  agents too, can also write `notify` in a mirror push, because the same credential pushes mirrors. orch-core keeps
+  agents from setting it through orch (human-only everywhere), and the sharing skill tells agents not to, but a
+  process that holds the device token could. The worst outcome is a notification on your phone, never access to
+  content: the flag is not a security boundary, only a courtesy switch, and the server still never sees any text.
 - **Downloads in Mission Control** are decrypted by the sharing CLI on the desktop, never in the browser. Core
   serves each one once, as an attachment (single-use token, 5 minutes, `nosniff`, sandbox CSP). Public and
   upload link URLs are shown once and never logged.
@@ -106,3 +118,144 @@ What TIX protects, what it does not, and exactly which fields the server can rea
   navigate its own frame to an arbitrary URL (there's no `allow-top-navigation`, so it can't escape
   the frame, but a `location` change is itself a request). Either way it can only leak the
   attachment's own content, never tix's.
+
+## Remote bridge (Orch Remote)
+
+What changes when a workspace is used from a phone or another computer through TIX. The wire format, keys
+and every rule below are in [bridge-protocol.md](bridge-protocol.md) (cited as §n); this section says what
+that means for you. It describes the bridge as specified and as the TIX server code (the mailbox and the
+presence routes) implements it. The host side in orch-core and the TIX app side are still being built (#25,
+#26, orch-core#85), so a statement about the host or the app is the specification's, not yet a shipped
+behaviour, and is marked *planned* where it matters.
+
+### Bridge data classes
+
+| Class | Examples | Who can read it |
+| --- | --- | --- |
+| Sealed body | request path and headers, request body, dashboard pages, ticket text, terminal output, file contents | the host and every holder of the master key (see "A holder of the master key"); never the server |
+| Envelope header (cleartext, authenticated) | version, direction, flags, key version, workspace id, device id, request id, stream id, sequence number, timestamp, salt | the server and anyone on the path |
+| Mailbox facts | which client posted, the browser tab id, whether a host is online, sizes, timing | the server |
+| Presence | workspace id, last heartbeat, goodbye time, three counts, a Factory code and up to three integers | the server, and any signed-in browser or approved device |
+| Names | machine and device names (plaintext today); workspace labels (sealed) | the server for device names; only master-key holders for labels |
+| Secrets | master key, workspace channel key, device signing key, host signing key, pairing secret | never the server (the device signing key never leaves its browser) |
+
+### What the server sees in the clear
+
+- **Envelope header** (§3.2): the 104-byte header is cleartext but authenticated (it is the AAD and is
+  signed). It shows the version, direction, flags, key version, workspace id, the device id, the request
+  id, the stream id, the sequence number, the sender's clock and the per-envelope salt. The device id is
+  stable per device and workspace, not across workspaces (§2.4). The sequence numbers and the sender's
+  clock are visible too, so the server can tell how many requests a device has made and what its clock
+  says.
+- **Sizes and timing.** The mailbox stores the body as the base64url text it received and checks only its
+  shape and size (`fileshare/routes/bridge.py` `_sealed`; `fileshare/bridge.py` docstring). It therefore
+  sees each envelope's size, when it was posted and fetched, and the number of chunks of a response.
+- **Mailbox routing facts.** Which client posted a request (an approved device's id or the signed-in
+  session), the request's tab id (chosen by the browser, never interpreted), whether it is a stream, and
+  whether the host is online (`Route` in `bridge.py`; `host_online` in the post reply). It also sees
+  the host's device id and a holder id for the lease. A refusal or a lease change is written to the server's
+  log with the workspace id and, for a lease, the device id (`bridge.refuse`, `host_lease`); no body is
+  logged.
+- **Presence** (`fileshare/presence.py`, migration 010): the workspace id, the owning device's id, the
+  time of the last heartbeat and of the goodbye, three counts (sessions, in progress, needs you), a short
+  Factory state code (`none`, `running`, `paused`, `waiting`, `ready`, `stopped`, `done`) and three
+  optional integers (children done, children total, budget percent). The state (online, not answering,
+  lost, stopped, never started) is derived from those times on read. The table holds no name. Any signed-in
+  browser or approved device may read it (`GET /api/presence`).
+- **Machine and device names are plaintext today.** `devices.name` is stored in the clear and is returned
+  as `owner_name` with every space, including by `GET /api/presence`, which is how the status page groups
+  workspaces by machine. Workspace labels are different: they are sealed under the master key (`enc_label`).
+  Sealing device names is tracked in [#75](https://github.com/severinlindenmann/orch-tix/issues/75); until it
+  ships, a server operator can read your machine and device names.
+
+### What the server never sees
+
+Request paths and headers, page and response content, ticket text, terminal output and keystrokes, file
+names and contents, workspace labels and any key. All of those are inside the sealed body (§3.5) or never
+leave a device. The mailbox keeps a sealed request for at most 60 seconds, deleted when the host fetches it
+(`bridge.TTL_S`, `take_requests`); sealed page chunks the same way (`take_pages`); stream frames are kept in
+memory only and are not written to the database (`add_frame`). Pending rows are lost on a restart on purpose
+(`bridge.py` docstring).
+
+### Scenarios
+
+**A curious or compromised TIX server.**
+- Cannot: read any body, forge or alter an envelope (every envelope has an authentication tag and a
+  signature), make the host run a request twice (§5), forge a response the device will accept (responses
+  need the host's signature, checked against the host key the device pinned at pairing, §7), or forge a
+  request the host will accept (requests need a registered device's signature, §6.1).
+- Can: see the metadata listed above, drop, delay or reorder envelopes, replay captured bytes and refuse
+  service. A replayed envelope is answered from the host's record of it or refused, never run again; a
+  record is kept for 900 seconds, and after that the used sequence number refuses it (§5.3). Within the
+  timestamp window (300 seconds each way, §5.1) the host also checks the sequence number, so an old capture
+  does not run.
+- A server that is also given a copy of the master key is the next scenario.
+
+**A holder of the master key.** Every approved CLI device in any repo and every signed-in browser holds the
+master key, and the channel key is derived from it (§2.2). Anyone who holds it and obtains envelope bytes
+can read them. That includes a CLI device you have since revoked in TIX, if it kept the key. Version 1 has
+no forward secrecy: a later compromise of the master key exposes traffic recorded earlier. Mixing a
+per-device secret into the key is planned for version 2 (owner decision D1, §14; the labels end in `v1` so
+it can arrive without breaking v1). Holding the key does not let anyone *act*: running a request needs a
+registered device's signature, and accepting a response needs the host's (§1).
+
+**A compromised TIX web app** (the server serves modified JavaScript). The owner has accepted that it can
+act as a paired device, at that device's scope, in any browser that loads it, while it is loaded (§1). It
+can also recover the master key, as the existing threat model already says, and so read every bridge envelope
+it can obtain. It can show you one action and ask for an assertion over another; against this attacker an
+assertion proves only that you did a user verification on that device around then (§9.6). It cannot export an
+existing device key, act above that device's scope, or outlast the device's revocation on the host.
+- **Wider case, decided by the owner (D8):** if the web app is compromised *during pairing*, it can mint a
+  permanent device with a key that lives outside the browser and a software authenticator, whose "fresh"
+  confirmations are forged without any real user verification, until you revoke it (§1, §9.1, §14).
+- **Mitigations the specification requires of the host** (*planned*, host side, orch-core#89): devices are
+  added only from the Remote tab on the computer; every addition and change is written to an audit log
+  and listed at every remote start; every assertion-backed action is listed with its subject in the Remote
+  tab; fresh confirmations are rate limited to 6 per 10 minutes per device (§2.7, §9.5, D8, D9). These
+  expose a forged device after the fact; they do not prevent it.
+
+**A local process or coding agent as the same operating-system user on the host.** It can read the master
+key (in the workspace's sharing configuration) and, by file permissions alone, the host key, the registry of
+paired devices, the stored request records and the audit log, because the user is shared (§1, §2.7). The
+orch command guard refuses an agent's commands on those paths (the registry, the host key, the replay store
+and its stored bodies, the channel key and the command that prints it), and it is the only barrier. It
+deters careless and accidental changes and exposes them at the next start; it does not stop a determined
+agent that also rewrites the audit log, and an indirect write may get past a guard that matches command
+patterns (§2.7, D8). This is orch's documented limit for local agents; the bridge does not change it.
+
+**A stolen phone or browser profile.** The device signing key is a non-extractable key and cannot be copied
+out of the browser (§2.4); the master key is likewise held as a non-extractable key and the passphrase is
+never stored (§2.1). A person holding an unlocked, signed-in browser can still act at that device's scope, and
+the Type scope and Factory actions additionally need a fresh platform confirmation (Face ID, Touch ID,
+Windows Hello or device PIN, §9). Revoke the device on the host (it takes effect on the next request and
+ends its streams, §8.3) and sign it out on the Devices page. **Not yet in place:** signing out must clear the browser's bridge database (device key, channel keys,
+sequence counters). The TIX app does not store any of these yet, so there is nothing to clear today; making
+sign-out clear them is a required item of a later ticket (the app side of the bridge, #25), and until it
+ships, revoking the device on the host is the control.
+
+### What each scope allows, and the accepted limits
+
+The four scopes, Look, Decide, Operate and Type, are decided by the **host for every request, by device
+identity** (the signature), never by whether someone can read a key (§1). Every route starts as never
+remote and opens to a scope only through an explicit tag (orch-core#85); a typing lease lasts 15 minutes
+and covers only input to a terminal the same device opened, while starting a terminal or an agent and each
+AI Factory action need a fresh confirmation over the exact thing shown (§9.4, D3). Operate stays one
+scope, and editing tickets can steer running agents.
+
+Accepted limits:
+- A device can read whatever the host returns to it at its scope.
+- **Typing leaks its rhythm.** Each keystroke is one request, so the server sees when and how much you type
+  in a terminal, though not what (§4, F4). Batching or padding is a follow-up (R6).
+- Confirmations are text the host supplies; the app shows them as plain text with invisible characters
+  removed, and visually similar letters can remain, so the app also shows the ticket key and the first
+  digits of a digest to compare (§9.3).
+
+### What is not protected
+
+- The master key against every device that holds it, including revoked ones; and recorded traffic after a
+  later key compromise (no forward secrecy in v1).
+- Metadata: which workspace, which device, when, how much, and how often you type.
+- Machine and device names, until [#75](https://github.com/severinlindenmann/orch-tix/issues/75) ships.
+- Availability: the server can refuse to carry anything.
+- A compromised web app at pairing time, and a determined local agent on the host (see above).
+- Sealed content once it reaches a screen or a host: the host runs what a device with the right scope asks.

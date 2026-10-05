@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from orch.addons.api import Intent, PendingDecision, Snapshot
 
+from . import notify
 from .cli import SharingError
 from .widgets import supports_origin
 
@@ -401,6 +402,8 @@ class InboxProvider:
             except (TypeError, ValueError):
                 pass
             reconcile(self.addon, ctx, now)
+            notify.merge_phone_changes(self.addon, ctx)      # the phone's per-ticket switch, adopted here
+            notify.push_message_setting(self.addon, ctx)
         except SharingError as e:
             # nothing needs a login when the CLI path is unset: say "not set up", not "Login needed" (QA TF-02)
             health = "never_fetched" if e.code == "not_configured" else "auth_required" if e.code in _AUTH else "offline"
