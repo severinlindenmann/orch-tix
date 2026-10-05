@@ -221,7 +221,7 @@ def test_a_former_owners_heartbeat_does_not_count_after_a_takeover(host, session
 
 def test_the_migration_is_idempotent(settings):
     from fileshare.db import connect
-    sql = (__import__("pathlib").Path(pr.__file__).parent / "migrations" / "010_presence.sql").read_text()
+    sql = (__import__("pathlib").Path(pr.__file__).parent / "migrations" / "011_presence.sql").read_text()
     conn = connect(settings.db_path)
     try:
         conn.executescript(sql)
