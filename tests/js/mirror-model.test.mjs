@@ -415,7 +415,7 @@ test("no ack after two minutes: 'Not applied yet · open the desktop', paired or
 
 test("a ticket request's outcome", () => {
   assert.equal(text2("applied", { request: true }), "Created in your backlog");
-  assert.equal(text2("waiting-unpaired", { request: true }), "Not applied · this phone isn't paired with that desktop · open the desktop");
+  assert.equal(text2("waiting-unpaired", { request: true }), "Sent · waiting for you to confirm in Mission Control");
 });
 
 
