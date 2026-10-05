@@ -241,6 +241,16 @@ def test_login_and_setup_require_origin(client, settings):
     assert r.status_code == 403 and r.json()["error"] == "bad_origin"
 
 
+def test_login_without_origin_says_so_and_differs_from_a_wrong_origin(client, settings):
+    _setup(client, settings)
+    body = {"auth_key": b64u_encode(AUTH_KEY)}
+    missing = client.post("/api/login", json=body, headers={"Origin": ""})
+    wrong = client.post("/api/login", json=body, headers={"Origin": "https://evil.example"})
+    assert missing.status_code == wrong.status_code == 403
+    assert missing.json()["error"] == "origin_required" and "Origin:" in missing.json()["detail"]
+    assert wrong.json()["error"] == "bad_origin" and settings.public_url in wrong.json()["detail"]
+
+
 def test_logout_requires_session_and_origin(client, settings):
     assert client.post("/api/logout").status_code == 401
     _setup(client, settings)

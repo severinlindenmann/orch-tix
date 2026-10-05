@@ -89,7 +89,24 @@ def _sender(conn, principal) -> tuple[str, str | None, str]:
     return "device", principal.device["id"], principal.device["name"]
 
 
+def _resolve_device(conn, ident: str) -> str:
+    """A device recipient is an id or a device name; an unknown or revoked one is refused instead of
+    being stored and never delivered (QA TF-18)."""
+    row = conn.execute("SELECT id FROM devices WHERE id = ? AND revoked_at IS NULL", (ident,)).fetchone()
+    if row:
+        return row["id"]
+    rows = conn.execute("SELECT id FROM devices WHERE name = ? AND revoked_at IS NULL AND approved_at IS NOT NULL",
+                        (ident,)).fetchall()
+    if len(rows) == 1:
+        return rows[0]["id"]
+    if len(rows) > 1:
+        raise api_error(409, "ambiguous_device", f"{len(rows)} devices are named {ident!r}; use the device id")
+    raise api_error(404, "unknown_device", f"no device {ident!r}; use `sharing devices` for ids and names")
+
+
 def create_message(conn, app, *, principal, body: dict) -> dict:
+    if body["to_kind"] == "device":
+        body = {**body, "to_id": _resolve_device(conn, body["to_id"])}
     from_kind, from_device, from_name = _sender(conn, principal)
     if from_kind == "human" and body["to_kind"] == "human":
         raise api_error(400, "bad_request", "the browser sends messages to agents, not to itself")

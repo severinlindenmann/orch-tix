@@ -118,7 +118,7 @@ def test_post_without_origin_is_403(probe, app, settings):
     with TestClient(app, base_url="http://testserver") as bare:
         bare.cookies.set("fs_session", create_session(connect(settings.db_path)))
         r = bare.post("/_probe/session")
-    assert r.status_code == 403 and r.json()["error"] == "bad_origin"
+    assert r.status_code == 403 and r.json()["error"] == "origin_required"
 
 
 def test_post_with_matching_origin_ok(probe, client, settings):

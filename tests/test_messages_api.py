@@ -197,3 +197,12 @@ def test_a_ticket_tag_from_a_non_owner_is_refused(device_client, other_device_cl
         "event_uuid": hashlib.sha256(b"y").hexdigest()[:32]}).json()["id"]
     r = _send(other_device_client, "human", "", space=SPACE, ticket=tix)
     assert r.status_code == 403 and r.json()["error"] == "not_owner"
+
+
+def test_device_recipient_may_be_a_name_and_unknown_ones_are_refused(device_client, other_device, other_device_client):
+    assert _send(device_client, "device", other_device.name).status_code == 201     # by name
+    got = other_device_client.get("/api/messages", params={"after": 0, "wait": 0}).json()["messages"]
+    assert [m["to_id"] for m in got] == [other_device.id]                          # stored under the id
+    r = _send(device_client, "device", "dev_nonexistent")
+    assert r.status_code == 404 and r.json()["error"] == "unknown_device"
+    assert _send(device_client, "device", "no-such-name").json()["error"] == "unknown_device"

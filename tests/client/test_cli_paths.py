@@ -62,7 +62,8 @@ def test_choose_target_refuses_force_over_a_directory(sharing, tmp_path):
 
 
 @pytest.mark.parametrize("name", [".env", ".env.local", ".envrc", "prod.pem", "server.key", "id_rsa",
-                                  "id_ed25519.pub", "cert.p12", ".netrc", "credentials.json", "CREDENTIALS",
+                                  "id_ed25519.pub", "cert.p12", ".netrc", "credentials.json", "CREDENTIALS", "prod.env", "QA-secret.env",
+                                  "id_ecdsa", "cert.pfx", "keys.kdbx", "store.jks", ".npmrc", ".pgpass",
                                   "Server.KEY"])
 def test_is_secret_path_flags_secret_names(sharing, tmp_path, name):
     assert sharing.is_secret_path(tmp_path / name, tmp_path)
