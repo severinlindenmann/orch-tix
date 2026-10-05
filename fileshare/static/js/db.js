@@ -8,7 +8,7 @@
 //       the same stores (tests/js/outbox.test.mjs keeps the two in step).
 //   v4: pairs  (space id -> {space, phoneId, key, label, paired_at}: this phone's pairing with a
 //       desktop, the key a non-extractable HMAC CryptoKey; pairing.js), keyPath "space"
-//   v5: seen   (TIX id -> {gen, mirror_rev}: the newest snapshot this browser opened, so an older one
+//   v5: seen   (space|doc id -> {gen, mirror_rev}: the newest snapshot this browser opened, so an older one
 //       the server hands back later is noticed by the ticket page, Needs you and the service worker)
 //   v6: lists  ("spaces" | "mirrors" -> {body, at}: the last GET /api/spaces and /api/mirrors bodies exactly
 //       as the server sent them, sealed labels and docs, never opened; mirrors-data.js), so Needs you

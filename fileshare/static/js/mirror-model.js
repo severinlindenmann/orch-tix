@@ -491,6 +491,10 @@ export function highWater(prev, doc) {
   return b.gen > a.gen || (b.gen === a.gen && b.mirror_rev > a.mirror_rev) ? b : a;
 }
 
+// The key of a ticket's "seen" mark: the space and the doc's own key, the two things boundToRow proves the
+// row's uuid is made from. Never the server's TIX number, which a reset server hands out again to another ticket.
+export const seenKey = (space, doc) => `${space}|${doc.id}`;
+
 export function isRollback(seen, doc) {
   const g0 = seen?.gen, r0 = seen?.mirror_rev, g1 = doc?.gen, r1 = doc?.mirror_rev;
   if (![g0, r0, g1, r1].every(Number.isInteger)) return false;
