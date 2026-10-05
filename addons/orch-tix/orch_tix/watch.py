@@ -38,12 +38,42 @@ def _log_path(ctx) -> Path | None:
         return None
 
 
+TAIL_BYTES = 65536   # the log only grows: look at its end, widening until a line at or before the cursor is in view
+
+
+def _seq_of(line: bytes):
+    try:
+        seq = json.loads(line.decode("utf-8"))["seq"]
+    except (ValueError, KeyError, TypeError):
+        return None
+    return seq if isinstance(seq, int) and not isinstance(seq, bool) else None
+
+
+def _tail(path: Path, after: int) -> bytes:
+    """The end of the log that holds every event with seq > after (the whole file when it is small): a long-lived
+    workspace's log can be tens of MB and is looked at twice a second while it changes."""
+    with path.open("rb") as f:
+        size = f.seek(0, 2)
+        n = TAIL_BYTES
+        while True:
+            start = max(0, size - n)
+            f.seek(start)
+            raw = f.read()
+            if start == 0:
+                return raw
+            raw = raw[raw.index(b"\n") + 1:] if b"\n" in raw else b""     # drop the line cut in half
+            first = next((q for q in map(_seq_of, raw.split(b"\n")) if q is not None), None)
+            if first is not None and first <= after:
+                return raw
+            n *= 4
+
+
 def _read(path: Path, after: int) -> tuple[list, int]:
     """(events with seq > after, in order; the newest valid seq). A forged far-ahead seq never counts."""
     try:
-        raw = path.read_bytes()
+        raw = _tail(path, after)
     except OSError:
-        return [], after
+        return [], 0                # no log yet (the second value is only the newest seq: none)
     events, last = [], 0
     for line in raw.split(b"\n"):
         if not line.strip():
@@ -88,9 +118,9 @@ class NeedsWatchProvider:
             return 0
         st = self.addon.state
         cursor = st.watch()["cursor"]
-        _, newest = _read(path, 0)
+        _, newest = _read(path, 1 << 62)                # only the newest seq: the end of the log
         if cursor is None or cursor > newest:           # first run (or the log was reset): start now, never replay
-            st.set_watch(newest, {})
+            st.set_watch(newest, {}, reset=True)        # a reset log numbers from 1 again: old "done" marks would hide it
             cursor = newest
         deadline = time.monotonic() + WAIT_S
         synced, sig = 0, None

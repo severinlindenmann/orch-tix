@@ -291,10 +291,10 @@ class State:
         return {"cursor": d.get("cursor") if isinstance(d.get("cursor"), int) else None,
                 "done": d.get("done") if isinstance(d.get("done"), dict) else {}}
 
-    def set_watch(self, cursor: int, done: dict) -> None:
+    def set_watch(self, cursor: int, done: dict, reset: bool = False) -> None:
         """`done`: ticket ref -> the newest event seq the watcher synced (or knowingly skipped) for it. Capped."""
         def fn(d):
-            merged = {**(d.get("done") or {})}
+            merged = {} if reset else {**(d.get("done") or {})}
             for ref, seq in done.items():
                 merged[ref] = max(int(merged.get(ref) or 0), int(seq))
             if len(merged) > 2000:
