@@ -71,7 +71,11 @@ def _bridge(request: Request) -> br.Bridge:
 
 
 async def _client(request: Request, space: str) -> tuple[Principal, str]:
-    """A browser session or an approved device may use any existing space as a client."""
+    """A browser session or an approved device may use any existing space as a client.
+
+    This is safe only because an instance has a single owner: every session and device is that owner's, and
+    the host re-checks each sealed request. If an instance ever gets a second account, this needs an
+    ownership or membership check on the space."""
     def check(conn):
         p = require_any(request, conn)
         mirrors.space_row(conn, space)                 # 404 no_space
@@ -118,13 +122,14 @@ async def _wait_for(request: Request, wake: br.Wake, wait: int, step):
 async def post_request(space: str, request: Request):
     space = _space(space)
     _, client = await _client(request, space)
+    bridge, now = _bridge(request), br.now_ts()
+    bridge.prune(now)
+    bridge.admit(space, client)                      # rate and quota before the body (up to ~1.4 MB) is read
     body = await read_bounded_json(request, br.b64_len(br.MAX_REQUEST_BYTES) + 1024)
     rid, sealed = _rid(body.get("id")), _sealed(body.get("body"), br.MAX_REQUEST_BYTES)
     tab, stream = _opaque(body.get("tab"), "tab"), body.get("stream", False)
     if type(stream) is not bool:
         raise api_error(400, "bad_request", "stream must be true or false")
-    bridge, now = _bridge(request), br.now_ts()
-    bridge.prune(now)
     bridge.reserve(space, rid, client, tab, stream, now)
     try:
         await run_in_threadpool(_short, request, lambda conn: br.insert_request(conn, space, rid, sealed, now))
@@ -187,14 +192,14 @@ async def poll_requests(space: str, request: Request, holder: str = "", wait: st
         first = [take_over == "1"]
 
         async def step():
-            now = br.now_ts()
+            await _host(request, space)         # owner and approval first, every slice: a poll that is no longer
+            now = br.now_ts()                   # the host fails here, before it touches the lease or the queue
             bridge.prune(now)
             bridge.host_lease(space, device_id, holder, take_over=first[0], now=now)
             first[0] = False                                    # the take-over happens once, not on every slice
             rows = await run_in_threadpool(_short, request, lambda conn: br.take_requests(conn, space, now))
             if not rows:
                 return None
-            await _host(request, space)                          # revoked or no longer the owner: nothing handed over
             for r in rows:
                 route = bridge.routes.get((space, r["rid"]))
                 if route:
@@ -202,8 +207,6 @@ async def poll_requests(space: str, request: Request, holder: str = "", wait: st
             return [{"id": r["rid"], "body": r["body"]} for r in rows]
 
         requests = await _wait_for(request, bridge.box(space).req_wake, wait_s, step)
-        if requests is None:                                     # an idle poll renews the lease as it ends
-            bridge.host_lease(space, device_id, holder, take_over=False, now=br.now_ts())
     return {"requests": requests or [], "lease_s": br.LEASE_S}
 
 

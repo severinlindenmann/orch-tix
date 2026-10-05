@@ -98,8 +98,11 @@ def rows(settings) -> int:
 # --- auth binding ----------------------------------------------------------------------------------
 
 def test_every_bridge_route_refuses_an_anonymous_caller(app, settings):
-    from fileshare.routes import bridge as bridge_routes      # FastAPI nests included routers in app.routes
-    paths = {(m, r.path) for r in bridge_routes.router.routes for m in r.methods}
+    paths = set()
+    for r in app.routes:             # FastAPI nests included routers: descend into them
+        for ctx in (r.effective_route_contexts() if hasattr(r, "effective_route_contexts") else [r]):
+            if getattr(ctx, "path", "").startswith("/api/bridge/"):
+                paths |= {(m, ctx.path) for m in ctx.methods}
     assert len(paths) >= 6                             # derived from the app, not listed by hand
     anon = TestClient(app, base_url="http://testserver", headers={"Origin": settings.public_url})
     for method, path in sorted(paths):
@@ -593,3 +596,95 @@ def test_a_restart_drops_what_was_waiting(host, session_client, settings):
     assert rows(settings) == 1
     create_app(settings)
     assert rows(settings) == 0
+
+
+# --- review follow-ups: a displaced host, rate limits before the body, cancelled polls ------------------------
+
+def _sql(settings, sql, *args):
+    conn = sqlite3.connect(settings.db_path)
+    try:
+        conn.execute(sql, args)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _displaced_poll_case(app, settings, device, other_device, displace):
+    async def body():
+        async with _async_client(app, device.token) as a, _async_client(app, other_device.token) as b:
+            t = asyncio.create_task(a.get(f"/api/bridge/{SPACE}/requests", params={"holder": HOLDER, "wait": 20}))
+            await asyncio.sleep(0.3)
+            displace()
+            await b.post(f"/api/bridge/{SPACE}/requests", json={"id": rid(), "body": sealed()})   # wakes A's poll
+            first = await asyncio.wait_for(t, 5)
+            return first, app.state.bridge.box(SPACE).lease
+
+    return run_async(body)
+
+
+def test_a_poll_of_a_displaced_owner_neither_takes_the_lease_nor_eats_the_queue(app, settings, host, device, other_device):
+    def move_ownership():
+        _sql(settings, "UPDATE spaces SET owner_device = ? WHERE id = ?", other_device.id, SPACE)
+
+    first, lease = _displaced_poll_case(app, settings, device, other_device, move_ownership)
+    assert first.status_code == 403 and first.json()["error"] == "not_owner"
+    assert rows(settings) == 1                                   # the request is still queued
+    nb = device_client_for(app, other_device)
+    got = host_poll(nb, holder=HOLDER2)
+    assert got.status_code == 200 and len(got.json()["requests"]) == 1
+    assert app.state.bridge.box(SPACE).lease[:2] == (other_device.id, HOLDER2)
+
+
+def test_a_poll_of_a_device_revoked_mid_poll_neither_takes_the_lease_nor_eats_the_queue(app, settings, host, device, other_device):
+    def revoke():
+        _sql(settings, "UPDATE devices SET revoked_at = '2026-01-01T00:00:00Z' WHERE id = ?", device.id)
+
+    first, lease = _displaced_poll_case(app, settings, device, other_device, revoke)
+    assert first.status_code == 401 and first.json()["error"] == "revoked"
+    assert rows(settings) == 1
+    assert lease == app.state.bridge.box(SPACE).lease and lease[2] <= br.now_ts()
+
+
+def test_a_poll_cancelled_after_taking_requests_frees_its_slot(app, host, device, other_device, monkeypatch):
+    """At most once: what a cancelled poll had taken is gone (the host's idempotency key covers a resend),
+    but the slot it held is released."""
+    real = br.take_requests
+
+    def slow(conn, space, now):
+        out = real(conn, space, now)
+        time.sleep(0.5)
+        return out
+
+    async def body():
+        monkeypatch.setattr(br, "take_requests", slow)
+        async with _async_client(app, device.token) as a, _async_client(app, other_device.token) as b:
+            await b.post(f"/api/bridge/{SPACE}/requests", json={"id": rid(), "body": sealed()})
+            t = asyncio.create_task(a.get(f"/api/bridge/{SPACE}/requests", params={"holder": HOLDER, "wait": 20}))
+            await asyncio.sleep(0.2)
+            assert app.state.bridge.polls == {"h:" + device.id: 1}
+            t.cancel()
+            await asyncio.gather(t, return_exceptions=True)
+            await asyncio.sleep(0.6)
+
+    run_async(body)
+    assert app.state.bridge.polls == {}
+
+
+def test_rate_and_quota_refuse_before_the_body_is_read(host, session_client, other_device_client, frozen_clock, monkeypatch):
+    from datetime import datetime, timezone
+    from fileshare.routes import bridge as bridge_routes
+    frozen_clock(datetime(2026, 9, 24, 12, 0, 0, tzinfo=timezone.utc))
+    for _ in range(br.POSTS_PER_S):
+        r = post_req(session_client)
+        session_client.delete(f"/api/bridge/{SPACE}/requests/{r.sent['id']}")
+    for _ in range(br.CLIENT_INFLIGHT):
+        assert post_req(other_device_client).status_code == 201
+
+    async def never(*a, **kw):
+        raise AssertionError("the body was read")
+
+    monkeypatch.setattr(bridge_routes, "read_bounded_json", never)
+    r = post_req(session_client)
+    assert r.status_code == 429 and error(r) == "rate_limited"
+    r = post_req(other_device_client)
+    assert r.status_code == 429 and error(r) == "too_many_inflight"

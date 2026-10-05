@@ -172,11 +172,18 @@ class Bridge:
 
     # --- client requests -------------------------------------------------------------------------
 
-    def reserve(self, space: str, rid: str, client: str, tab: str, stream: bool, now: float) -> None:
-        """Count the request against every quota and register its route (before the database insert, so
-        two parallel posts cannot both slip under a limit)."""
+    def admit(self, space: str, client: str) -> None:
+        """The checks that need no body: rate, open requests, mailbox queue. Run before the body is read."""
         if not self.post_rate.allow(client):
             self.refuse(space, 429, "rate_limited", f"at most {POSTS_PER_S} bridge requests per second")
+        if sum(r.client == client for r in self.routes.values()) >= CLIENT_INFLIGHT:
+            self.refuse(space, 429, "too_many_inflight", f"at most {CLIENT_INFLIGHT} open requests")
+        if sum(r.queued for k, r in self.routes.items() if k[0] == space) >= BOX_QUEUED_REQUESTS:
+            self.refuse(space, 429, "mailbox_full", "the host is not keeping up; try again shortly")
+
+    def reserve(self, space: str, rid: str, client: str, tab: str, stream: bool, now: float) -> None:
+        """Register the request's route, finishing the quotas admit() started (the body is known now). No await
+        between these checks and the registration, so two parallel posts cannot both slip under a limit."""
         if (space, rid) in self.routes:
             raise api_error(409, "duplicate_id", "this request id is already in use")
         mine = [r for r in self.routes.values() if r.client == client]
