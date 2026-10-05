@@ -40,6 +40,21 @@ def on_event(event, outbox) -> None:
     outbox.put(item)
 
 
+def watch_item(event) -> dict | None:
+    """The outbox item the immediate watcher (watch.py) syncs for an event, or None when it is no ticket event.
+    Unlike on_event this does not skip our own writes (via addon:orch-tix): a phone decision applied through the
+    addon changes the ticket's needs, and the phone should hear that at once; only the addon's own log events skip."""
+    if not event.ticket or event.kind in SKIP:
+        return None
+    item = {"op": "sync", "ticket": event.ticket, "seq": event.seq, "kind": event.kind}
+    ev = history.entry(event)
+    if ev:
+        item["ev"] = ev
+    if event.kind == "artifact.added":
+        item.update(artifact=str((event.data or {}).get("name") or ""), context=(event.data or {}).get("context") is True)
+    return item
+
+
 def should_link(link_mode: str, doc: dict, link: dict | None) -> bool:
     """Push this ticket? An active link always; a retired one (by hand, done cleanup or gone) never — only the
     explicit link action re-links it. A ticket never linked follows the link mode."""
