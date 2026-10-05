@@ -11,7 +11,27 @@ export class ApiError extends Error {
 // A 401 from /api/login is a refusal, not an expired session, so it must not trigger the global redirect.
 const NOT_A_SESSION_401 = new Set(["/api/login"]);
 
-export async function api(method, path, { json, form, raw } = {}) {
+// One open of the app asks for the full /api/mirrors list from several places at once (the Needs list,
+// the tab-bar badge, the change watcher): ~0.5 MB each. Share one answer for a few seconds.
+const SHARED_TTL_MS = 4000;
+const shared = new Map(); // path -> { at, promise }
+export function api(method, path, opts = {}) {
+  if (method !== "GET") shared.clear(); // a write may change the list: the next read is a fresh one
+  if (method === "GET" && !opts.raw && path.startsWith("/api/mirrors/changes")) {
+    // the change feed saying something changed (another device, a desktop ack): the list we hold is stale now
+    return request(method, path, opts).then((body) => { if (body?.mirrors?.length) shared.clear(); return body; });
+  }
+  if (method !== "GET" || opts.raw || path !== "/api/mirrors") return request(method, path, opts);
+  let hit = shared.get(path);
+  if (!hit || Date.now() - hit.at > SHARED_TTL_MS) {
+    hit = { at: Date.now(), promise: request(method, path, opts) };
+    hit.promise.catch(() => shared.delete(path));
+    shared.set(path, hit);
+  }
+  return hit.promise.then((body) => structuredClone(body));
+}
+
+async function request(method, path, { json, form, raw } = {}) {
   const init = { method, credentials: "same-origin", headers: {} };
   if (json !== undefined) {
     init.headers["Content-Type"] = "application/json";
