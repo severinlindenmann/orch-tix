@@ -884,7 +884,7 @@ def test_an_unpaired_phone_says_why_its_decision_waits(phone_page, mirror_with_q
     page.get_by_role("radio", name="ISO 8601").check()
     page.get_by_role("button", name="Send answer").click()
     page.get_by_text("Sent · waiting for the desktop").wait_for()
-    page.get_by_text("isn't paired with the desktop", exact=False).wait_for()
+    page.get_by_text("Pair this phone so answers apply directly", exact=False).wait_for()
 
 
 # ---- feedback fix round F1: a held decision says why; no ack for two minutes says so ----

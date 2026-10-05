@@ -162,7 +162,8 @@ function statusLine() {
   const late = !state.queued.length && state.paired && latest && latest.ack == null && ageOf(latest.created_at) > NOT_YET_MS;
   return el("div", { class: `decision-status${text ? "" : " is-empty"}`, role: "status", "aria-live": "polite" },
     text ? pill(role, role === "ok" ? "check" : role === "warn" ? "alert" : "clock", text) : "",
-    waiting ? el("p", { class: "hint" }, "This phone isn't paired with the desktop, so it waits there for an Apply. Pair in Settings to have it apply at once.") : null,
+    waiting ? el("p", { class: "hint" }, "Confirm it in Mission Control (Today, or this ticket). ",
+      el("a", { href: "/settings#pair" }, "Pair this phone so answers apply directly")) : null,
     late ? el("p", { class: "hint" }, "Nothing back from the desktop yet. Open Mission Control; if this phone was unpaired there, pair it again in Settings.") : null);
 }
 

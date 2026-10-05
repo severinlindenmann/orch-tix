@@ -396,7 +396,8 @@ test("together: one approve with the requirements hash and the plan hash", () =>
 import { outcomeRole as role2, outcomeText as text2, NOT_YET_MS } from "../../fileshare/static/js/mirror-model.js";
 
 test("a waiting ack reads 'Not applied · <reason> · open the desktop'", () => {
-  assert.equal(text2("waiting-unpaired"), "Not applied · this phone isn't paired with that desktop · open the desktop");
+  assert.equal(text2("waiting-unpaired"), "Sent · waiting for you to confirm in Mission Control");   // not an error
+  assert.equal(role2("waiting-unpaired"), "info");
   assert.equal(text2("waiting-switched-off"), "Not applied · decisions of this kind from the phone are switched off · open the desktop");
   assert.equal(text2("waiting-signature"), "Not applied · the desktop couldn't verify this phone · open the desktop");
   assert.equal(text2("waiting-time"), "Not applied · this phone's clock looks wrong · open the desktop");
@@ -414,7 +415,7 @@ test("no ack after two minutes: 'Not applied yet · open the desktop', paired or
 
 test("a ticket request's outcome", () => {
   assert.equal(text2("applied", { request: true }), "Created in your backlog");
-  assert.equal(text2("waiting-unpaired", { request: true }), "Not applied · this phone isn't paired with that desktop · open the desktop");
+  assert.equal(text2("waiting-unpaired", { request: true }), "Sent · waiting for you to confirm in Mission Control");
 });
 
 
