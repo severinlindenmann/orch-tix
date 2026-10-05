@@ -63,6 +63,12 @@ test("matches searches id, name and note, case-insensitively", () => {
   assert.ok(!matches({ id: "FILE3", n: 3, ok: false, meta: null }, "secret"));
 });
 
+test("a bare number matches the file number only, not every name or note containing it", () => {
+  const f = { id: "FILE17", n: 17, ok: true, meta: { name: "report 2017.md", note: "item 17" } };
+  const g = { id: "FILE40", n: 40, ok: true, meta: { name: "a.md", note: "" } };
+  assert.ok(matches(g, "40") && !matches(f, "40") && matches(f, "17") && !matches(f, "20") && matches(f, "report"));
+});
+
 test("mapLimit keeps order and never exceeds the limit", async () => {
   let running = 0;
   let peak = 0;
