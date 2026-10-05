@@ -794,7 +794,7 @@ def is_secret_path(path: Path, repo_root: Path) -> bool:
 
 # =========================================================== config (Task 13)
 
-VERSION = "2.1.0"   # semver; bump on every skill change — the server's /skill/manifest.json reads it
+VERSION = "2.1.1"   # semver; bump on every skill change — the server's /skill/manifest.json reads it
 REPO_CONFIG = Path(".claude") / "skills" / "sharing" / "config.json"
 OLD_CONFIG = "config.json.old"   # the identity --force is replacing; lives beside config.json until the new one is approved
 TICKETS_SKILL_SRC = "tickets-SKILL.md"   # served beside SKILL.md; installed where Claude Code finds skills
