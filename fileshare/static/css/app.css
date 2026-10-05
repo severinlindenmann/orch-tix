@@ -189,6 +189,8 @@ code.cmd { padding: 1px 6px; border-radius: 5px; background: var(--sunken); colo
 /* "Done" is a visibility toggle, not a type: set apart from the type chips so both never look like one choice (QA TF-07) */
 .chip-toggle { margin-left: 10px; border-style: dashed; }
 .chip-toggle[aria-pressed="true"] { border-style: solid; }
+/* the sort select sits at the right end of the search box (QA TF-07) */
+.chip-sort { flex: none; width: auto; max-width: 42%; height: 30px; min-height: 0; padding: 0 4px; border: 0; border-left: 1px solid var(--border); border-radius: 0; background: transparent; color: var(--muted); font: 500 13px/1 var(--font); }
 .chip[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--on-ink); }
 .list-body { display: flex; flex-direction: column; gap: 12px; padding: 0 16px 16px; }
 .list-msg { padding: 8px 4px; }
