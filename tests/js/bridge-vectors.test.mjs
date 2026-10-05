@@ -1,10 +1,13 @@
 // docs/bridge-protocol.md §10: the WebCrypto calls the document gives for the browser, run against
-// tests/bridge_vectors.json (made by Python, tests/support/bridge_protocol_ref.py). Only crypto.subtle
-// and the existing crypto.js helpers are used, so a mismatch is a mismatch in the specification.
+// tests/bridge_vectors.json (made by Python, tests/support/bridge_protocol_ref.py). The document's calls use only
+// crypto.subtle and the existing crypto.js helpers, so a mismatch there is a mismatch in the specification. Each test
+// then runs the PRODUCTION module (fileshare/static/js/bridge-crypto.js) on the same vector; every vector goes through
+// it in tests/js/bridge-conformance.test.mjs.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { b64u, bytesToHex, canonicalJson, hexToBytes as hex } from "../../fileshare/static/js/crypto.js";
+import * as B from "../../fileshare/static/js/bridge-crypto.js";
 
 const VEC = JSON.parse(readFileSync(new URL("../bridge_vectors.json", import.meta.url), "utf8"));
 const subtle = globalThis.crypto.subtle;
@@ -61,6 +64,13 @@ test("HKDF: the workspace key and a message key", async () => {
   const mkc = VEC.hkdf[2];
   const bits = await subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt: hex(mkc.salt), info: hex(mkc.info) }, ws.key, 256);
   assert.equal(bytesToHex(new Uint8Array(bits)), mkc.okm);
+  // production: the same K_ws (non-extractable, so compared by the K_msg it derives)
+  const prod = await B.workspaceKey(hex(VEC.keys.mk), VEC.keys.workspace);
+  assert.equal(prod.extractable, false);
+  const probe = te.encode("probe"), p = { name: "AES-GCM", iv: new Uint8Array(12) };
+  const ref = await subtle.importKey("raw", hex(mkc.okm), "AES-GCM", false, ["encrypt"]);
+  assert.deepEqual(new Uint8Array(await subtle.encrypt(p, await B.messageKey(prod, hex(mkc.salt), "encrypt"), probe)),
+    new Uint8Array(await subtle.encrypt(p, ref, probe)));
 });
 
 test("§10.4 builds the vector's header byte for byte", () => {
@@ -68,6 +78,8 @@ test("§10.4 builds the vector's header byte for byte", () => {
   const h = encodeHeader({ direction: f.direction, flags: f.flags, keyVersion: f.key_version, workspace: hex(f.workspace),
     deviceId: hex(f.device), rid: hex(f.rid), stream: hex(f.stream), seq: f.seq, tsMs: f.ts_ms, salt: hex(f.salt) });
   assert.equal(bytesToHex(h), c.header);
+  assert.equal(bytesToHex(B.encodeHeader({ direction: f.direction, flags: f.flags, keyVersion: f.key_version, workspace: hex(f.workspace),
+    deviceId: hex(f.device), rid: hex(f.rid), stream: hex(f.stream), seq: f.seq, tsMs: f.ts_ms, salt: hex(f.salt) })), c.header);
 });
 
 test("seal and open: AES-256-GCM, zero nonce, header as AAD", async () => {
@@ -77,12 +89,16 @@ test("seal and open: AES-256-GCM, zero nonce, header as AAD", async () => {
   assert.equal(bytesToHex(ct), c.sealed);
   const pt = new Uint8Array(await subtle.decrypt(gcm(header), await messageKey(key, header, "decrypt"), ct));
   assert.equal(bytesToHex(pt), c.plaintext);
+  const prod = await B.workspaceKey(hex(VEC.keys.mk), VEC.keys.workspace);
+  assert.equal(bytesToHex(await B.sealBody(prod, header, hex(c.plaintext))), c.sealed);
+  assert.equal(bytesToHex(await B.openBody(prod, header, ct)), c.plaintext);
 });
 
 test("ECDSA P-256 verify takes the raw 64-byte r||s the vectors hold", async () => {
   for (const c of VEC.sign) {
     const ok = await subtle.verify(SIG, await importPub(hex(c.pub)), hex(c.sig), hex(c.msg));
     assert.equal(ok, c.valid, c.name);
+    assert.equal(await B.verifySigned(await B.importPublicKey(hex(c.pub)), hex(c.sig), hex(c.msg)), c.valid, `production ${c.name}`);
   }
 });
 
@@ -96,6 +112,11 @@ test("a non-extractable device key signs, and its public half gives the device i
   const a = VEC.ids.device_a;
   assert.equal(bytesToHex((await sha256(cat(L.device, hex(VEC.keys.workspace), hex(a.pub)))).subarray(0, 16)), a.device_id);
   assert.notEqual(a.device_id, a.device_id_other_workspace);
+  const prod = await B.newDeviceKey();
+  assert.equal(prod.privateKey.extractable, false);
+  await assert.rejects(subtle.exportKey("pkcs8", prod.privateKey));
+  assert.equal(bytesToHex(await B.deviceId(hex(VEC.keys.workspace), hex(a.pub))), a.device_id);
+  assert.equal(await B.deviceFingerprint(hex(a.pub)), a.fingerprint);
 });
 
 test("the device opens the full response chunk: host signature, then tag", async () => {
@@ -111,6 +132,9 @@ test("the device opens the full response chunk: host signature, then tag", async
   assert.equal(bytesToHex(pt.subarray(4 + metaLen)), c.expect.data);
   const dv = new DataView(header.buffer, header.byteOffset, HEADER_LEN);
   assert.equal(Number(dv.getBigUint64(72, false)), c.mailbox.idx);
+  const r = await B.openResponse({ workspace: VEC.keys.workspace, kWs: await kWs(), keyVersion: 1, device: VEC.ids.device_a.device_id,
+    hostKey: host, offsetMs: 0, pending: new Map(Object.entries(c.pending)) }, env, c.mailbox, c.now_ms);
+  assert.deepEqual([r.result, r.meta, bytesToHex(r.data)], ["accept", c.expect.meta, c.expect.data]);
 });
 
 test("a response signed by a device key or with a flipped tag bit fails", async () => {
@@ -119,6 +143,7 @@ test("a response signed by a device key or with a flipped tag bit fails", async 
     const env = hex(VEC.device_cases.find((x) => x.name === name).envelope);
     const header = env.subarray(0, HEADER_LEN), body = env.subarray(HEADER_LEN, env.length - SIG_LEN);
     assert.equal(await subtle.verify(SIG, host, env.subarray(env.length - SIG_LEN), cat(L.sig, header, body)), false, name);
+    assert.equal(await B.verifySigned(host, env.subarray(env.length - SIG_LEN), B.signedBytes(header, body)), false, `production ${name}`);
   }
 });
 
@@ -132,6 +157,8 @@ test("the assertion challenge, recomputed from what the device shows", async () 
   const ch = await sha256(cat(L.assert, hex(i.workspace), hex(i.device), hex(i.rid), new Uint8Array([1, 4]), exp,
     hex(i.nonce), subjectHash));
   assert.equal(bytesToHex(ch), VEC.assertion.challenge);
+  assert.equal(bytesToHex(await B.assertionChallenge({ workspace: hex(i.workspace), deviceId: hex(i.device), rid: hex(i.rid),
+    purpose: i.purpose, scope: i.scope, expiresMs: i.expires_ms, nonce: hex(i.nonce), subject: i.subject })), VEC.assertion.challenge);
 });
 
 test("the pairing link carries the host pin, and the MAC is HMAC-SHA256", async () => {
@@ -146,6 +173,10 @@ test("the pairing link carries the host pin, and the MAC is HMAC-SHA256", async 
   const pk = await subtle.importKey("raw", hex(p.phone_key), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const proof = new Uint8Array(await subtle.sign("HMAC", pk, cat(L.phone_link, hex(p.device_id))));
   assert.equal(bytesToHex(proof), p.phone_proof);
+  const link = B.parsePairFragment(p.link_fragment);
+  assert.equal(b64u(await B.hostPin(hex(p.host_pub))), pin);
+  const meta = await B.pairRequestMeta({ link, pub: hex(p.device_pub), label: "Phone", phone: { phoneId: p.phone_id, key: pk } });
+  assert.deepEqual([meta.mac, meta.phone_proof], [p.mac, p.phone_proof]);
 });
 
 test("signature scalars outside 1..n-1 never verify in WebCrypto", async () => {
@@ -155,6 +186,7 @@ test("signature scalars outside 1..n-1 never verify in WebCrypto", async () => {
     try { ok = await subtle.verify(SIG, pub, hex(s.sig), hex(c.msg)); } catch { ok = false; }
     assert.equal(ok, false, s.name);
   }
+  for (const s of VEC.sig_scalars) assert.equal(B.scalarsInRange(hex(s.sig)), s.in_range, `production ${s.name}`);
 });
 
 // §9.3: the `shown` rule as one Unicode property regex (the host applies it; the app may check it).
@@ -170,5 +202,8 @@ test("the shown vectors, with the regex form of the rule", () => {
       + (c.input.some((x) => x >= 0xD800 && x <= 0xDFFF) ? "\uD800" : "");
     if (c.expect === null) assert.throws(() => cleanShown(s), c.name);
     else assert.equal(cleanShown(s), c.expect, c.name);
+    // production: the device takes the host's cleaned text as it is, and refuses what is not scalar values
+    if (c.expect === null) assert.throws(() => B.acceptShown(s), c.name);
+    else assert.equal(B.acceptShown(c.expect), c.expect, c.name);
   }
 });
