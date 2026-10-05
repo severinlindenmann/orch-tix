@@ -60,6 +60,7 @@ def send(req: dict) -> dict:
                 vapid_private_key=req["private"],
                 vapid_claims={"sub": req["sub"]},
                 ttl=req.get("ttl", 86400),
+                headers={"Topic": req["topic"]} if req.get("topic") else None,
                 timeout=10,
             )
         except WebPushException as e:

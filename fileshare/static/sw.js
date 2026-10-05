@@ -427,6 +427,17 @@ async function clearFor(d, s, m) {
   const { label } = await spaceInfo(s);
   const handled = (tag, body) => ({ title: "Handled on desktop", options: { body, tag, silent: true, renotify: false,
     icon: ICON, data: { url: "/", s } } });
+  if (d.w === "message" && !m) {
+    // The owner read the message(s) in the browser (QA N-04): replace the message notification, but leave a needs
+    // notification of the same workspace (it shares the tag) as it was.
+    const tag = s ? `tix:${s}` : "tix";
+    const shown = (await self.registration.getNotifications({ tag }))[0];
+    if (shown && ticketsOf(shown).length) {
+      return { title: shown.data?.title || shown.title || "TIX", options: { body: shown.data?.body || shown.body || "", tag,
+        silent: true, renotify: false, icon: ICON, data: shown.data } };
+    }
+    return handled(tag, s ? `Read on desktop · ${label}` : "Read on desktop");
+  }
   if (!m) return handled(s ? `tix:join:${s}` : "tix", `Handled on desktop · ${label}`);
   const quiet = (n, data) => ({ title: n.data?.title || n.title || "TIX", options: { body: n.data?.body || n.body || "",
     tag: n.tag, silent: true, renotify: false, icon: ICON, data } });
@@ -449,6 +460,19 @@ async function clearFor(d, s, m) {
   return handled(s ? `tix:${s}` : "tix", `Handled on desktop · ${label}`);
 }
 
+// The app icon badge (iOS 16.4+ installed web apps, Chrome): the server's `c` = what needs you across workspaces.
+// A clear sets it to the new count (0 removes the badge). Best effort: never blocks the notification.
+async function setBadge(data) {
+  try {
+    if (!data || data.v !== 2 || typeof data.c !== "number") return;
+    const c = count(data.c);
+    if (c > 0) await self.navigator.setAppBadge?.(c);
+    else await self.navigator.clearAppBadge?.();
+  } catch {
+    /* no Badging API */
+  }
+}
+
 self.addEventListener("push", (event) => {
   let data = null;
   try {
@@ -464,7 +488,28 @@ self.addEventListener("push", (event) => {
       note = GENERIC;
     }
     for (const x of note.close || []) x.close();
-    await self.registration.showNotification(note.title, note.options);
+    await Promise.all([self.registration.showNotification(note.title, note.options), setBadge(data)]);
+  })());
+});
+
+// The push service rotated or expired this subscription (iOS and Chrome do, QA N-06): subscribe again with the
+// server's VAPID key and replace the server's row. Needs the session cookie; without it the page's Settings card
+// shows the toggle off and the owner turns it on again.
+self.addEventListener("pushsubscriptionchange", (event) => {
+  event.waitUntil((async () => {
+    try {
+      const { public_key: key } = await (await fetch("/api/push/vapid", { credentials: "same-origin", cache: "no-store" })).json();
+      const sub = event.newSubscription || await self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: unb64u(key) });
+      const j = sub.toJSON();
+      await fetch("/api/push/subscribe", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ endpoint: j.endpoint, keys: { p256dh: j.keys?.p256dh, auth: j.keys?.auth } }) });
+      if (event.oldSubscription?.endpoint && event.oldSubscription.endpoint !== j.endpoint) {
+        await fetch("/api/push/subscribe", { method: "DELETE", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ endpoint: event.oldSubscription.endpoint }) });
+      }
+    } catch {
+      /* offline or signed out */
+    }
   })());
 });
 

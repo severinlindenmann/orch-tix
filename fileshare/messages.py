@@ -167,7 +167,7 @@ def messages_for(conn, principal, after: int, limit: int = LIST_LIMIT) -> list[d
     return [message_out(r) for r in rows]
 
 
-def ack_message(conn, principal, uuid: str) -> None:
+def ack_message(conn, principal, uuid: str, app=None) -> None:
     clause, args = _recipient_clause(conn, principal)
     with _tx(conn):
         row = conn.execute("SELECT * FROM messages WHERE uuid = ?", (uuid,)).fetchone()
@@ -177,3 +177,12 @@ def ack_message(conn, principal, uuid: str) -> None:
             raise api_error(403, "forbidden", "only a recipient acks a message")
         conn.execute("INSERT OR IGNORE INTO message_acks (message_seq, recipient, acked_at) VALUES (?, ?, ?)",
                      (row["seq"], recipient_key(principal), clock.now_iso()))
+    # The owner read it in the browser: withdraw the phone's "Message from agent" once nothing unread is left in
+    # that workspace (QA N-04). `w` tells the service worker which notification the clear belongs to.
+    if app is not None and principal.kind == "session" and row["to_kind"] == "human":
+        left = conn.execute("SELECT COUNT(*) FROM messages m WHERE m.to_kind = 'human' AND m.space_id IS ? AND NOT EXISTS"
+                            " (SELECT 1 FROM message_acks a WHERE a.message_seq = m.seq AND a.recipient = 'human')",
+                            (row["space_id"],)).fetchone()[0]
+        if left == 0:
+            push_v2(app, {"v": 2, "s": row["space_id"] or "", "t": "", "k": "clear", "w": "message", "n": 0,
+                          "c": attention_total(conn)})
