@@ -17,6 +17,10 @@ const SHARED_TTL_MS = 4000;
 const shared = new Map(); // path -> { at, promise }
 export function api(method, path, opts = {}) {
   if (method !== "GET") shared.clear(); // a write may change the list: the next read is a fresh one
+  if (method === "GET" && !opts.raw && path.startsWith("/api/mirrors/changes")) {
+    // the change feed saying something changed (another device, a desktop ack): the list we hold is stale now
+    return request(method, path, opts).then((body) => { if (body?.mirrors?.length) shared.clear(); return body; });
+  }
   if (method !== "GET" || opts.raw || path !== "/api/mirrors") return request(method, path, opts);
   let hit = shared.get(path);
   if (!hit || Date.now() - hit.at > SHARED_TTL_MS) {

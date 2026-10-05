@@ -43,3 +43,20 @@ test("a failed fetch is not remembered", async () => {
   await api("GET", "/api/mirrors");
   assert.equal(calls.length, 2); // the POST and the retry
 });
+
+test("a change reported by the feed drops the shared list, so the reload it triggers is fresh", async () => {
+  calls = [];
+  await api("POST", "/api/x");
+  const real = globalThis.fetch;
+  globalThis.fetch = async (path, init) => {
+    calls.push([init.method, path]);
+    const body = path.startsWith("/api/mirrors/changes") ? { mirrors: [{ n: 1 }], cursor: 2 } : { mirrors: [] };
+    return { ok: true, status: 200, json: async () => body };
+  };
+  await api("GET", "/api/mirrors");
+  await api("GET", "/api/mirrors"); // still shared
+  await api("GET", "/api/mirrors/changes?after=1&wait=25");
+  await api("GET", "/api/mirrors"); // after a reported change: a new request
+  globalThis.fetch = real;
+  assert.deepEqual(calls.map((c) => c[1]), ["/api/x", "/api/mirrors", "/api/mirrors/changes?after=1&wait=25", "/api/mirrors"]);
+});
