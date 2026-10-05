@@ -221,7 +221,8 @@ PWA_HEAD = (
     '<meta name="mobile-web-app-capable" content="yes">',
     '<meta name="apple-mobile-web-app-status-bar-style" content="default">',
     '<meta name="apple-mobile-web-app-title" content="tix">',
-    '<meta name="theme-color" content="#15171a">',
+    '<meta name="theme-color" content="#F2F3F5" media="(prefers-color-scheme: light)">',
+    '<meta name="theme-color" content="#15171a" media="(prefers-color-scheme: dark)">',
 )
 
 
