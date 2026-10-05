@@ -551,6 +551,16 @@ async function setBadge(data) {
   }
 }
 
+// A TIX window is on screen and focused: the page already long-polls and shows the item.
+async function appIsFocused() {
+  try {
+    const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    return wins.some((c) => c.focused === true && c.visibilityState === "visible");
+  } catch {
+    return false;
+  }
+}
+
 self.addEventListener("push", (event) => {
   let data = null;
   try {
@@ -566,7 +576,11 @@ self.addEventListener("push", (event) => {
       note = GENERIC;
     }
     for (const x of note.close || []) x.close();
-    await Promise.all([self.registration.showNotification(note.title, note.options), setBadge(data)]);
+    // The owner is looking at TIX right now (QA N-01, #40): the notification is still shown (iOS punishes a push that
+    // shows nothing, userVisibleOnly), but silently: no sound, no vibration, no re-alert for an existing tag. The
+    // page reconciles it away. `renotify` must be false with `silent` (the spec throws otherwise).
+    const options = await appIsFocused() ? { ...note.options, silent: true, renotify: false } : note.options;
+    await Promise.all([self.registration.showNotification(note.title, options), setBadge(data)]);
   })());
 });
 
