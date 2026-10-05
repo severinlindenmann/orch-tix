@@ -393,7 +393,8 @@ class InboxProvider:
                 pass
             reconcile(self.addon, ctx, now)
         except SharingError as e:
-            health = "auth_required" if e.code in _AUTH else "offline"
+            # nothing needs a login when the CLI path is unset: say "not set up", not "Login needed" (QA TF-02)
+            health = "never_fetched" if e.code == "not_configured" else "auth_required" if e.code in _AUTH else "offline"
             return Snapshot(self.id, scope, now, health=health, message=e.detail[:200])
         return self._snapshot(scope, now)
 
