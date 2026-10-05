@@ -39,6 +39,15 @@ const messageKey = (kWs, header, usage) => subtle.deriveKey(
   { name: "AES-GCM", length: 256 }, false, [usage]);
 const gcm = (header) => ({ name: "AES-GCM", iv: new Uint8Array(12), additionalData: header, tagLength: 128 });
 
+// §10.4, verbatim: the header from its fields.
+function encodeHeader({ direction, flags, keyVersion, workspace, deviceId, rid, stream, seq, tsMs, salt }) {
+  const h = new Uint8Array(104), dv = new DataView(h.buffer);
+  h.set(te.encode("SHRB"), 0); h[4] = 1; h[5] = direction; h[6] = flags; h[7] = keyVersion;
+  h.set(workspace, 8); h.set(deviceId, 24); h.set(rid, 40); h.set(stream, 56);
+  dv.setBigUint64(72, BigInt(seq), false); dv.setBigUint64(80, BigInt(tsMs), false); h.set(salt, 88);
+  return h;
+}
+
 const importPub = (pub) => subtle.importKey("raw", pub, ECDSA, false, ["verify"]);
 
 async function kWs() {
@@ -52,6 +61,13 @@ test("HKDF: the workspace key and a message key", async () => {
   const mkc = VEC.hkdf[2];
   const bits = await subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt: hex(mkc.salt), info: hex(mkc.info) }, ws.key, 256);
   assert.equal(bytesToHex(new Uint8Array(bits)), mkc.okm);
+});
+
+test("§10.4 builds the vector's header byte for byte", () => {
+  const c = VEC.seal[0], f = c.header_fields;
+  const h = encodeHeader({ direction: f.direction, flags: f.flags, keyVersion: f.key_version, workspace: hex(f.workspace),
+    deviceId: hex(f.device), rid: hex(f.rid), stream: hex(f.stream), seq: f.seq, tsMs: f.ts_ms, salt: hex(f.salt) });
+  assert.equal(bytesToHex(h), c.header);
 });
 
 test("seal and open: AES-256-GCM, zero nonce, header as AAD", async () => {
@@ -78,7 +94,8 @@ test("a non-extractable device key signs, and its public half gives the device i
   const sig = new Uint8Array(await subtle.sign(SIG, kp.privateKey, te.encode("x")));
   assert.equal(sig.length, SIG_LEN);
   const a = VEC.ids.device_a;
-  assert.equal(bytesToHex((await sha256(cat(L.device, hex(a.pub)))).subarray(0, 16)), a.device_id);
+  assert.equal(bytesToHex((await sha256(cat(L.device, hex(VEC.keys.workspace), hex(a.pub)))).subarray(0, 16)), a.device_id);
+  assert.notEqual(a.device_id, a.device_id_other_workspace);
 });
 
 test("the device opens the full response chunk: host signature, then tag", async () => {
@@ -125,4 +142,17 @@ test("the pairing link carries the host pin, and the MAC is HMAC-SHA256", async 
   assert.equal(b64u(hex(p.secret)), secret);
   const mac = new Uint8Array(await subtle.sign("HMAC", k, cat(L.pair, hex(ws), hex(pid), hex(p.device_pub))));
   assert.equal(bytesToHex(mac), p.mac);
+  // the phone-link proof is signed with the phone's existing sign-only HMAC pairing key (pairing.js)
+  const pk = await subtle.importKey("raw", hex(p.phone_key), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const proof = new Uint8Array(await subtle.sign("HMAC", pk, cat(L.phone_link, hex(p.device_id))));
+  assert.equal(bytesToHex(proof), p.phone_proof);
+});
+
+test("signature scalars outside 1..n-1 never verify in WebCrypto", async () => {
+  const c = VEC.sign[0], pub = await importPub(hex(c.pub));
+  for (const s of VEC.sig_scalars.filter((x) => !x.in_range && x.name !== "short")) {
+    let ok = false;
+    try { ok = await subtle.verify(SIG, pub, hex(s.sig), hex(c.msg)); } catch { ok = false; }
+    assert.equal(ok, false, s.name);
+  }
 });
