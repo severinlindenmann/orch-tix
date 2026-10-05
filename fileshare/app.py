@@ -15,7 +15,7 @@ from fileshare.bridge import Bridge
 from fileshare.blobs import BlobStore
 from fileshare.db import backfill_device_fingerprints, connect, migrate
 from fileshare.expiry import expire_files, expire_upload_links, sweep_forever
-from fileshare.headers import SecurityHeadersMiddleware
+from fileshare.headers import CompressionMiddleware, ConditionalMiddleware, SecurityHeadersMiddleware
 from fileshare.push import SubprocessPusher
 from fileshare.routes import auth as auth_routes
 from fileshare.routes import decisions as decisions_routes
@@ -99,8 +99,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.bridge = Bridge()                                 # remote bridge mailboxes (R8)
     app.state.pusher = SubprocessPusher(settings, settings.db_path)  # Web Push through a subprocess (spec T7)
     links.install_log_redaction()        # access lines carry /p/<token> and /api/public/<token>
+    app.add_middleware(ConditionalMiddleware)
     app.add_middleware(CookieRefreshMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(CompressionMiddleware)      # outermost: compresses what the others produced
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error(request: Request, exc: StarletteHTTPException):

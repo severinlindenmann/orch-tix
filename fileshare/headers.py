@@ -2,7 +2,8 @@ import base64
 import hashlib
 from pathlib import Path
 
-from starlette.datastructures import MutableHeaders
+from starlette.datastructures import Headers, MutableHeaders
+from starlette.middleware.gzip import DEFAULT_EXCLUDED_CONTENT_TYPES, GZipMiddleware
 
 PREVIEW_CSS = (Path(__file__).parent / "static" / "css" / "preview.css").read_text(encoding="utf-8")
 PREVIEW_CSS_SHA256 = base64.b64encode(hashlib.sha256(PREVIEW_CSS.encode("utf-8")).digest()).decode("ascii")
@@ -72,3 +73,62 @@ class SecurityHeadersMiddleware:
             await send(message)
 
         await self.app(scope, receive, send_with_headers)
+
+
+class CompressionMiddleware(GZipMiddleware):
+    """gzip for the text the app serves (JSON lists, HTML, JS, CSS). Not for the encrypted blobs
+    (application/octet-stream: incompressible, and streamed); images, audio and video are excluded by default.
+    The /api/mirrors list was ~0.5 MB of JSON per open, uncompressed."""
+
+    def __init__(self, app):
+        super().__init__(app, minimum_size=1000, compresslevel=6,
+                         exclude_content_types=DEFAULT_EXCLUDED_CONTENT_TYPES + ("application/octet-stream",))
+
+
+def _etag_matches(header: str, etag: str) -> bool:
+    """Weak comparison of an If-None-Match value with our (weak) ETag."""
+    bare = etag.removeprefix("W/")
+    return header.strip() == "*" or any(t.strip().removeprefix("W/") == bare for t in header.split(","))
+
+
+class ConditionalMiddleware:
+    """ETag + 304 for the revalidated shell (HTML pages, /sw.js, the manifest). Those are `Cache-Control: no-cache`
+    and small, but had no validator, so every open downloaded them in full. Only single-body 200 GET answers that
+    are `no-cache` and carry no ETag of their own are touched (StaticFiles already sends its own)."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope["method"] != "GET":
+            await self.app(scope, receive, send)
+            return
+        wanted = Headers(scope=scope).get("if-none-match", "")
+        held = {}
+
+        async def send_with_etag(message):
+            if message["type"] == "http.response.start":
+                h = Headers(raw=message["headers"])
+                if message["status"] == 200 and h.get("cache-control") == "no-cache" and "etag" not in h:
+                    held["start"] = message          # hold it until the body message arrives
+                    return
+            elif message["type"] == "http.response.body" and "start" in held:
+                start = held.pop("start")
+                if message.get("more_body"):         # not a small buffered page: pass through untouched
+                    await send(start)
+                    await send(message)
+                    return
+                etag = 'W/"' + hashlib.sha256(message.get("body", b"")).hexdigest()[:32] + '"'
+                headers = MutableHeaders(raw=start["headers"])
+                headers["ETag"] = etag
+                if wanted and _etag_matches(wanted, etag):
+                    for name in ("content-length", "content-type"):
+                        del headers[name]
+                    start["status"] = 304
+                    await send(start)
+                    await send({"type": "http.response.body", "body": b""})
+                    return
+                await send(start)
+            await send(message)
+
+        await self.app(scope, receive, send_with_etag)

@@ -124,7 +124,11 @@ async def mirror_changes(request: Request, after: str = "0", wait: str = "0"):
 
 @router.get("/api/mirrors")
 def list_mirrors(space: str | None = None, _: Principal = Depends(require_any), conn: sqlite3.Connection = Depends(get_db)):
-    return {"mirrors": mirrors.list_mirrors(conn, None if space is None else _space_id(space))}
+    """The live mirrors, and `cursor`: the newest event seq at the time of the read. A client that keeps this list
+    asks /api/mirrors/changes?after=<cursor> for what changed instead of downloading the whole list again (the
+    list is read after the cursor, so a change in between is replayed, never missed)."""
+    cursor = conn.execute("SELECT COALESCE(MAX(seq), 0) FROM ticket_events").fetchone()[0]
+    return {"mirrors": mirrors.list_mirrors(conn, None if space is None else _space_id(space)), "cursor": cursor}
 
 
 @router.get("/api/mirrors/u/{uuid}")
