@@ -347,8 +347,9 @@ carries the host's clock (`host_ms`):
 
 - the device MUST NOT drop that refusal because of its own clock;
 - it adopts `offset = host_ms − device_now` **only** from a host-signed `stale_timestamp` refusal for one
-  of its **pending** rids, at most **once per pending rid**, and only if `|offset| ≤ 24 h`; a larger
-  offset is not adopted, and the app says "this device's clock is wrong";
+  of its **pending** rids, at most **once per pending rid**, and only if `|offset| ≤ 24 h` (86,400,000 ms;
+  inclusive, so exactly 24 h is adopted, vector `stale_timestamp_offset_of_exactly_24_h_is_adopted`); a
+  larger offset is not adopted, and the app says "this device's clock is wrong";
 - it sends the request again as a **new** request (new rid, new seq).
 
 A re-sent stored refusal carries the host's current `host_ms` (§5.3), so a retry of identical bytes never
@@ -453,7 +454,10 @@ mailbox already shows that a response exists and its size.
 
    **Refusal budget:** the refusals of this step are issued before any registered signature verified.
    They count against **one host-wide budget** of 10 per minute, never against the claimed device id,
-   which anyone with K_ws can write. Over the budget the host drops them. A request whose signature
+   which anyone with K_ws can write. Over the budget the host drops them. The exact rule: the host keeps
+   the time of each counted refusal; at `now`, an entry counts while `now − t < 60,000 ms`, so an entry
+   exactly 60 s old no longer counts; a new refusal is dropped if 10 entries count, otherwise sent and
+   added (vector `refusal_budget_entries_exactly_60_s_old_no_longer_count`). A request whose signature
    verified is never dropped because of the budget. The refusals of an **open pairing offer** count
    against that offer's own budget instead (5 per minute, keyed by its unguessable `pairing_id`, §8.1),
    so junk envelopes cannot starve an honest pairing (vectors `refusal_budget_spent_drops_unverified`,
@@ -462,6 +466,8 @@ mailbox already shows that a response exists and its size.
    `pair_refusals_spent_the_offers_own_budget`, `pair_request_under_spent_host_budget_succeeds`).
 4. **Replay.** A known rid gets §5.3's answer.
 5. **Framing.** If the plaintext framing or the meta JSON is invalid: record, then refuse `malformed`.
+   This comes before step 6, so a malformed envelope does **not** consume its seq (vector
+   `malformed_does_not_consume_its_seq`).
 6. **Sequence.** Outside the sequence window (§5.2): record, then refuse `stale_sequence` with `high`.
    A seq that passes is consumed now, even if step 7 refuses the request.
 7. **Time.** Outside the window (§5.1): record, then refuse `stale_timestamp` with `host_ms`. Because
@@ -533,7 +539,13 @@ trusts a new host key on first use, and never replaces the pin without a new pai
    The request is signed with the new key, as proof of possession, and its header device id is
    `device_id(workspace, pub)`.
 3. **The host**, after §6.1 steps 1 and 2, checks in this order:
-   - the offer exists, is open and has not expired;
+   - the offer exists, is open and has not expired. An offer already used is still open to **the device
+     that holds its pending pairing**: a `pair` with the same device id and the same public key (its
+     `pending` answer was lost and it resent) is answered `pending` again, and nothing else changes. Any
+     other device id or key against a used offer gets `pairing_closed`. Without this, a lost `pending`
+     would make the honest device show the "used by someone else" warning, and the owner might reject
+     it (vector `pair_request_then_status`: the resend gets `pending`, another key gets
+     `pairing_closed`);
    - `device_id(workspace, pub)` equals the header's (vector `pair_request_device_id_not_of_pub`);
    - the signature verifies with `pub`;
    - the MAC verifies (a wrong MAC gets the same `pairing_closed` refusal as no offer);
@@ -676,7 +688,8 @@ The host builds `subject` from its own data for that route (R2, R13). Vectors:
 
 - It MUST consist of Unicode scalar values only; a string with a lone surrogate is an error, and the host
   does not issue the challenge.
-- The host removes every code point of general category **Cc** (except line feed), **Cf**, **Zl**,
+- The host removes every code point of general category **Cc** (except line feed; carriage return is Cc
+  and is removed, vector `carriage_return_removed_line_feed_kept`), **Cf**, **Zl**,
   **Zp**, **Co** and **Cn**, and every **Default_Ignorable_Code_Point**. That covers C0/C1 controls, bidi
   controls, zero-width characters, word joiners, the BOM, line and paragraph separators, tag characters,
   variation selectors, the soft hyphen, the combining grapheme joiner, the Mongolian vowel separator,
@@ -917,9 +930,9 @@ checked too. The `why` fields are informative and not part of the contract.
 
 Every MUST in §3–§9 that the reference implements has a negative vector. Every host case and step also
 pins the rid record's `until` (`record_until`), and every assertion case the stored count afterwards
-(`sign_count_after`). `tests/test_bridge_protocol_mutations.py` applies 54 mutations to the reference
-(the first review's 16, the second review's 12, and one or more for each rule added since) and fails
-unless the vectors catch every one.
+(`sign_count_after`). `tests/test_bridge_protocol_mutations.py` applies 61 mutations to the reference
+(the first review's 16, the second review's 12, the third review's boundaries, and one or more for each
+rule added since) and fails unless the vectors catch every one.
 
 Not covered by vectors yet (F2): parsing a real WebAuthn attestation object (CBOR) at registration; the
 `credential_begin` / `credential_finish` requests of a pending device; and the host's park-and-run flow of

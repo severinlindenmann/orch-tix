@@ -1107,6 +1107,54 @@
    "record_until": 1790000900000
   },
   {
+   "name": "refusal_budget_entries_exactly_60_s_old_no_longer_count",
+   "envelope": "53485242010100013e7afa7ff8e262a2b4d26f4442d0b8908f7a92c06ffaacf8077bf2c7e764fdbd434c189f5a1de63b379237f153cf4ef2000000000000000000000000000000000000000000000003000001a0c4506c006f4b5faf0a33deed191939efe0207b842a3e70464a11ca4ad41eaed7d504fff3058b389557cb0e3920c4fce1bae0419d14770f0bcf276634692dc37a433921c4d4d04ae0b9a1495d99870b2dade15d7ec1d780eafd3043340ac904af2bec983df6bac9abf262ba25811d2b12d112149ce2810dde1173bc651a7ede223b62aebf47890c931996f7a120228f",
+   "mailbox_id": "434c189f5a1de63b379237f153cf4ef2",
+   "state": {
+    "workspace": "3e7afa7ff8e262a2b4d26f4442d0b890",
+    "key_version": 1,
+    "devices": {
+     "8f7a92c06ffaacf8077bf2c7e764fdbd": {
+      "pub": "04f8723041e769dc9b8ed9aedf924f05b6962c3e77f0c945c7cd7848df16a1b6233c9653c06a4d3526201351a838bf496668abd08c97b99a7841b625b69ad7222d",
+      "scope": "operate",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     },
+     "c97c83c6fe2bb707e6a45dba5b4f1367": {
+      "pub": "0494b9b21a496f05c380623ddb32f87bf806d09eace8e465dcaffb530fb20c92e48f2c4cf35b4ce71722d6f07e7020ab7558f73e6b82d97c7a036f5793cbc08f11",
+      "scope": "look",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     }
+    },
+    "rids": {},
+    "offers": {},
+    "pending_pairs": {},
+    "phones": {},
+    "streams": {},
+    "unverified": [
+     1789999940000,
+     1789999940000,
+     1789999940000,
+     1789999940000,
+     1789999940000,
+     1789999940000,
+     1789999940000,
+     1789999940000,
+     1789999940000,
+     1789999940000
+    ]
+   },
+   "now_ms": 1790000000000,
+   "expect": {
+    "result": "refuse",
+    "code": "bad_signature"
+   },
+   "record_until": null
+  },
+  {
    "name": "refusal_budget_counts_from_any_claimed_device",
    "envelope": "53485242010100013e7afa7ff8e262a2b4d26f4442d0b8901476f9c2b35ad4649a3c16e2b2f65ab8434c189f5a1de63b379237f153cf4ef2000000000000000000000000000000000000000000000003000001a0c4506c006f4b5faf0a33deed191939efe0207b842a3e70464a11ca4ad41eaed7d504fff3058b389557cb0e3920c4fce1bae0419d14770f0bcf276634692dc30b7d67730cc27dfca3770a849728539833c1cbf0dd81e99fbf6d953b8117fce0b13aed83be9cb8b394d774f3088044cff7869b230b0c8d4a45890c622e4650e5921ce2e319612f9d699b2cacfd91fd9b",
    "mailbox_id": "434c189f5a1de63b379237f153cf4ef2",
@@ -1370,6 +1418,63 @@
     "code": "malformed"
    },
    "record_until": 1790000900000
+  },
+  {
+   "name": "malformed_does_not_consume_its_seq",
+   "state": {
+    "workspace": "3e7afa7ff8e262a2b4d26f4442d0b890",
+    "key_version": 1,
+    "devices": {
+     "8f7a92c06ffaacf8077bf2c7e764fdbd": {
+      "pub": "04f8723041e769dc9b8ed9aedf924f05b6962c3e77f0c945c7cd7848df16a1b6233c9653c06a4d3526201351a838bf496668abd08c97b99a7841b625b69ad7222d",
+      "scope": "operate",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     },
+     "c97c83c6fe2bb707e6a45dba5b4f1367": {
+      "pub": "0494b9b21a496f05c380623ddb32f87bf806d09eace8e465dcaffb530fb20c92e48f2c4cf35b4ce71722d6f07e7020ab7558f73e6b82d97c7a036f5793cbc08f11",
+      "scope": "look",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     }
+    },
+    "rids": {},
+    "offers": {},
+    "pending_pairs": {},
+    "phones": {},
+    "streams": {},
+    "unverified": []
+   },
+   "steps": [
+    {
+     "envelope": "53485242010100013e7afa7ff8e262a2b4d26f4442d0b8908f7a92c06ffaacf8077bf2c7e764fdbd588ca4ff74be1883f5d85cd71fb60c8c000000000000000000000000000000000000000000000005000001a0c4506c009cb9855dcf0e176edd984e78204cce5c9f4dbf24276482866fa72c3a89a50834b8f25f6e0580e793262cd390cda36436b004969fed5d5035b32f6008b453476e51c2d47ffbf20b6d529f9e201696318940cc1d0a20fbef1284f3dced06c5df94c26d7437eb83787ce58ddedf9a",
+     "mailbox_id": "588ca4ff74be1883f5d85cd71fb60c8c",
+     "now_ms": 1790000000000,
+     "expect": {
+      "result": "refuse",
+      "code": "malformed"
+     },
+     "record_until": 1790000900000
+    },
+    {
+     "envelope": "53485242010100013e7afa7ff8e262a2b4d26f4442d0b8908f7a92c06ffaacf8077bf2c7e764fdbd84a5d56fbddc135553c9d3b8f0627a6f000000000000000000000000000000000000000000000005000001a0c4506c009cb9855dcf0e176edd984e78204cce5c9f4dbf0a32299bc371bc2c308a4a39bf9480970dc49f41fe9b571afd94b5ee2874e3e11ee8128862f3134fb4f0f124eed040d7efe3237e455b2c989b4c8d8fbc7f6d36c3fef2a6ad9a89e5933eb06676e650ab861964e61d806c1cbe709bf35ac37891e63b5cc6230e0faffa3682d44917d9e6a46c159f6647450f",
+     "mailbox_id": "84a5d56fbddc135553c9d3b8f0627a6f",
+     "now_ms": 1790000000010,
+     "expect": {
+      "result": "accept",
+      "scope": "operate",
+      "meta": {
+       "method": "GET",
+       "op": "http",
+       "path": "/"
+      },
+      "data": ""
+     },
+     "record_until": 1790000900010
+    }
+   ]
   },
   {
    "name": "sequence_zero",
@@ -2501,8 +2606,10 @@
      "mailbox_id": "e80f5862c94bf6cc5259cb8a4fcdb2fb",
      "now_ms": 1790000001000,
      "expect": {
-      "result": "refuse",
-      "code": "pairing_closed"
+      "result": "pair_pending",
+      "fingerprint": "M4HT-X73M-LRBV-ZWQF-RX3M",
+      "scope": "decide",
+      "phone_link": null
      },
      "record_until": null
     },
@@ -2523,6 +2630,16 @@
      "expect": {
       "result": "refuse",
       "code": "bad_signature"
+     },
+     "record_until": null
+    },
+    {
+     "envelope": "53485242010100013e7afa7ff8e262a2b4d26f4442d0b890408097e475d59ea896e765185a9a2654520eef07028bab0aba7e811e6d7bba79000000000000000000000000000000000000000000000001000001a0c4506c0065ab862cf07b0242bb9aac7223a5ca22692fa3f98e5a89ac361b3493fac3eb43de1fb4393510e10261d517a5305ed8137b0e0cc3b877ec1d4647121fca22bc23cb50dcee65ab2a27789dce6482cb2faf73f972b1aebc2faa460c4eda717aa5763c97bab32a767a4d0d66f3ea70f59dbaf00883bfa71599d167b338fcfae178b76e73de2313388842697cfbba120f42f07621372aec39c5c51ae7a4970a3614a3b7d90443f13d7b5afb9eda91c79e125db8b1931953f75b13421052ad8ff0ca80d57dbe3e494014e1d94739952c12e4ebe72894c4c0139999914b0f4276492db8f5fa403968d2d9b1f7782a1721e8445422380e4267e5d584eaf7bb31744abfb47d94396e91e7eb73659fcc66daf70605c314d238b185566123e5bc0f57cc4b046b42ceda401aae6554bd2455ba0303826c322449efba8f412a2291a5e62c3c5800e577b1da8c5d78cb9af053d51f397fc9019756c475c9ac607ffad5c3feb1ff5c0a5ae6e07ac2a73b1d6377dfe0a9744b537d8e6f9808eac8b9ab5dfb04e4c3a66910811d",
+     "mailbox_id": "520eef07028bab0aba7e811e6d7bba79",
+     "now_ms": 1790000004000,
+     "expect": {
+      "result": "refuse",
+      "code": "pairing_closed"
      },
      "record_until": null
     }
@@ -2922,6 +3039,36 @@
    }
   },
   {
+   "name": "stale_timestamp_offset_of_exactly_24_h_is_adopted",
+   "envelope": "53485242010205013e7afa7ff8e262a2b4d26f4442d0b8908f7a92c06ffaacf8077bf2c7e764fdbda7d6e8710d22bfdfecc9c091bf3966a3000000000000000000000000000000000000000000000000000001a0c45073d0415a90d9720e319f381b380ccc9732e173564fd733e56d8e0116049544faa7441352f33743bb8e67c035d131b78ec2cffa8634c2bd31c0c499b0e3530b2c69cc8a25ab93fb53bc493a9038e9586654bfc610bae89d86b23fa0b1a457f75623cff74631c9d5994709b4e46e10bec1a4a405a34afeddd304e609ab33986d93a24222913dc31bcd87c2f37f2a671e9015539cb5a51634eb0bd58d",
+   "mailbox": {
+    "id": "a7d6e8710d22bfdfecc9c091bf3966a3",
+    "idx": 0,
+    "last": true,
+    "stream": false
+   },
+   "pending": {
+    "a7d6e8710d22bfdfecc9c091bf3966a3": {
+     "next": 0,
+     "stream": false
+    }
+   },
+   "offset_ms": 0,
+   "now_ms": 1790086402000,
+   "expect": {
+    "result": "accept",
+    "last": true,
+    "refusal": true,
+    "meta": {
+     "host_ms": 1790000002000,
+     "refusal": "stale_timestamp"
+    },
+    "data": "",
+    "offset_ms": -86400000,
+    "clock_wrong": null
+   }
+  },
+  {
    "name": "stale_timestamp_offset_out_of_range",
    "envelope": "53485242010205013e7afa7ff8e262a2b4d26f4442d0b8908f7a92c06ffaacf8077bf2c7e764fdbda7d6e8710d22bfdfecc9c091bf3966a3000000000000000000000000000000000000000000000000000001a0c45073d0415a90d9720e319f381b380ccc9732e173564fd733e56d8e0116049544faa7441352f33743bb8e67c035d131b78ec2cffa8634c2bd31c0c499b0e3530b2c69cc8a25ab93fb53bc493a9038e9586654bfc610bae89d86b23fa0b1a457f75623cff74631c9d5994709b4e46e10bec1a4a405a34afeddd304e609ab33986d93a24222913dc31bcd87c2f37f2a671e9015539cb5a51634eb0bd58d",
    "mailbox": {
@@ -3084,6 +3231,18 @@
     98
    ],
    "expect": "E-12 über 日本 👍tab"
+  },
+  {
+   "name": "carriage_return_removed_line_feed_kept",
+   "input": [
+    97,
+    13,
+    10,
+    98,
+    13,
+    99
+   ],
+   "expect": "a\nbc"
   },
   {
    "name": "no_normalisation",

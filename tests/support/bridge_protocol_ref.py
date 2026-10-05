@@ -386,7 +386,9 @@ def _pair(state, h, hb, body, sig, meta, now_ms):
         offer = state["offers"].get(pid)
     except (KeyError, TypeError, ValueError, AttributeError):
         return _unverified(state, now_ms, "malformed")
-    if offer is None or now_ms >= offer["expires_ms"] or offer.get("used"):
+    held = state.get("pending_pairs", {}).get(h.device.hex()) or {}
+    resend = held.get("pairing_id") == pid and held.get("pub") == pub.hex()   # its `pending` answer was lost
+    if offer is None or now_ms >= offer["expires_ms"] or (offer.get("used") and not resend):
         return _unverified(state, now_ms, "pairing_closed")
     ob = {"bucket": offer, "limit": OFFER_BUDGET}  # an open offer is not starved by the host-wide budget
     if device_id(h.workspace, pub) != h.device or not verify(pub, sig, signed_bytes(hb, body)):
@@ -396,6 +398,9 @@ def _pair(state, h, hb, body, sig, meta, now_ms):
         return _unverified(state, now_ms, "pairing_closed", **ob)      # the same answer as no offer: the link is the secret
     if abs(now_ms - h.ts_ms) > WINDOW_MS:
         return _unverified(state, now_ms, "stale_timestamp", host_ms=now_ms, **ob)
+    if resend:                                     # nothing changes: the same answer again
+        return {"result": "pair_pending", "fingerprint": device_fingerprint(pub), "device": h.device.hex(),
+                "scope": held["scope"], "phone_link": held["phone_link"]}
     offer["used"] = True
     link = None                                    # a phone link is recorded only with its proof (§8.2)
     phone_key = state.get("phones", {}).get(str(meta.get("phone_id", "")))
@@ -406,7 +411,7 @@ def _pair(state, h, hb, body, sig, meta, now_ms):
             proof = b""
         if hmac.compare_digest(phone_link_proof(bytes.fromhex(phone_key), h.device), proof):
             link = meta["phone_id"]
-    state.setdefault("pending_pairs", {})[h.device.hex()] = {"pub": pub.hex(), "state": "pending",
+    state.setdefault("pending_pairs", {})[h.device.hex()] = {"pub": pub.hex(), "state": "pending", "pairing_id": pid,
                                                              "scope": offer["scope"], "phone_link": link,
                                                              "label": clean_shown(str(meta.get("label", "")))[:80]}
     return {"result": "pair_pending", "fingerprint": device_fingerprint(pub), "device": h.device.hex(),
@@ -734,6 +739,8 @@ def build() -> dict:
          lambda s: s.update(unverified=[now - i for i in range(BUDGET)]))
     case("refusal_budget_spent_signed_request_runs", req(seq=3), None, now,
          lambda s: s.update(unverified=[now - i for i in range(BUDGET)]))
+    case("refusal_budget_entries_exactly_60_s_old_no_longer_count", req(signer="device_b", seq=3), None, now,
+         lambda s: s.update(unverified=[now - BUDGET_WINDOW_MS] * BUDGET))
     case("refusal_budget_counts_from_any_claimed_device", req(signer="intruder", device=fake("forged-id")[:16], seq=3),
          None, now, lambda s: s.update(unverified=[now - i for i in range(BUDGET)]))
     case("unknown_version", full[:4] + bytes([2]) + full[5:], None, now)
@@ -744,6 +751,9 @@ def build() -> dict:
     case("revoked_device", req(seq=5), None, now, da(revoked=True))
     big = canonical_json({"op": "http", "pad": "x" * MAX_META})
     case("meta_longer_than_64_kib", req(seq=5, raw_pt=struct.pack(">I", len(big)) + big), None, now)
+    chain("malformed_does_not_consume_its_seq",
+          [(req(seq=5, rid=fake("rid-mal")[:16], raw_pt=b"\x00\x00\x00\x09not json!"), now),
+           (req(seq=5, rid=fake("rid-mal-2")[:16]), now + 10)])
     case("sequence_zero", req(seq=0, rid=fake("rid-0")[:16]), None, now)
     case("repeated_sequence", req(seq=9, rid=fake("rid-9b")[:16]), None, now, da(high=9, bitmap=1))
     late = req(seq=9, rid=fake("rid-9c")[:16])
@@ -805,8 +815,14 @@ def build() -> dict:
     case("pair_request_phone_link_without_proof", pair({**pair_meta, "phone_id": phone_id,
                                                        "phone_proof": fake("no-proof").hex()}), None, now, offer)
     status = {"op": "pair_status", "pairing_id": pid.hex()}
+    other_pub = pub["authenticator"]            # another key, not registered anywhere
+    other_id = device_id(ws, other_pub)
+    other_pair = {**pair_meta, "pub": other_pub.hex(), "mac": pair_mac(secret, ws, pid, other_pub).hex()}
+    # step 2 is the device resending after its `pending` answer was lost: `pending` again, never pairing_closed;
+    # step 5 is another key (with a valid MAC) against the same, now used, offer: pairing_closed
     chain("pair_request_then_status", [(pair(), now), (pair(seq=2), now + 1000), (pair(status, seq=3), now + 3000),
-                                       (pair(status, signer="device_b", seq=4), now + 3000)], offer)
+                                       (pair(status, signer="device_b", seq=4), now + 3000),
+                                       (pair(other_pair, device=other_id, signer="authenticator", seq=1), now + 4000)], offer)
     case("pair_status_without_pairing", pair(status, seq=3), None, now)
     out["host_cases"] = host_cases
     out["pairing"] = {"workspace": ws_hex, "pairing_id": pid.hex(), "secret": secret.hex(),
@@ -861,6 +877,7 @@ def build() -> dict:
     stale = resp(flags=F_LAST | F_REFUSAL, meta={"refusal": "stale_timestamp", "host_ms": now + 2000})
     dcase("stale_timestamp_refusal_to_a_skewed_clock", stale, now_ms=skew)
     dcase("stale_timestamp_offset_adopted_once_per_request", stale, now_ms=skew, adopted=True)
+    dcase("stale_timestamp_offset_of_exactly_24_h_is_adopted", stale, now_ms=now + 2000 + MAX_OFFSET_MS)
     far = now + 2000 + MAX_OFFSET_MS + 1                 # the device's clock is more than 24 h off
     dcase("stale_timestamp_offset_out_of_range", stale, now_ms=far)
     dcase("stale_timestamp_refusal_for_a_request_not_pending",
@@ -883,6 +900,8 @@ def build() -> dict:
          "expect": "ab"},
         {"name": "visible_text_kept", "input": [ord(c) for c in "E-12 \u00fcber \u65e5\u672c \U0001F44D\ttab"],
          "expect": "E-12 \u00fcber \u65e5\u672c \U0001F44Dtab"},
+        {"name": "carriage_return_removed_line_feed_kept", "input": [0x61, 0x0D, 0x0A, 0x62, 0x0D, 0x63],
+         "expect": "a\nbc"},
         {"name": "no_normalisation", "input": [0x65, 0x301], "expect": "e\u0301"},
         {"name": "lone_surrogate", "input": [0x41, 0xD800], "expect": None},
     ]

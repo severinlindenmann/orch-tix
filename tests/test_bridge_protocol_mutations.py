@@ -68,6 +68,10 @@ SEQ = ('    if not seq_accept(dev, h.seq):\n'
 TIME = ('    if abs(now_ms - h.ts_ms) > WINDOW_MS:\n'
         '        return _recorded_refusal(state, h, env, now_ms, "stale_timestamp", host_ms=now_ms)\n')
 
+SEQ_NOTE = '    # sequence BEFORE time: a stale_timestamp refusal consumes its seq, so the same bytes can never run\n'
+MAL = ('    try:\n        meta, data = unframe(pt)\n    except ValueError:\n'
+       '        return _recorded_refusal(state, h, env, now_ms, "malformed")\n')
+
 MUTS = {
     # the reviewer's 16
     "seq0_allowed": ("if seq < 1 or i >= SEQ_WINDOW", "if i >= SEQ_WINDOW"),
@@ -78,8 +82,8 @@ MUTS = {
     "no_UV_only_UP": ("ad[32] & (AD_UP | AD_UV) != AD_UP | AD_UV", "ad[32] & AD_UP != AD_UP"),
     "no_rpid_check": ('or ad[:32] != hashlib.sha256(cred["rp_id"].encode()).digest()', ""),
     "no_type_check": ('client.get("type") != "webauthn.get" or ', ""),
-    "pair_ts_unchecked": ('    if abs(now_ms - h.ts_ms) > WINDOW_MS:\n        return _unverified(state, now_ms, "stale_timestamp", host_ms=now_ms, **ob)\n    offer["used"] = True',
-                          '    offer["used"] = True'),
+    "pair_ts_unchecked": ('    if abs(now_ms - h.ts_ms) > WINDOW_MS:\n        return _unverified(state, now_ms, "stale_timestamp", host_ms=now_ms, **ob)\n    if resend:',
+                          '    if resend:'),
     "no_pair_devid_bind": ("device_id(h.workspace, pub) != h.device or ", ""),
     "window_strict_lt": ('if abs(now_ms - h.ts_ms) > WINDOW_MS:\n        return _recorded_refusal',
                          'if abs(now_ms - h.ts_ms) >= WINDOW_MS:\n        return _recorded_refusal'),
@@ -137,6 +141,15 @@ MUTS = {
     "offset_adopted_every_time": ('if not pend.get("offset_adopted"):', "if True:"),
     "offset_unbounded": ("if abs(off) <= MAX_OFFSET_MS:", "if True:"),
     "offer_budget_ignored": ('ob = {"bucket": offer, "limit": OFFER_BUDGET}', "ob = {}"),
+    # the third review's 4 boundaries, and the pairing resend
+    "offset_bound_strict_lt": ("if abs(off) <= MAX_OFFSET_MS:", "if abs(off) < MAX_OFFSET_MS:"),
+    "keep_cr": ('    if c == "\\n":', '    if c in "\\n\\r":'),
+    "budget_window_le": ("if now_ms - t < BUDGET_WINDOW_MS]", "if now_ms - t <= BUDGET_WINDOW_MS]"),
+    "malformed_after_seq": (MAL + SEQ_NOTE + SEQ, SEQ_NOTE + SEQ + MAL),
+    "no_pair_resend": ('held.get("pairing_id") == pid and held.get("pub") == pub.hex()', "False"),
+    "pair_resend_for_any_key": ('held.get("pairing_id") == pid and held.get("pub") == pub.hex()', "True"),
+    "pair_resend_ignores_key": ('held.get("pairing_id") == pid and held.get("pub") == pub.hex()',
+                                'held.get("pairing_id") == pid or bool(state.get("pending_pairs"))'),
 }
 
 
