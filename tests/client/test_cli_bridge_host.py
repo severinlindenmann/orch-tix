@@ -420,3 +420,121 @@ def test_a_random_holder_is_used_per_process(start):
     ha, hb = json.loads(a.out.raw[0])["holder"], json.loads(b.out.raw[0])["holder"]
     assert ha != hb and 1 <= len(ha) <= 64 and all(c.isalnum() or c in "_-" for c in ha)
     assert a.close() == 0 and b.close() == 0
+
+
+# --- review round: unhashable values, redaction before ready, EOF wait, writer lock, closed stdout ------
+
+WEIRD = [[], {}, [[1]], {"a": []}, 5, 1.5, True, False, None, "", ["x"]]
+
+
+@pytest.mark.parametrize("weird", WEIRD, ids=lambda w: json.dumps(w))
+def test_unhashable_and_odd_ops_and_ids_get_protocol_and_the_loop_continues(start, weird):
+    h = start()
+    h.send(id="a", op=weird)
+    m = h.get()
+    assert (m["id"], m["ok"], m["code"]) == ("a", False, "protocol")
+    h.send(id=weird, op="goodbye")
+    m = h.get()
+    assert (m["id"], m["ok"], m["code"]) == (None, False, "protocol")
+    h.send(op=weird)
+    assert h.get()["code"] == "protocol"
+    assert h.call("ok", op="goodbye")["ok"]               # a following valid command still works
+    assert h.close() == 0 and "unexpected" not in h.err.getvalue()
+
+
+@pytest.mark.parametrize("weird", [w for w in WEIRD if isinstance(w, (list, dict, float))], ids=lambda w: json.dumps(w))
+def test_odd_argument_types_get_bad_request_and_the_loop_continues(start, weird):
+    h = start()
+    rid = "a" * 32
+    cmds = [dict(op="poll", wait=weird), dict(op="respond", rid=weird, idx=0, last=True, body="AA"),
+            dict(op="respond", rid=rid, idx=weird, last=True, body="AA"),
+            dict(op="respond", rid=rid, idx=0, last=weird, body="AA"),
+            dict(op="respond", rid=rid, idx=0, last=True, body=weird),
+            dict(op="heartbeat", sessions=weird, in_progress=0, needs_you=0, factory="none"),
+            dict(op="heartbeat", sessions=0, in_progress=0, needs_you=0, factory=weird)]
+    for i, c in enumerate(cmds):
+        r = h.call(f"w{i}", **c)
+        assert r["ok"] is False and r["code"] in ("bad_request", "protocol"), (c, r)
+    assert h.call("ok", op="goodbye")["ok"]
+    assert h.close() == 0 and "unexpected" not in h.err.getvalue()
+
+
+def test_the_device_token_is_redacted_when_the_failure_comes_before_ready(desk, cli, sharing, monkeypatch, caplog):
+    odd = "tok-" + "z9" * 20          # not shd_-shaped: only the exact registration can redact it
+    data = json.loads(desk.config_path.read_text())
+    data["device_token"] = odd
+    desk.config_path.write_text(json.dumps(data))
+    desk.config_path.chmod(0o600)
+
+    def boom(self, *a, **k):
+        raise sharing.ApiError(500, "http_500", f"the server echoed {odd}")
+    monkeypatch.setattr(sharing.Api, "get_json", boom)
+    with caplog.at_level("DEBUG"):
+        r = cli(desk.root, "bridge-host", "--workspace", "0" * 32)
+    assert r.code == 1 and r.out == ""
+    assert odd not in r.out + r.err + caplog.text and "ready" not in r.out
+
+
+def test_stdin_eof_waits_for_the_pending_poll_then_releases_then_exits_0(start, sharing, monkeypatch):
+    events = []
+    real_get, real_del = sharing.Api.get_json, sharing.Api.delete
+
+    def get(self, path, headers=None):
+        out = real_get(self, path, headers)
+        if "/requests?" in path:
+            events.append("poll_done")
+        return out
+
+    def delete(self, path, headers=None):
+        events.append("release")
+        return real_del(self, path, headers)
+    monkeypatch.setattr(sharing.Api, "get_json", get)
+    monkeypatch.setattr(sharing.Api, "delete", delete)
+    h = start()
+    h.send(id="p", op="poll", wait=3)
+    time.sleep(0.5)
+    h._wf.close()
+    time.sleep(1)
+    assert h.t.is_alive() and events == []                 # still waiting for the pending call
+    assert h.answer("p")["ok"]
+    h.t.join(40)
+    assert h.code == 0 and events == ["poll_done", "release"]
+
+
+def test_the_stdout_writer_is_serialised(sharing):
+    class Slow:
+        """A write that is not atomic: two halves with a yield between them."""
+        def __init__(self):
+            self.parts = []
+
+        def write(self, s):
+            h = len(s) // 2
+            self.parts.append(s[:h])
+            time.sleep(0.0005)
+            self.parts.append(s[h:])
+
+        def flush(self):
+            pass
+    out = Slow()
+    host = sharing.BridgeHost(None, "0" * 32, "h", False, None, out)
+    ts = [threading.Thread(target=lambda n=n: [host.emit({"id": f"{n}-{i}", "ok": True, "pad": "x" * 40})
+                                                for i in range(40)]) for n in range(8)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    lines = "".join(out.parts).split("\n")
+    assert lines.pop() == "" and len(lines) == 320
+    assert len({json.loads(line)["id"] for line in lines}) == 320   # every line is one whole object
+    # ponytail: provoked by a deliberately split write; with the lock removed this fails on every run here.
+
+
+def test_the_loop_stops_when_stdout_is_closed(start):
+    h = start()
+
+    def broken(s):
+        raise BrokenPipeError()
+    h.out.write = broken
+    h.send(id="1", op="goodbye")        # its answer cannot be written: the writer notes that nobody listens
+    time.sleep(1)
+    h.send(id="2", op="goodbye")        # the next line the loop reads ends it, without stdin reaching EOF
+    h.t.join(40)
+    assert not h.t.is_alive() and h.code == 0

@@ -4185,7 +4185,9 @@ class BridgeHost:
         extra = set(cmd) - {"id", "op", *_HOST_BEAT_KEYS}
         if extra:
             raise HostError("bad_request", "unknown field in heartbeat")
-        beat = {k: cmd[k] for k in _HOST_BEAT_KEYS if cmd.get(k) is not None}   # the server checks the values
+        # Values are forwarded unvalidated on purpose: the server's strict schema checks them, and the line is
+        # capped at HOST_MAX_LINE bytes. Only the key set is checked here.
+        beat = {k: cmd[k] for k in _HOST_BEAT_KEYS if cmd.get(k) is not None}
         self._call(lambda a: a.post_json(f"/api/presence/{self.ws}/heartbeat", beat))
         return {"ok": True}
 
@@ -4227,7 +4229,8 @@ class BridgeHost:
         cid = cmd.get("id")
         if not isinstance(cid, str) or not 1 <= len(cid) <= 128:
             return self._fail(None, "protocol", "a command needs a string id of 1 to 128 characters")
-        if cmd.get("op") not in self.OPS:
+        op = cmd.get("op")
+        if not (isinstance(op, str) and op in self.OPS):   # a list or dict op is unhashable: type first
             return self._fail(cid, "protocol", "unknown op")
         with self._lock:
             if cid in self._inflight:
@@ -4241,7 +4244,7 @@ class BridgeHost:
 
     def _lines(self):
         """Yield command lines of at most HOST_MAX_LINE bytes; an over-long one is skipped and yields None."""
-        while True:
+        while not self.gone.is_set():   # stdout closed: nobody listens, stop reading
             line = self._stdin.readline(HOST_MAX_LINE + 1)
             if not line:
                 return
@@ -4261,8 +4264,13 @@ class BridgeHost:
             if line is None:
                 self._fail(None, "protocol", "line too long")
             else:
-                self._dispatch(line)
-        # EOF: let pending calls (a poll re-takes the lease while it waits) end, then release best effort.
+                try:
+                    self._dispatch(line)
+                except Exception:   # nothing a client sends may end the loop
+                    self._fail(None, "protocol")
+        # EOF (or stdout gone): let pending calls end, then release best effort. A poll re-takes the lease on
+        # every server slice while it waits, so a release sent before it ends can be overtaken; a poll that
+        # outlives this wait is abandoned and may re-lease for one slice (the lease then lapses by itself).
         with self._lock:
             pending = list(self._threads)
         deadline = time.monotonic() + HOST_EOF_JOIN_S
