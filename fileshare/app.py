@@ -11,6 +11,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from fileshare import messages as messages_mod
 from fileshare import mirrors as mirrors_mod
+from fileshare import presence as presence_mod
 from fileshare.bridge import Bridge
 from fileshare.blobs import BlobStore
 from fileshare.db import backfill_device_fingerprints, connect, migrate
@@ -21,6 +22,7 @@ from fileshare.push import SubprocessPusher
 from fileshare.routes import auth as auth_routes
 from fileshare.routes import decisions as decisions_routes
 from fileshare.routes import bridge as bridge_routes
+from fileshare.routes import presence as presence_routes
 from fileshare.routes import devices, files, links, messages, mirrors, onboarding, uploadlinks
 from fileshare.routes import push as push_routes
 from fileshare.routes import tickets as tickets_routes
@@ -102,7 +104,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.ticket_bus = Bus(last_seq)                        # long-poll wakeups (spec T6)
     app.state.inbox_bus = Bus(last_decision)                    # decision long-poll wakeups (TIX spec §9)
     app.state.message_bus = Bus(last_message)                   # message long-poll wakeups (TIX spec §8)
-    app.state.bridge = Bridge()                                 # remote bridge mailboxes (R8)
+    app.state.presence_limiter = WindowLimiter(presence_mod.BEATS_PER_MIN, 60)   # per host device (R9)
+    app.state.bridge = Bridge()                                # remote bridge mailboxes (R8)
     app.state.pusher = SubprocessPusher(settings, settings.db_path)  # Web Push through a subprocess (spec T7)
     links.install_log_redaction()        # access lines carry /p/<token> and /api/public/<token>
     app.add_middleware(CookieRefreshMiddleware)
@@ -136,6 +139,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(decisions_routes.router)
     app.include_router(messages.router)
     app.include_router(bridge_routes.router)
+    app.include_router(presence_routes.router)
     app.include_router(tickets_routes.router)
     app.include_router(push_routes.router)
     app.include_router(pages_routes.router)
