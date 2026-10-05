@@ -704,7 +704,7 @@ function render() {
       ? "The server's routing for this ticket doesn't match its sealed content. Nothing can be sent from here; check it on the desktop."
       : "This ticket doesn't open with this browser's key."),
     ...[sentList(), doc ? notifyRow() : null, ...(doc ? extras() : [])].filter(Boolean));
-  if (state.offline) for (const c of main.querySelectorAll("#decision input, #decision textarea, #decision button, .notify-row input, .notify-row button")) c.disabled = true;
+  if (state.offline) for (const c of main.querySelectorAll("#decision input, #decision textarea, #decision button, #notify-toggle")) c.disabled = true;
   paintBar();
   if (state.focusOnRender) {
     state.focusOnRender = false;

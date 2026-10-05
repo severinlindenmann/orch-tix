@@ -7,7 +7,7 @@ STATIC = Path(__file__).resolve().parents[1] / "fileshare" / "static"
 SHELL_BUDGET = 1_030_000           # bytes, uncompressed: the whole offline shell (fonts, scripts, styles, icons); was 1_000_000,
                                    # raised by 20 kB for the phone UI round (#71: update prompt, offline cards, settings folds, labels),
                                    # then 10 kB more for the sealed offline ticket cache (#73, ticket-cache.js)
-PHONE_JS_BUDGET = 168_000          # bytes, uncompressed: Needs you, Board and ticket modules (+8 kB: the offline ticket cache, #73)
+PHONE_JS_BUDGET = 172_000          # bytes, uncompressed: Needs you, Board and ticket modules (+12 kB: the per-ticket notify row (#74) and the offline ticket cache, #73)
 # The bridge's device module (R10a, docs/bridge-protocol.md) has its own allowance on top of the shell's, so it can
 # neither eat the shell's budget nor grow unnoticed. The owner chose this separate allowance (PR #81, for #78) over
 # raising SHELL_BUDGET or keeping the bridge out of the offline shell.
