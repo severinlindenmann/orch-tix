@@ -2597,6 +2597,15 @@ def _download_decrypted(api: Api, blob_path: str, dek: bytes, file_uuid: bytes, 
     return size
 
 
+def _sha256_of(path: Path) -> bytes:
+    """Streamed: a 200 MiB file must not be read into memory twice to be compared."""
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.digest()
+
+
 def _identical_existing(api: Api, f: dict, dek: bytes, out_dir: Path, name: str, ref: str) -> Path | None:
     """A copy of this very file already in out_dir (as NAME or REF-NAME): `get` again reuses it instead of
     piling up FILE7-name copies until it is refused (QA TF-19). Compared by content: the file is decrypted
@@ -2615,7 +2624,7 @@ def _identical_existing(api: Api, f: dict, dek: bytes, out_dir: Path, name: str,
         try:
             probe = scratch / "probe"
             _download_decrypted(api, f"/api/files/{ref}/blob", dek, bytes.fromhex(f["uuid"]), probe)
-            same = hashlib.sha256(probe.read_bytes()).digest() == hashlib.sha256(cand.read_bytes()).digest()
+            same = _sha256_of(probe) == _sha256_of(cand)
         finally:
             shutil.rmtree(scratch, ignore_errors=True)
         if same:

@@ -377,3 +377,15 @@ def test_get_again_with_different_content_still_keeps_both(cli, dev_repo, sim):
     again = cli(dev_repo.root, "get", fid, "--no-ack", "--json")
     assert again.code == 0 and Path(again.json()["path"]).name == f"{fid}-a.txt"
     assert Path(p).read_bytes() == b"edited locally"
+
+
+def test_the_copy_comparison_hashes_in_chunks(dev_repo):
+    """The reuse check hashes in chunks (a big file would otherwise be held in memory twice)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("sharing_cli_under_test", Path(__file__).resolve().parents[2] / "skill" / "sharing" / "sharing.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    big = dev_repo.root / "big.bin"
+    big.write_bytes(b"x" * (3 * (1 << 20) + 5))
+    import hashlib
+    assert mod._sha256_of(big) == hashlib.sha256(big.read_bytes()).digest()
