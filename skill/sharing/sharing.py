@@ -24,6 +24,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unicodedata
 import urllib.error
@@ -794,7 +795,7 @@ def is_secret_path(path: Path, repo_root: Path) -> bool:
 
 # =========================================================== config (Task 13)
 
-VERSION = "2.3.0"   # semver; bump on every skill change — the server's /skill/manifest.json reads it
+VERSION = "2.4.0"   # semver; bump on every skill change — the server's /skill/manifest.json reads it
 REPO_CONFIG = Path(".claude") / "skills" / "sharing" / "config.json"
 OLD_CONFIG = "config.json.old"   # the identity --force is replacing; lives beside config.json until the new one is approved
 TICKETS_SKILL_SRC = "tickets-SKILL.md"   # served beside SKILL.md; installed where Claude Code finds skills
@@ -4036,6 +4037,275 @@ def _reg_bridge_key(sub, common):
     p.add_argument("--allow-terminal", action="store_true",
                    help="print even though stdout is a terminal (the key then stays in scrollback)")
     p.set_defaults(func=cmd_bridge_key)
+
+
+# ---------------------------------------------------------------- bridge-host (R15b)
+
+HOST_LEASE_S = 40            # the server's lease; only the ready event echoes it, every poll answer carries the real one
+HOST_MAX_LINE = 1 << 19      # one command line, bytes (a respond body is at most ~350 KB of base64url)
+HOST_MAX_INFLIGHT = 8        # commands being worked on at once; more are refused rate_limited
+HOST_MAX_BODY_B64 = (256 * 1024 * 4 + 2) // 3   # the server's response-chunk cap (bridge.MAX_CHUNK_BYTES), as base64url text
+HOST_MAX_WAIT_S = 25
+HOST_CALL_TIMEOUT_S = 15     # per request, besides a poll (which gets its wait on top)
+HOST_EOF_JOIN_S = 30         # on stdin EOF: how long to let a pending poll end before releasing the lease
+_HOLDER_RE = re.compile(r"[A-Za-z0-9_-]{1,64}", re.ASCII)
+_RID_RE = re.compile(r"[0-9a-f]{32}", re.ASCII)
+_B64U_RE = re.compile(r"[A-Za-z0-9_-]*", re.ASCII)
+_HOST_BEAT_KEYS = ("sessions", "in_progress", "needs_you", "factory", "children_done", "children_total", "budget_pct")
+_HOST_CODES = {   # stable code -> a fixed short text; the server's own text is never forwarded
+    "host_taken": "another host serves this workspace; start with --take-over to replace it",
+    "lease_lost": "this host no longer holds the workspace; poll again",
+    "not_owner": "this device does not own the workspace",
+    "unauthorized": "the server does not accept this device (revoked?)",
+    "pending": "this device is still pending approval",
+    "rate_limited": "the server asks for fewer calls; slow down",
+    "too_large": "the body is over the server's size limit",
+    "bad_request": "the server refused the request as malformed",
+    "no_space": "the server has no such workspace",
+    "network": "cannot reach the server (retryable)",
+    "server": "the server failed (retryable)",
+    "protocol": "malformed command",
+}
+
+
+class HostError(Exception):
+    def __init__(self, code: str, message: str | None = None):
+        super().__init__(code)
+        self.code = code
+        self.message = message or _HOST_CODES[code]
+
+
+def _stdin_is_tty() -> bool:
+    """Tests replace this."""
+    try:
+        return sys.stdin.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
+def host_error_code(e: ApiError) -> str:
+    """Map an HTTP failure to one of the stable bridge-host codes."""
+    c = e.code
+    if e.status == 0:
+        return "network"
+    if c in ("host_taken", "lease_lost", "not_owner", "pending", "rate_limited", "too_large", "bad_request", "no_space"):
+        return c
+    if c in ("revoked", "unauthenticated") or e.status == 401:
+        return "unauthorized"
+    if c == "forbidden":
+        return "not_owner"
+    if c == "mailbox_full" or e.status == 429:
+        return "rate_limited"
+    if e.status == 413:
+        return "too_large"
+    if e.status >= 500 or 300 <= e.status < 400:
+        return "server"
+    return "bad_request"
+
+
+def _host_int(v, lo: int, hi: int, name: str) -> int:
+    if type(v) is not int or not lo <= v <= hi:
+        raise HostError("bad_request", f"{name} must be a whole number from {lo} to {hi}")
+    return v
+
+
+class BridgeHost:
+    """The pipe proxy: JSON-lines commands in, answers out, mailbox calls made with the device token this
+    object holds. Bodies are opaque base64url text and are never decoded or logged."""
+
+    def __init__(self, cfg: Config, workspace: str, holder: str, take_over: bool, stdin, stdout):
+        self.cfg, self.ws, self.holder = cfg, workspace, holder
+        self._take_over = take_over            # cleared once a poll got an answer from the server
+        self._lock = threading.Lock()          # guards _take_over, _inflight, _threads
+        self._wlock = threading.Lock()         # serialises stdout
+        self._inflight: set[str] = set()
+        self._threads: set[threading.Thread] = set()
+        self._stdin, self._out = stdin, stdout
+        self.gone = threading.Event()          # stdout is closed: nobody listens any more
+
+    # --- output ------------------------------------------------------------------------------------
+
+    def emit(self, obj: dict) -> None:
+        line = json.dumps(obj) + "\n"          # ASCII only: one line, no raw control or bidi characters
+        with self._wlock:
+            try:
+                self._out.write(line)
+                self._out.flush()
+            except (OSError, ValueError):
+                self.gone.set()
+
+    def _fail(self, cid, code: str, message: str | None = None) -> None:
+        self.emit({"id": cid, "ok": False, "code": code, "message": message or _HOST_CODES[code]})
+
+    # --- mailbox calls -----------------------------------------------------------------------------
+
+    def _api(self, timeout: float) -> Api:
+        api = Api(self.cfg.server_url, self.cfg.device_token)
+        api.TIMEOUT = timeout
+        return api
+
+    def _call(self, fn, timeout: float = HOST_CALL_TIMEOUT_S):
+        try:
+            return fn(self._api(timeout))
+        except ApiError as e:
+            raise HostError(host_error_code(e)) from None
+
+    def op_poll(self, cmd: dict) -> dict:
+        wait = _host_int(cmd.get("wait", HOST_MAX_WAIT_S), 0, HOST_MAX_WAIT_S, "wait")
+        with self._lock:
+            take = self._take_over
+        q = f"holder={self.holder}&wait={wait}" + ("&take_over=1" if take else "")
+        r = self._call(lambda a: a.get_json(f"/api/bridge/{self.ws}/requests?{q}"), wait + HOST_CALL_TIMEOUT_S)
+        rows, lease = r.get("requests"), r.get("lease_s")
+        if not isinstance(rows, list) or not all(isinstance(x, dict) and isinstance(x.get("id"), str)
+                                                 and isinstance(x.get("body"), str) for x in rows):
+            raise HostError("server", "the server's answer was not the expected shape")
+        if take:
+            with self._lock:
+                self._take_over = False
+        return {"ok": True, "requests": [{"rid": x["id"], "body": x["body"]} for x in rows],
+                "lease_s": lease if type(lease) is int else HOST_LEASE_S}
+
+    def op_respond(self, cmd: dict) -> dict:
+        rid, body = cmd.get("rid"), cmd.get("body")
+        if not isinstance(rid, str) or not _RID_RE.fullmatch(rid):
+            raise HostError("bad_request", "rid must be 32 lowercase hex characters")
+        idx, last = _host_int(cmd.get("idx"), 0, 2**31 - 1, "idx"), cmd.get("last")
+        if type(last) is not bool:
+            raise HostError("bad_request", "last must be true or false")
+        if not isinstance(body, str) or not body or not _B64U_RE.fullmatch(body):
+            raise HostError("bad_request", "body must be base64url text")
+        if len(body) > HOST_MAX_BODY_B64:
+            raise HostError("too_large")
+        self._call(lambda a: a.post_json(f"/api/bridge/{self.ws}/responses/{rid}?holder={self.holder}",
+                                         {"idx": idx, "last": last, "body": body}))
+        return {"ok": True}
+
+    def op_heartbeat(self, cmd: dict) -> dict:
+        extra = set(cmd) - {"id", "op", *_HOST_BEAT_KEYS}
+        if extra:
+            raise HostError("bad_request", "unknown field in heartbeat")
+        beat = {k: cmd[k] for k in _HOST_BEAT_KEYS if cmd.get(k) is not None}   # the server checks the values
+        self._call(lambda a: a.post_json(f"/api/presence/{self.ws}/heartbeat", beat))
+        return {"ok": True}
+
+    def op_goodbye(self, cmd: dict) -> dict:
+        self._call(lambda a: a.post_json(f"/api/presence/{self.ws}/goodbye", {}))
+        return {"ok": True}
+
+    def op_release(self, cmd: dict) -> dict:
+        self._call(lambda a: a.delete(f"/api/bridge/{self.ws}/host?holder={self.holder}"))
+        return {"ok": True}
+
+    OPS = {"poll": "op_poll", "respond": "op_respond", "heartbeat": "op_heartbeat",
+           "goodbye": "op_goodbye", "release": "op_release"}
+
+    # --- the loop ----------------------------------------------------------------------------------
+
+    def _run(self, cid: str, cmd: dict) -> None:
+        try:
+            try:
+                out = getattr(self, self.OPS[cmd["op"]])(cmd)
+            except HostError as e:
+                self._fail(cid, e.code, e.message)
+            except Exception as e:   # never crash, never forward text that could carry anything: the type only
+                self._fail(cid, "server", f"internal error ({type(e).__name__})")
+            else:
+                self.emit({"id": cid, **out})
+        finally:
+            with self._lock:
+                self._inflight.discard(cid)
+                self._threads.discard(threading.current_thread())
+
+    def _dispatch(self, raw: bytes) -> None:
+        try:
+            cmd = json.loads(raw.decode("utf-8"))
+        except (ValueError, RecursionError):
+            return self._fail(None, "protocol")
+        if not isinstance(cmd, dict):
+            return self._fail(None, "protocol")
+        cid = cmd.get("id")
+        if not isinstance(cid, str) or not 1 <= len(cid) <= 128:
+            return self._fail(None, "protocol", "a command needs a string id of 1 to 128 characters")
+        if cmd.get("op") not in self.OPS:
+            return self._fail(cid, "protocol", "unknown op")
+        with self._lock:
+            if cid in self._inflight:
+                return self._fail(cid, "bad_request", "this id is already in flight")
+            if len(self._inflight) >= HOST_MAX_INFLIGHT:
+                return self._fail(cid, "rate_limited", "too many commands in flight")
+            self._inflight.add(cid)
+            t = threading.Thread(target=self._run, args=(cid, cmd), daemon=True)
+            self._threads.add(t)
+        t.start()
+
+    def _lines(self):
+        """Yield command lines of at most HOST_MAX_LINE bytes; an over-long one is skipped and yields None."""
+        while True:
+            line = self._stdin.readline(HOST_MAX_LINE + 1)
+            if not line:
+                return
+            if len(line) > HOST_MAX_LINE and not line.endswith(b"\n"):
+                while line and not line.endswith(b"\n"):   # drop the rest of it without keeping it
+                    line = self._stdin.readline(HOST_MAX_LINE)
+                yield None
+                continue
+            if line.strip():
+                yield line
+
+    def serve(self) -> None:
+        self.emit({"event": "ready", "holder": self.holder, "lease_s": HOST_LEASE_S})
+        for line in self._lines():
+            if self.gone.is_set():
+                break
+            if line is None:
+                self._fail(None, "protocol", "line too long")
+            else:
+                self._dispatch(line)
+        # EOF: let pending calls (a poll re-takes the lease while it waits) end, then release best effort.
+        with self._lock:
+            pending = list(self._threads)
+        deadline = time.monotonic() + HOST_EOF_JOIN_S
+        for t in pending:
+            t.join(max(0.0, deadline - time.monotonic()))
+        try:
+            self._api(5).delete(f"/api/bridge/{self.ws}/host?holder={self.holder}")
+        except Exception:
+            pass
+
+
+def cmd_bridge_host(args) -> int:
+    """A long-running JSON-lines proxy for the orch host: it holds the device token so the dashboard process
+    never does. A guarded command like bridge-key: the orch command guard refuses agents, and that guard is
+    the only barrier (docs/bridge-protocol.md §2.7)."""
+    workspace = _space_arg(args.workspace)
+    holder = args.holder if args.holder is not None else secrets.token_urlsafe(12)
+    if not _HOLDER_RE.fullmatch(holder):
+        raise UsageError("--holder is 1 to 64 characters of A-Z a-z 0-9 _ -")
+    if _stdin_is_tty() or _stdout_is_tty():   # before any config, key or network access
+        raise Refused("bridge-host speaks a JSON-lines pipe: stdin and stdout must both be pipes, not a terminal")
+    cfg = load_config(Path.cwd())             # pending -> exit 3
+    _remember_secret(b64u(cfg.mk))            # redacted from anything this command prints, in both spellings
+    _remember_secret(cfg.mk.hex())
+    _remember_secret(cfg.device_token)
+    row = _find_space(Api(cfg.server_url, cfg.device_token), workspace)   # a revoked device gets 401 here
+    if row is None:
+        raise ApiError(404, "no_space", "the server has no such space")
+    if row.get("owner_device") != cfg.device_id:
+        raise ApiError(403, "not_owner", "this device does not own that space")
+    BridgeHost(cfg, workspace, holder, args.take_over, getattr(sys.stdin, "buffer", sys.stdin), sys.stdout).serve()
+    return 0
+
+
+@command
+def _reg_bridge_host(sub, common):
+    # No `common`: --json would put an error object on the protocol's stdout.
+    p = sub.add_parser("bridge-host", help="(for the orch host) relay mailbox operations over a JSON-lines pipe; "
+                                           "holds the device token so the dashboard does not")
+    p.add_argument("--workspace", required=True, metavar="SPACE_ID", help="the space id (32 hex characters)")
+    p.add_argument("--take-over", action="store_true", help="replace another live host on the first poll")
+    p.add_argument("--holder", help="this host process's id (default: random per process)")
+    p.set_defaults(func=cmd_bridge_host)
 
 
 @command
