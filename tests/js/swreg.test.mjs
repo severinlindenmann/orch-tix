@@ -82,3 +82,19 @@ test("a hidden page with nothing typed reloads quietly; with a draft it asks", (
   assert.equal(reloads, 0); assert.equal(d.made.length, 1);
   assert.equal(safeToReload(fakeDoc("hidden", { dialog: {} })), false);
 });
+
+test("safeToReload counts everything unsent: text, a chosen file, a picked radio, a checked box, contenteditable", () => {
+  const ok = (fields) => safeToReload(fakeDoc("hidden", { fields }));
+  assert.equal(ok([]), true);
+  assert.equal(ok([{ type: "text", value: "", defaultValue: "" }, { type: "hidden", value: "csrf" }, { type: "search", value: "q" }]), true);
+  assert.equal(ok([{ type: "text", value: "prefilled", defaultValue: "prefilled" }]), true);   // rendered, not typed
+  assert.equal(ok([{ type: "text", value: "typed", defaultValue: "" }]), false);
+  assert.equal(ok([{ tagName: "TEXTAREA", value: "half a note" }]), false);
+  assert.equal(ok([{ type: "file", files: { length: 1 } }]), false);                          // a chosen file
+  assert.equal(ok([{ type: "file", files: { length: 0 } }]), true);
+  assert.equal(ok([{ type: "radio", checked: true, defaultChecked: false }]), false);          // an answer picked, not sent
+  assert.equal(ok([{ type: "radio", checked: false, defaultChecked: false }]), true);
+  assert.equal(ok([{ type: "checkbox", checked: true, defaultChecked: true }]), true);
+  assert.equal(ok([{ type: "checkbox", checked: true, defaultChecked: false }]), false);
+  assert.equal(ok([{ tagName: "DIV", isContentEditable: true, textContent: " draft " }]), false);
+});

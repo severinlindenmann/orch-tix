@@ -65,8 +65,17 @@ export function listenForNewBuild(nav = globalThis.navigator) {
 export function safeToReload(doc = globalThis.document) {
   if (!doc) return false;
   if (doc.querySelector("dialog[open]")) return false;
-  for (const f of doc.querySelectorAll("textarea, input:not([type=checkbox]):not([type=radio]):not([type=search]):not([type=file]):not([type=button]):not([type=submit])")) {
-    if (f.value) return false;
+  // Anything the owner has put into the page and not sent: typed text, a chosen file, a picked option (an answer
+  // selected but not yet sent is a radio), a checked box, a contenteditable. Not-yet-touched fields are what the page
+  // itself rendered (defaultValue / defaultChecked), so they do not count.
+  for (const f of doc.querySelectorAll("textarea, input, select, [contenteditable]")) {
+    const type = String(f.type || "").toLowerCase();
+    if (type === "hidden" || type === "button" || type === "submit" || type === "search") continue;
+    if (type === "file") { if (f.files?.length) return false; continue; }
+    if (type === "radio" || type === "checkbox") { if (Boolean(f.checked) !== Boolean(f.defaultChecked)) return false; continue; }
+    if (f.tagName === "SELECT") { if (f.selectedIndex > 0 && f.options?.[f.selectedIndex]?.defaultSelected === false) return false; continue; }
+    if (f.isContentEditable === true || f.hasAttribute?.("contenteditable")) { if ((f.textContent || "").trim()) return false; continue; }
+    if ((f.value || "") !== (f.defaultValue || "")) return false;
   }
   return true;
 }
