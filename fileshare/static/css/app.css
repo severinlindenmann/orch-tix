@@ -190,7 +190,7 @@ code.cmd { padding: 1px 6px; border-radius: 5px; background: var(--sunken); colo
 .chip-toggle { margin-left: 10px; border-style: dashed; }
 .chip-toggle[aria-pressed="true"] { border-style: solid; }
 /* the sort select sits at the right end of the search box (QA TF-07) */
-.chip-sort { flex: none; width: auto; max-width: 42%; height: 30px; min-height: 0; padding: 0 4px; border: 0; border-left: 1px solid var(--border); border-radius: 0; background: transparent; color: var(--muted); font: 500 13px/1 var(--font); }
+.chip-sort { flex: none; width: auto; max-width: 42%; align-self: stretch; height: auto; margin-right: -8px; padding: 0 10px 0 8px; /* fills the box: as tall as it is (48 px on a phone) */ border: 0; border-left: 1px solid var(--border); border-radius: 0; background: transparent; color: var(--muted); font: 500 13px/1 var(--font); }
 .chip[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--on-ink); }
 .list-body { display: flex; flex-direction: column; gap: 12px; padding: 0 16px 16px; }
 .list-msg { padding: 8px 4px; }
@@ -698,13 +698,13 @@ body.pub { min-height: 100vh; min-height: 100dvh; overflow-x: hidden; }
 
 /* ---- transcription ---- (Task 35, spec §20: the Transcribe button and the Settings card) */
 .transcribe-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.transcribe-btn { min-height: 44px; }
+.transcribe-btn { }
 .transcribe-hint { color: var(--text-2); font-size: 12.5px; }
 .transcribe-status { font-size: 13px; color: var(--text-2); }
 .transcribe-status.error { color: var(--danger); }
 .transcript-notice { margin: 0; }
 .transcription-card select.input { max-width: 320px; }
-.transcribe-toggle { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 14px; cursor: pointer; }
+.transcribe-toggle { display: flex; align-items: center; gap: 10px; font-size: 14px; cursor: pointer; }
 /* A switch with a 44 px tap target: the transparent border pads the visible 44×28 track. */
 .transcribe-toggle input { appearance: none; flex: none; box-sizing: border-box; width: 60px; height: 44px; margin: 0;
   border: 8px solid transparent; border-radius: 22px; background-clip: padding-box; cursor: pointer;
@@ -1059,7 +1059,7 @@ dialog.sheet-confirm[open] { display: flex; flex-direction: column; gap: 12px; }
 }
 
 /* T05 Settings: compact device rows, an outline Revoke (not a big filled red button beside a status), the Advanced fold */
-.btn-danger-line { background: transparent; border-color: var(--danger); color: var(--danger); font-weight: 600; min-height: 44px; }
+.btn-danger-line { background: transparent; border-color: var(--danger); color: var(--danger); font-weight: 600; }
 .btn-danger-line:hover { background: var(--danger-soft); color: var(--danger); border-color: var(--danger); }
 .device-row-active { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; }
 .device-row-active .device-main .badge { align-self: flex-start; margin-top: 4px; }
