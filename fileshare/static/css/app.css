@@ -118,8 +118,8 @@ code.cmd { padding: 1px 6px; border-radius: 5px; background: var(--sunken); colo
 .seg button[aria-selected="true"], .seg-btn[aria-pressed="true"] { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: var(--shadow-seg); }
 
 /* ---- auth pages (login, setup) ---- */
-.auth-wrap { min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center;
-  padding: 24px 16px calc(24px + var(--safe-b)); }
+.auth-wrap { min-height: 100vh; min-height: 100dvh; display: flex; align-items: flex-start; justify-content: center;
+  padding: max(24px, 9vh) 16px calc(24px + var(--safe-b)); }
 .auth-card { width: 100%; max-width: 440px; padding: 32px; display: flex; flex-direction: column; gap: 18px; border-radius: var(--radius-sheet); }
 .auth-card form, .auth-card section { display: flex; flex-direction: column; gap: 16px; }
 .wordmark { font-size: 22px; font-weight: 700; letter-spacing: -.01em; }
@@ -338,7 +338,7 @@ dialog.onboard { width: min(600px, calc(100vw - 32px)); }
 .sheet-lock .icon { width: 14px; height: 14px; }
 .sheet-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .seg-field legend { margin-bottom: 6px; }
-.upload-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 14px; max-height: 40vh; overflow: auto; }
+.upload-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 14px; max-height: 40vh; overflow: auto; flex-shrink: 0; }
 .upload-list:empty { display: none; }
 .upload-item { display: flex; flex-direction: column; gap: 12px; }
 .upload-card { display: flex; align-items: center; gap: 12px; padding: 10px; background: var(--ground); border-radius: var(--radius-lg); min-width: 0; }
@@ -845,8 +845,15 @@ h1, h2, h3, .page-title, .settings-title, .brand-main, .ws-title, .t-title { fon
 .decision-status.is-empty { display: none; }
 .decision-bar { display: flex; flex-direction: column; gap: 8px; padding: 10px 16px calc(12px + var(--safe-b)); background: var(--surface); border-top: 1px solid var(--line); }
 .decision-bar .btn { width: 100%; }
-.bar-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.bar-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 8px; }
+.bar-grid .btn { min-width: 0; padding-inline: 10px; white-space: normal; line-height: 1.15; text-align: center; }
 .bar-hint { font-size: 12px; color: var(--muted); text-align: center; }
+@media (max-width: 899px) {
+  /* the phone has the page title and the tab bar: the brand-only header and the encryption footnote are noise */
+  .m-head:has(> .brand:only-child) { display: none; }
+  .page-needs .page-body { padding-top: calc(20px + env(safe-area-inset-top, 0px)); }
+  .page-needs .hint.foot { display: none; }
+}
 .sect { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
 .tsection { display: flex; flex-direction: column; gap: 8px; }
 .sent-list, .art-list, .hist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; }
