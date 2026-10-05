@@ -393,6 +393,12 @@ async function notificationFor(data) {
     const more = count(d.c) - (n || 1);
     if (more > 0) body += `\n+${more} more`;
     newIds = m ? [d.t] : [];
+    // A message has a tag of its own (QA N-07): it used to share `tix:<space>` with the needs notification of that
+    // workspace and replaced a visible "Agent needs input". It also stays out of the per-workspace ticket lists.
+    if (d.k === "message") {
+      return { title, options: { body, tag: s ? `tix:msg:${s}` : "tix:msg", renotify: true, icon: ICON,
+        data: { url: url2, s, title, body, msg: true } } };
+    }
   }
   const tags = await openSpaceTags();
   const mine = tags.find((x) => x.tag === `tix:${s}`);
@@ -410,7 +416,7 @@ async function notificationFor(data) {
       renotify: true, icon: ICON, data: { url: "/", spaces, ts: byspace, title, body: workspacesText(spaces.length) } } };
   }
   return { title, options: { body, tag: s ? `tix:${s}` : "tix", renotify: true, icon: ICON,
-    data: { url: url2, s, ts: s ? byspace[s] : [], title, body, ...(d.k === "message" ? { msg: true } : {}) } } };
+    data: { url: url2, s, ts: s ? byspace[s] : [], title, body } } };
 }
 
 const ticketsOf = (n) => (Array.isArray(n?.data?.ts) ? n.data.ts.filter((t) => typeof t === "string") : []);
@@ -435,15 +441,9 @@ async function clearFor(d, s, m) {
   const handled = (tag, body, title = word) => ({ title, options: { body, tag, silent: true, renotify: false,
     icon: ICON, data: { url: "/", s, handled: true } } });
   if (d.w === "message" && !m) {
-    // The owner read the message(s) in the browser (QA N-04): replace the message notification, but leave a needs
-    // notification of the same workspace (it shares the tag) as it was.
-    const tag = s ? `tix:${s}` : "tix";
-    const shown = (await self.registration.getNotifications({ tag }))[0];
-    if (shown && ticketsOf(shown).length) {
-      return { title: shown.data?.title || shown.title || "TIX", options: { body: shown.data?.body || shown.body || "", tag,
-        silent: true, renotify: false, icon: ICON, data: shown.data } };
-    }
-    return handled(tag, s ? `Read on desktop · ${label}` : "Read on desktop", "Read on desktop");
+    // The owner read the message(s) in the browser (QA N-04): the message notification (its own tag, QA N-07) is
+    // replaced; a needs notification of the workspace is never touched.
+    return handled(s ? `tix:msg:${s}` : "tix:msg", s ? `Read on desktop · ${label}` : "Read on desktop", "Read on desktop");
   }
   if (!m && d.w === "join") {
     const t = d.r === "denied" ? "Workspace request denied" : "Workspace request approved";
@@ -500,9 +500,7 @@ async function reconcileNeeds(spaces, tickets, messages, at, joins) {
   for (const x of await openSpaceTags()) {
     if (newer(x)) continue;
     const sp = x.tag.slice(4);
-    const isMsg = x.data?.msg === true;
     if (x.data?.handled) x.close();                                   // an old "Handled" note: nothing left to say
-    else if (isMsg) { if (messages === 0) x.close(); }
     else if (!live.has(sp) && ticketsOf(x).length) x.close();
     else if (open && ticketsOf(x).length) {
       // the workspace still has something, but some tickets of this notification were handled
@@ -515,6 +513,17 @@ async function reconcileNeeds(spaces, tickets, messages, at, joins) {
           renotify: false, icon: ICON, data: { ...x.data, ts: rest, body } });
       }
     }
+  }
+  try {
+    for (const x of await self.registration.getNotifications()) {
+      // Message notifications: `tix:msg[:<space>]`, and the ones shown before that tag existed (`tix` for a message
+      // without a workspace, `tix:<space>` marked msg): the spaceless one was never seen by openSpaceTags, so a read
+      // message stayed on the lock screen after the app opened (live test 2026-10-05, step 10).
+      const isMsg = /^tix:msg(:[0-9a-f]{32})?$/.test(x.tag || "") || (x.data?.msg === true && /^tix(:[0-9a-f]{32})?$/.test(x.tag || ""));
+      if (isMsg && !newer(x) && (x.data?.handled || messages === 0)) x.close();
+    }
+  } catch {
+    /* no notification list */
   }
   const group = await groupNote();
   if (group && !newer(group)) {
