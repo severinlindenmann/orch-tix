@@ -516,11 +516,9 @@ _DECIDING = ("answer", "approve", "request_changes", "verdict")
 
 
 def decision_session(conn, space: str, ticket: str) -> str | None:
-    """The browser session that decided this ticket from a phone, when its needs just went away because of that
-    decision: the newest answer/approve/request_changes/verdict sent for it in the last 15 minutes that was not
-    refused or overtaken (no ack yet, applied, or held for an Apply). None: it was handled on the desktop, in
-    Mission Control or by CLI. A best guess: if the desktop answered while a phone decision was still waiting, the
-    phone gets credit; the cost is only that phone's missing "handled" note."""
+    """The browser session that sent the newest answer/approve/request_changes/verdict for this ticket in the last 15
+    minutes that was not refused or overtaken (no ack yet, applied, or held for an Apply): the one to leave out of the
+    "handled" push. Only asked when Mission Control said it applied a phone answer (decided_via)."""
     n = parse_ticket_ref(ticket)
     if n is None:
         return None
@@ -532,7 +530,7 @@ def decision_session(conn, space: str, ticket: str) -> str | None:
     return row["session_hash"] if row is not None else None
 
 
-def after_needs_change(conn, app, *, space, ticket, before, after, open_questions) -> None:
+def after_needs_change(conn, app, *, space, ticket, before, after, open_questions, decided_via=None) -> None:
     """Push only when a mirror starts needing the human or needs something else; replace it when it stops.
     The payload is cleartext routing only (TIX spec §7): no title, text, client name or local key. Needs pushes
     are coalesced per workspace (NeedsPushGate); a clear goes out at once."""
@@ -544,9 +542,11 @@ def after_needs_change(conn, app, *, space, ticket, before, after, open_question
             return          # its "needs you" never left the server (held in the window): nothing to withdraw
         payload = {"v": 2, "s": space, "t": ticket, "k": "clear", "n": 0, "c": attention_total(conn),
                    "cs": space_needs_total(conn, space)}
-        decided = decision_session(conn, space, ticket)
-        if decided:
-            payload["via"] = "phone"        # the SW words it "Decided on your phone"; the deciding session gets none
+        # Mission Control says (decided_via) when it applied a phone answer; the server does not guess. Then the SW words
+        # it "Decided on a phone", and the session that sent the answer gets no push at all.
+        decided = decision_session(conn, space, ticket) if decided_via == "phone" else None
+        if decided_via == "phone":
+            payload["via"] = "phone"
         push_v2(app, payload, {decided} if decided else None)
         return
     if gate is not None and not gate.due(space, ticket, lambda sp, held: _flush_held(app, sp, held)):

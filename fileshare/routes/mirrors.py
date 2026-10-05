@@ -161,6 +161,9 @@ async def put_mirror(uuid: str, request: Request, principal: Principal = Depends
     needs = raw.get("needs")
     if needs is not None and needs not in mirrors.NEEDS:
         raise api_error(400, "bad_request", "needs must be null, question, approval or verdict")
+    decided_via = raw.get("decided_via")
+    if decided_via not in (None, "phone"):
+        raise api_error(400, "bad_request", "decided_via must be null or phone")
     if raw.get("wrapped_dek") is not None:
         check_envelope(raw["wrapped_dek"], "wrapped_dek", 4096, lambda b: len(b) == WRAPPED_DEK_LEN, code="bad_request")
     check_envelope(raw.get("enc_content"), "enc_content", MAX_MIRROR_B64, lambda b: len(b) >= MIN_ENC_LEN, code="bad_request")
@@ -173,7 +176,7 @@ async def put_mirror(uuid: str, request: Request, principal: Principal = Depends
     result, before, after = mirrors.upsert_mirror(conn, request.app, device=principal.device,
                                                   uuid=_uuid(uuid, "uuid"), body=body)
     mirrors.after_needs_change(conn, request.app, space=body["space"], ticket=result["id"], before=before,
-                               after=after, open_questions=oq)
+                               after=after, open_questions=oq, decided_via=decided_via)
     return result
 
 
