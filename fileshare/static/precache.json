@@ -50,6 +50,7 @@
     "/static/js/mirror-crypto.js",
     "/static/js/mirror-model.js",
     "/static/js/mirrors-data.js",
+    "/static/js/mirrors-sync.js",
     "/static/js/nav.js",
     "/static/js/needs.js",
     "/static/js/note.js",

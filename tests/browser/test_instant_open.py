@@ -49,13 +49,26 @@ READ_SEEN = """(id) => new Promise((resolve, reject) => {
 })"""
 
 
+PUT_LIST = """(entry) => new Promise((ok, fail) => { const q = indexedDB.open("fileshare");
+  q.onerror = () => fail(q.error);
+  q.onsuccess = () => { const tx = q.result.transaction("lists", "readwrite");
+    tx.objectStore("lists").put(entry, "mirrors"); tx.oncomplete = () => { q.result.close(); ok(); }; }; })"""
+
+
+def restore_stale_list(page, stale):
+    """Opening any page now merges the changes into the stored list (that is the point of the cursor), so a test
+    about an OLDER cached copy puts the old one back."""
+    page.evaluate(PUT_LIST, stale["mirrors"])
+
+
 class Hold:
     """Holds every request to one URL (pages and the service worker) until release()."""
 
     def __init__(self, context, url):
         self.routes = []
         self.context = context
-        self.match = lambda u: u == url
+        # the list is read as /api/mirrors (a cold open) or as the stored list plus /changes?after=<cursor>&wait=0
+        self.match = lambda u: u == url or (u.startswith(url + "/changes?after=") and u.endswith("&wait=0"))
         context.route(self.match, lambda route: self.routes.append(route))
 
     def release(self, fulfill=None):
@@ -144,10 +157,12 @@ def test_offline_without_a_cache_keeps_the_error(phone_page, mirror_with_questio
 def test_a_cached_copy_older_than_seen_is_left_out_never_a_rollback_and_never_lowers_seen(phone_page, mirror_with_question, context):
     page = phone_page("light")                       # the cached lists now hold mirror_rev 1
     base = mirror_with_question.base
+    stale = page.evaluate(READ_LISTS)
     mirror_with_question.push(EXAMPLE_DOC, rev=2)
     page.goto(f"{base}/t/{mirror_with_question.n}")  # this phone opens rev 2: seen moves to 2
     page.get_by_role("radio", name="ISO 8601").wait_for()
     assert page.evaluate(READ_SEEN, f"{mirror_with_question.space}|{EXAMPLE_DOC['id']}") == {"gen": 1, "mirror_rev": 2}
+    restore_stale_list(page, stale)
     hold = Hold(context, base + "/api/mirrors")
     page.goto(base + "/")
     page.locator('#needs-list[data-from="cache"]').wait_for(state="attached")
@@ -289,9 +304,11 @@ def test_an_expired_session_on_settings_ends_on_login(phone_page, mirror_with_qu
 def test_rows_left_out_of_the_cached_list_are_counted_offline(phone_page, mirror_with_question, context):
     page = phone_page("light")                         # the cached lists hold mirror_rev 1
     base = mirror_with_question.base
+    stale = page.evaluate(READ_LISTS)
     mirror_with_question.push(EXAMPLE_DOC, rev=2)
     page.goto(f"{base}/t/{mirror_with_question.n}")    # seen moves to 2
     page.get_by_role("radio", name="ISO 8601").wait_for()
+    restore_stale_list(page, stale)
     context.set_offline(True)
     try:
         page.goto(base + "/")

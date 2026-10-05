@@ -2,6 +2,7 @@
 import { unb64u } from "./crypto.js";
 import { api } from "./api.js";
 import { tellWorker } from "./swreg.js";
+import { syncedMirrors } from "./mirrors-sync.js";
 
 export const MIN_ITERATIONS = 1000;
 export const MAX_ITERATIONS = 10_000_000;
@@ -102,7 +103,10 @@ export function setAppBadge(n, nav = globalThis.navigator) {
   }
 }
 
-export async function needsCount(get = (path) => api("GET", path), openRows = openRowsHere) {
+// The tab-bar badge reads the same stored list plus changes as the Needs list (mirrors-sync.js), not a second full copy.
+const getHere = (path) => (path === "/api/mirrors" ? syncedMirrors() : api("GET", path));
+
+export async function needsCount(get = getHere, openRows = openRowsHere) {
   const at = Date.now();
   const { mirrors = [] } = await get("/api/mirrors");
   let joinSpaces = null;
@@ -118,7 +122,7 @@ export async function needsCount(get = (path) => api("GET", path), openRows = op
 
 // Fills #needs-badge (the sidebar and the tab bar share it). Failures keep the badge as it was:
 // the session and network banners report those.
-export async function refreshAttention(doc = document, get = (path) => api("GET", path), openRows = openRowsHere) {
+export async function refreshAttention(doc = document, get = getHere, openRows = openRowsHere) {
   const badge = doc.getElementById("needs-badge");
   if (!badge) return;
   let n;

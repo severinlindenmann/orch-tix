@@ -14,9 +14,9 @@ from fileshare import mirrors as mirrors_mod
 from fileshare import presence as presence_mod
 from fileshare.bridge import Bridge
 from fileshare.blobs import BlobStore
-from fileshare.db import backfill_device_fingerprints, connect, migrate
+from fileshare.db import backfill_device_fingerprints, connect, ensure_epoch, migrate
 from fileshare.expiry import expire_files, expire_upload_links, sweep_forever
-from fileshare.headers import SecurityHeadersMiddleware
+from fileshare.headers import CompressionMiddleware, ConditionalMiddleware, SecurityHeadersMiddleware
 from fileshare.heldpush import HeldStore
 from fileshare.push import SubprocessPusher
 from fileshare.routes import auth as auth_routes
@@ -55,6 +55,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     conn = connect(settings.db_path)
     try:
         migrate(conn)
+        ensure_epoch(conn)
         backfill_device_fingerprints(conn)  # rewrite pre-2026-09-25 8-char fingerprints (§4.6)
         expire_files(conn, blobs)          # startup expiry sweep (§14 E), before the orphan sweep
         expire_upload_links(conn, blobs)  # same, for dead upload links (upload-links spec, Task 3)
@@ -108,8 +109,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.bridge = Bridge()                                # remote bridge mailboxes (R8)
     app.state.pusher = SubprocessPusher(settings, settings.db_path)  # Web Push through a subprocess (spec T7)
     links.install_log_redaction()        # access lines carry /p/<token> and /api/public/<token>
+    app.add_middleware(ConditionalMiddleware)
     app.add_middleware(CookieRefreshMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(CompressionMiddleware)      # outermost: compresses what the others produced
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error(request: Request, exc: StarletteHTTPException):

@@ -6,6 +6,7 @@
 // kept as the server sent them ("lists": ciphertext only, never a doc, DEK or MK), so Needs you opens at
 // once and offline; a cached row is opened on every load through the same checks as a fresh one.
 import { api, ApiError } from "./api.js";
+import { storedCursor, syncedMirrors } from "./mirrors-sync.js";
 import { LABELS, LISTS, SEEN, clearLists, getValue, putValue } from "./db.js";
 import { highWater, isRollback, openQuestionCount, phoneNeed, seenKey } from "./mirror-model.js";
 import { mapLimit } from "./format.js";
@@ -59,9 +60,8 @@ async function openSpaces(mk, spaces = []) {
 
 // Every live mirror, opened. A row that does not open keeps doc null and error "integrity".
 export async function loadMirrors(mk, space = null) {
-  const q = space ? `?space=${encodeURIComponent(space)}` : "";
-  const body = await api("GET", `/api/mirrors${q}`);
-  if (!space) await storeList("mirrors", body);
+  // The whole list comes from the stored copy plus what changed since (mirrors-sync.js); one space is asked for.
+  const body = space ? await api("GET", `/api/mirrors?space=${encodeURIComponent(space)}`) : await syncedMirrors();
   return mapLimit(body?.mirrors || [], 4, (m) => openRow(mk, m));
 }
 
@@ -173,11 +173,17 @@ export async function loadDecisions(row) {
 }
 
 // Long-polls /api/mirrors/changes and calls onChange(rows) for every batch. First it reads up to
-// the current cursor without waiting, so only later changes count. Returns stop().
+// the current cursor without waiting, so only later changes count: from the stored list's cursor, so that is
+// a few rows rather than every mirror again. Returns stop().
 export function watchMirrors(onChange) {
   let stopped = false;
   let cursor = 0;
   (async () => {
+    try {
+      cursor = await storedCursor();
+    } catch {
+      cursor = 0;
+    }
     try {
       for (;;) {
         const r = await api("GET", `/api/mirrors/changes?after=${cursor}&wait=0`);
