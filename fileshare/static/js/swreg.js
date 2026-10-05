@@ -58,7 +58,52 @@ export function listenForNewBuild(nav = globalThis.navigator) {
   });
 }
 
+// A new worker takes over an open page (skipWaiting + clients.claim, sw.js): the page keeps the old JS it already
+// loaded, but any later dynamic import() is answered from the new build's cache, so old and new modules could mix.
+// A page that was not controlled before (the very first install claims it) is not an update. When the page is in
+// the background and holds nothing the user typed or is deciding on, it just reloads; otherwise it asks.
+export function safeToReload(doc = globalThis.document) {
+  if (!doc) return false;
+  if (doc.querySelector("dialog[open]")) return false;
+  for (const f of doc.querySelectorAll("textarea, input:not([type=checkbox]):not([type=radio]):not([type=search]):not([type=file]):not([type=button]):not([type=submit])")) {
+    if (f.value) return false;
+  }
+  return true;
+}
+
+export function listenForUpdate(nav = globalThis.navigator, doc = globalThis.document, reload = () => globalThis.location.reload()) {
+  const sw = nav?.serviceWorker;
+  if (!sw || !doc) return;
+  let had = Boolean(sw.controller);
+  let asked = false;
+  sw.addEventListener("controllerchange", () => {
+    if (!had) { had = true; return; }
+    if (asked) return;
+    asked = true;
+    if (doc.visibilityState === "hidden" && safeToReload(doc)) { reload(); return; }
+    showUpdatePrompt(doc, reload);
+  });
+}
+
+export function showUpdatePrompt(doc, reload) {
+  if (doc.getElementById("update-prompt")) return;
+  const bar = doc.createElement("div");
+  bar.id = "update-prompt";
+  bar.className = "update-prompt";
+  bar.setAttribute("role", "status");
+  const text = doc.createElement("span");
+  text.textContent = "tix was updated.";
+  const btn = doc.createElement("button");
+  btn.type = "button";
+  btn.className = "btn btn-primary";
+  btn.textContent = "Reload";
+  btn.addEventListener("click", () => reload());
+  bar.append(text, btn);
+  doc.body.append(bar);
+}
+
 if (typeof document !== "undefined") {
   registerServiceWorker();
   listenForNewBuild();
+  listenForUpdate();
 }

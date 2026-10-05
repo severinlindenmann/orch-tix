@@ -196,6 +196,7 @@ def test_phone_width(browser, live_server, sim, path):
         if path == "/settings":
             card = page.locator(".settings-card").first.bounding_box()
             assert card["x"] >= 0 and card["x"] + card["width"] <= 390
+            page.locator("#advanced > summary").click()          # Deepgram sits in the Advanced fold on a phone
             assert save_key(page, KEY).status == 200
             expect(page.locator("#deepgram-status")).to_have_text(re.compile("^Configured ✓"))
             save = page.locator("#deepgram-save").bounding_box()

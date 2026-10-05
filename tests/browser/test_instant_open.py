@@ -239,6 +239,7 @@ def test_the_ticket_request_card_follows_the_servers_workspaces(phone_page, mirr
     hold = Hold(context, base + "/api/mirrors")
     page.reload()
     page.locator('#needs-list[data-from="cache"]').wait_for(state="attached")
+    page.get_by_text("New ticket request").click()
     expect(page.locator("#req-space option")).to_have_text(["Acme Energy"])
     page.locator("#req-title").fill("Typed before the server answered")
     hold.release()

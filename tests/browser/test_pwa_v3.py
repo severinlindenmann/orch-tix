@@ -148,7 +148,7 @@ def test_a_join_request_is_approved_in_settings(phone_page, live_server, sim, mi
     row = page.locator(".join-row").filter(has_text="mac-mini wants to sync Acme Energy")
     row.get_by_role("button", name="Approve").click()
     page.get_by_role("dialog").get_by_role("button", name="Approve").click()
-    page.locator("#join-list").get_by_text("No requests.").wait_for()
+    page.locator("#join-card").wait_for(state="hidden")   # an empty block is not shown
     spaces = {x["id"]: x for x in sim.request("GET", "/api/spaces").json()["spaces"]}
     assert spaces[mirror_with_question.space]["owner_name"] == "mac-mini"
     assert other_space in spaces
@@ -160,7 +160,7 @@ def test_a_join_request_can_be_denied(phone_page, live_server, sim, mirror_with_
     page = phone_page("light")
     page.goto(live_server.url + "/settings#join")
     page.locator(".join-row").filter(has_text="ci-runner").get_by_role("button", name="Deny").click()
-    page.locator("#join-list").get_by_text("No requests.").wait_for()
+    page.locator("#join-card").wait_for(state="hidden")   # an empty block is not shown
     spaces = {x["id"]: x for x in sim.request("GET", "/api/spaces").json()["spaces"]}
     assert spaces[mirror_with_question.space]["owner_name"] == "macbook-pro"
 
@@ -526,6 +526,7 @@ def test_a_message_to_the_human_shows_as_text_and_ack_clears_it(phone_page, mirr
 def test_a_ticket_request_is_sealed_for_its_space_with_value_title_and_body(phone_page, mirror_with_question):
     page = phone_page("light")
     page.goto(f"{mirror_with_question.base}/?view=tickets")
+    page.get_by_text("New ticket request").click()
     page.get_by_label("Title").fill("Rotate the API key")
     page.get_by_label("Details").fill("before Friday")
     page.get_by_role("button", name="Send request").click()
@@ -683,6 +684,7 @@ def test_typing_a_ticket_request_survives_a_list_refresh(phone_page, mirror_with
     page = phone_page("light")
     page.goto(f"{mirror_with_question.base}/?view=tickets")
     page.locator('#needs-list[data-from="server"]').wait_for(state="attached")
+    page.get_by_text("New ticket request").click()
     title = page.get_by_label("Title")
     title.fill("Rotate the API")
     page.evaluate("() => { window.__card = document.querySelector('.req-card'); }")

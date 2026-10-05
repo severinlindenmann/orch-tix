@@ -195,6 +195,16 @@ function quickAnswerEl(row, doc, qa) {
     el("a", { class: "qa-more", href: `/t/${row.n}#answer` }, "Other answer or a note"));
 }
 
+// Offline (the browser says so, or a request found no network): a ticket opens from the network, so the card says
+// so instead of offering a button that leads to "You're offline". Answers to a question are queued, so they stay.
+let offline = typeof navigator !== "undefined" && navigator.onLine === false;
+export const isOffline = () => offline;
+export function setOffline(v) {
+  const changed = offline !== v;
+  offline = v;
+  return changed;
+}
+
 // What a Needs you card offers below its title: the answer in place, or the way to the ticket.
 function cardAct(row, doc) {
   if (row.needs === "question") {
@@ -208,6 +218,11 @@ function cardAct(row, doc) {
   const action = cardAction(row, doc);
   if (!action) return null;
   const line = cardLine(row, doc);
+  if (offline) {
+    return el("div", { class: "card-act" }, line ? el("p", { class: "ncard-meta" }, line) : null,
+      el("button", { type: "button", class: "btn btn-block card-go", disabled: true, dataset: { offline: "1" } },
+        el("span", {}, "Offline: opens when you are back")));
+  }
   // v4: the gated text's first pinned image (or the proof's for a verdict), shown only once its sha256 is verified
   const img = row.needs === "approval" ? gateImage(doc, ["requirements", "plan"]) : proofImage(doc);
   return el("div", { class: "card-act" }, line ? el("p", { class: "ncard-meta" }, line) : null,
@@ -266,6 +281,18 @@ function requestCard(state) {
   return state.requestCard;
 }
 
+// The request form lives in a fold on the Tickets tab (it was 400 px at the very bottom of a 6,000 px page). One
+// node for the page's life, like the card in it, so a half-typed request survives every refresh.
+function requestFold(state) {
+  const card = requestCard(state);
+  if (!state.requestFold) {
+    state.requestFold = el("details", { class: "card bfold req-fold" },
+      el("summary", {}, el("span", {}, "New ticket request"), el("span", { class: "muted", "aria-hidden": "true" }, "▾")),
+      el("div", { class: "bfold-body" }, card));
+  }
+  return state.requestFold;
+}
+
 async function render(state) {
   const { view, spaces, rows, joins, messages } = state;
   const tickets = view === "tickets";
@@ -298,7 +325,7 @@ async function render(state) {
       el("p", { class: "hint" }, `${linked ? `${linked} linked ticket${linked === 1 ? "" : "s"}, none waiting on you. ` : ""}When an agent asks a question or a plan is ready, it shows here.`));
   // Needs you: messages to the human first (spec §8). Tickets: the ticket request form (spec §5.5); it keeps
   // its own state, so it is kept across reloads while the workspaces stay the same.
-  const top = tickets ? (spaces.size ? requestCard(state) : null) : messagesSection(messages, () => state.reload());
+  const top = tickets ? (spaces.size ? requestFold(state) : null) : messagesSection(messages, () => state.reload());
   // partial: a cached list with rows left out (older than this phone saw): never "Nothing needs you", and
   // still loading until the server answers.
   const nothing = !groups.length && !(top && !tickets) && !state.partial;
@@ -330,6 +357,8 @@ async function render(state) {
 // ---- v4 Board (the Tickets tab): your move, the agents with their task bar, the folded backlog; a search box filters
 // as you type (title and key, on this phone only).
 const BOARD_STATUS_BACKLOG = new Set(["backlog"]);
+// A busy account has dozens of agent tickets (125 px each): the newest few, the rest behind "Show N more".
+export const AGENTS_SHOWN = 5;
 
 function boardRow(row) {
   const doc = row.doc;
@@ -376,13 +405,20 @@ function board(state, list) {
   const backlog = rows.filter((r) => !yours.includes(r) && !agents.includes(r) && BOARD_STATUS_BACKLOG.has(r.doc?.status));
   const rest = rows.filter((r) => !yours.includes(r) && !agents.includes(r) && !backlog.includes(r));
   const lab = (text) => el("h2", { class: "lab" }, text);
+  // a search shows every match; otherwise the newest few unless the list was opened
+  const allAgents = q !== "" || state.allAgents === true;
+  const shownAgents = allAgents ? agents : agents.slice(0, AGENTS_SHOWN);
+  const moreAgents = q === "" && agents.length > AGENTS_SHOWN
+    ? el("button", { type: "button", class: "btn btn-block bmore", "aria-expanded": String(allAgents),
+      onclick: () => { state.allAgents = !state.allAgents; render(state); } },
+    allAgents ? "Show fewer agents" : `Show ${agents.length - AGENTS_SHOWN} more`) : null;
   const fold = (title, items, cls) => (items.length ? el("details", { class: `card bfold ${cls}` },
     el("summary", {}, el("span", {}, title), el("span", { class: "muted", "aria-hidden": "true" }, "▾")),
     el("div", { class: "bfold-body" }, items.map((r) => el("a", { class: "brow-plain", href: `/t/${r.n}` },
       el("b", {}, r.doc?.id || r.id), " ", shown(cardTitle(r.doc, r.doc?.id || r.id)), idleTag(r.doc))))) : null);
   return [
     yours.length ? lab(`Your move · ${yours.length}`) : null, yours.map(boardRow),
-    agents.length ? lab(`Agents · ${agents.length}`) : null, agents.map(agentCard),
+    agents.length ? lab(`Agents · ${agents.length}`) : null, shownAgents.map(agentCard), moreAgents,
     fold(`Backlog · ${backlog.length} idea${backlog.length === 1 ? "" : "s"}`, backlog, "bfold-backlog"),
     fold(`Other · ${rest.length}`, rest, "bfold-other"),
     q && !rows.length ? el("p", { class: "hint" }, "No ticket matches this search.") : null].flat().filter(Boolean);
@@ -502,6 +538,12 @@ export async function start() {
     skipped = cached.skipped;
     await render(state);
   }
+  // Offline: the cards say so (and say it is over); a render only when that changes.
+  const net = (v) => () => { if (setOffline(v) && state.slots) render(state); };
+  window.addEventListener("offline", net(true));
+  window.addEventListener("fs:network-error", net(true));
+  window.addEventListener("fs:network-ok", net(false));
+  window.addEventListener("online", net(false));
   await reload();
   watchMirrors(reload);
   window.addEventListener("online", reload);
