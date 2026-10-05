@@ -80,3 +80,32 @@ def test_refuses_a_device_that_is_not_approved(make_device, cli):
     d = make_device("waiting", "acme", approve=False)
     r = cli(d.root, "bridge-key", "--workspace", "0" * 32, "--json")
     assert r.code == 3 and r.json()["error"] == "pending"
+
+
+def test_terminal_refusal_comes_before_config_master_key_and_network(desk, cli, sharing, monkeypatch):
+    touched = []
+
+    def boom(name):
+        def f(*a, **k):
+            touched.append(name)
+            raise AssertionError(f"{name} reached before the terminal check")
+        return f
+
+    monkeypatch.setattr(sharing, "_stdout_is_tty", lambda: True)
+    monkeypatch.setattr(sharing, "load_config", boom("load_config"))
+    monkeypatch.setattr(sharing, "Api", boom("Api"))
+    monkeypatch.setattr(sharing, "bridge_key", boom("bridge_key"))
+    r = cli(desk.root, "bridge-key", "--workspace", "0" * 32, "--json")
+    assert r.code == 6 and r.json()["error"] == "refused" and touched == []
+
+
+def test_a_device_the_server_no_longer_accepts_gets_exit_3_and_no_output(desk, cli):
+    ws = _space(desk, cli)
+    data = json.loads(desk.config_path.read_text())
+    data["device_token"] = "shd_" + "A" * 40   # a token the server does not know: the 401 a revoked device gets
+    desk.config_path.write_text(json.dumps(data))
+    desk.config_path.chmod(0o600)
+    r = cli(desk.root, "bridge-key", "--workspace", ws)
+    assert r.code == 3 and r.out == ""
+    r = cli(desk.root, "bridge-key", "--workspace", ws, "--json")
+    assert r.code == 3 and "key" not in r.json()
