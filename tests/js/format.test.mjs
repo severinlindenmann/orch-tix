@@ -234,3 +234,17 @@ test("isNew means not done and shared in the last 24 hours", () => {
   assert.equal(isNew({ created_at: ago(1), acked_at: ago(0.5) }, now), false);
   assert.equal(isNew({ created_at: "garbage" }, now), false);
 });
+
+import { SORTS, sortFiles } from "../../fileshare/static/js/format.js";
+test("sortFiles: newest, oldest, name and size; unreadable files go last by name and size", () => {
+  const f = (n, name, plain) => ({ n, ok: name !== null, meta: name === null ? null : { name }, size: plain === null ? undefined : 34 + plain + 16 });
+  const files = [f(3, "b.txt", 10), f(5, "A.png", 500), f(1, null, null), f(4, "c.zip", 500), f(2, "a2.md", 1)];
+  const ns = (k) => sortFiles(files, k).map((x) => x.n);
+  assert.deepEqual(ns("newest"), [5, 4, 3, 2, 1]);
+  assert.deepEqual(ns("oldest"), [1, 2, 3, 4, 5]);
+  assert.deepEqual(ns("name"), [5, 2, 3, 4, 1]);
+  assert.deepEqual(ns("size"), [5, 4, 3, 2, 1]);
+  assert.deepEqual(ns("bogus"), [5, 4, 3, 2, 1]);
+  assert.deepEqual(files.map((x) => x.n), [3, 5, 1, 4, 2]);   // the input is not reordered
+  assert.deepEqual(SORTS.map(([k]) => k), ["newest", "oldest", "name", "size"]);
+});

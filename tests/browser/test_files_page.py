@@ -146,3 +146,26 @@ def test_list_header_stays_on_two_rows_with_a_file_open(ui_page, sim):
         box = ui_page.locator(sel).bounding_box()
         assert box["x"] >= col["x"] and box["x"] + box["width"] <= col["x"] + col["width"] + 1, sel
     assert ui_page.locator("#upload-btn").bounding_box()["y"] > count.bounding_box()["y"] + 10, "dock shares the title row"
+
+
+def test_sort_select_orders_the_list_and_is_remembered(ui_page, sim):
+    """QA TF-07: newest (default), oldest, name, size; the choice survives a reload."""
+    sim.upload("b-mid.txt", b"x" * 10)
+    sim.upload("c-big.txt", b"x" * 500)
+    sim.upload("a-small.txt", b"x")
+    ui_page.evaluate("localStorage.removeItem('fileshare.sort')")
+    ui_page.reload()
+    names = lambda: [t.strip() for t in ui_page.locator("#file-list .frow:visible .fname").all_inner_texts()]
+    expect(rows(ui_page)).to_have_count(3)
+    assert names() == ["a-small.txt", "c-big.txt", "b-mid.txt"]
+    sel = ui_page.locator("#sort-files")
+    sel.select_option("oldest")
+    assert names() == ["b-mid.txt", "c-big.txt", "a-small.txt"]
+    sel.select_option("name")
+    assert names() == ["a-small.txt", "b-mid.txt", "c-big.txt"]
+    sel.select_option("size")
+    assert names() == ["c-big.txt", "b-mid.txt", "a-small.txt"]
+    ui_page.reload()
+    expect(ui_page.locator("#sort-files")).to_have_value("size")
+    expect(rows(ui_page)).to_have_count(3)
+    assert names() == ["c-big.txt", "b-mid.txt", "a-small.txt"]

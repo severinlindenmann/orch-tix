@@ -202,3 +202,22 @@ export function isNew(f, now = Date.now()) {
   const t = Date.parse(f.created_at);
   return Number.isFinite(t) && now - t < DAY_MS;
 }
+
+// The sort control of the Files list (QA TF-07): newest (the server's order, the default), oldest, name, size
+// (largest first). It orders the pages loaded so far, like the search; an unreadable file sorts by its number
+// and has no name or size.
+export const SORTS = [["newest", "Newest first"], ["oldest", "Oldest first"], ["name", "Name A-Z"], ["size", "Largest first"]];
+
+export function sortFiles(files, key) {
+  const byN = (a, b) => b.n - a.n;
+  const name = (f) => (f.ok && f.meta && typeof f.meta.name === "string" ? f.meta.name : "");
+  const size = (f) => (Number.isFinite(f.size) ? plainSize(f.size) : -1);
+  const cmp = {
+    newest: byN,
+    oldest: (a, b) => a.n - b.n,
+    name: (a, b) => (name(a) === "" ? 1 : 0) - (name(b) === "" ? 1 : 0)
+      || name(a).localeCompare(name(b), undefined, { sensitivity: "base", numeric: true }) || byN(a, b),
+    size: (a, b) => size(b) - size(a) || byN(a, b),
+  }[key] || byN;
+  return [...files].sort(cmp);
+}

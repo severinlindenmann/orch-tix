@@ -3,7 +3,7 @@ import { IntegrityError, openFileMeta } from "./crypto.js";
 import { loadKeys } from "./keystore.js";
 import { el, hydrateIcons, icon, wirePopover } from "./ui.js";
 import {
-  deviceKey, deviceLabel, expiryShort, fileGroup, isExpiringSoon, isNew, mapLimit, matches, shortAge, typeOf,
+  SORTS, deviceKey, deviceLabel, expiryShort, fileGroup, isExpiringSoon, isNew, mapLimit, matches, shortAge, sortFiles, typeOf,
 } from "./format.js";
 import { previewKind } from "./previewkind.js";
 import { tagsFromSearch, withTags } from "./tags.js";
@@ -35,6 +35,7 @@ const state = {
 
   filter: { type: "all", device: "", project: "", q: "" },
   showAcked: false, // the "Done" chip; remembered per browser
+  sort: "newest", // the sort select (newest, oldest, name, size); remembered per browser
   selected: null, // n of the highlighted row (desktop keyboard selection)
   pushed: false, // the open file view added a history entry (phone), so closing it steps back
   wanted: null, // ?f=ID from the URL, opened once the list knows it
@@ -58,6 +59,25 @@ function writeShowAcked(on) {
     localStorage.setItem(SHOW_ACKED_KEY, on ? "1" : "0");
   } catch {
     /* storage blocked (private mode, policy): the chip still works for this page */
+  }
+}
+
+const SORT_KEY = "fileshare.sort";
+
+function readSort() {
+  try {
+    const v = localStorage.getItem(SORT_KEY);
+    return SORTS.some(([k]) => k === v) ? v : "newest";
+  } catch {
+    return "newest";
+  }
+}
+
+function writeSort(v) {
+  try {
+    localStorage.setItem(SORT_KEY, v);
+  } catch {
+    /* storage blocked: the sort still works for this page */
   }
 }
 
@@ -192,7 +212,7 @@ function onReconnect() {
 
 function visibleFiles() {
   const { type, device, project, q } = state.filter;
-  return state.files.filter((f) =>
+  return sortFiles(state.files, state.sort).filter((f) =>
     (state.showAcked || !f.acked_at)
     && (type === "all" || f.tile === type)
     && (!device || deviceKey(f) === device)
@@ -528,6 +548,10 @@ function wireToolbar() {
     type: "button", class: "chip", "aria-pressed": String(key === state.filter.type), dataset: { type: key },
     onClick: () => pick(key),
   }, label)));
+  const sortSel = $("sort-files");
+  sortSel.replaceChildren(...SORTS.map(([k, v]) => el("option", { value: k }, v)));
+  sortSel.value = state.sort;
+  sortSel.addEventListener("change", () => { state.sort = sortSel.value; writeSort(state.sort); render(); });
   $("search").addEventListener("input", (e) => { state.filter.q = e.target.value; render(); });
   $("filter-device").addEventListener("change", (e) => { state.filter.device = e.target.value; render(); });
   $("filter-project").addEventListener("change", (e) => { state.filter.project = e.target.value; render(); });
@@ -584,6 +608,7 @@ async function main() {
   window.addEventListener("fs:network-ok", onReconnect);
   document.addEventListener("visibilitychange", onVisible);
   state.showAcked = readShowAcked();
+  state.sort = readSort();
   const ref = new URLSearchParams(location.search).get("f");
   // ignored, and dropped from the address (the tag filter stays)
   if (ref !== null && !FILE_REF.test(ref)) history.replaceState(null, "", withTags("/files", tagsFromSearch(location.search)));
