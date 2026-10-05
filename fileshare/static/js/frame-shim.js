@@ -26,6 +26,8 @@
   const parentWin = window.parent;
   const apply = Reflect.apply;
   const winPost = parentWin.postMessage;
+  const mapGet = Map.prototype.get, mapDelete = Map.prototype.delete;   // onPort uses these, not the (replaceable) methods
+  const mGet = (m, k) => apply(mapGet, m, [k]), mDel = (m, k) => apply(mapDelete, m, [k]);
   const portPost = MessagePort.prototype.postMessage;
   const portDesc = (proto, name) => Object.getOwnPropertyDescriptor(proto, name);
   const evData = portDesc(MessageEvent.prototype, "data").get;
@@ -531,18 +533,18 @@
     if (m === null || typeof m !== "object") return;
     if (m.t === "ping") { post({ t: "pong", n: m.n }); return; }
     if (m.t === "go") { if (typeof m.path === "string") navigate("GET", m.path, null, null, false); return; }
-    if (m.t === "copied") { const f = copies.get(m.id); copies.delete(m.id); if (f) f(m.ok === true); return; }
+    if (m.t === "copied") { const f = mGet(copies, m.id); mDel(copies, m.id); if (f) f(m.ok === true); return; }
     if (m.t === "sdata" || m.t === "send") {
-      const s = streams.get(m.id);
+      const s = mGet(streams, m.id);
       if (!s || m.gen !== gen) return;
-      if (m.t === "send") { s.readyState = 2; streams.delete(m.id); s._fire("error"); return; }
+      if (m.t === "send") { s.readyState = 2; mDel(streams, m.id); s._fire("error"); return; }
       if (s.readyState === 0) { s.readyState = 1; s._fire("open"); }
       if (m.chunk) s._feed(String(m.chunk));
       return;
     }
-    const p = pending.get(m.id);
+    const p = mGet(pending, m.id);
     if (!p) return;
-    pending.delete(m.id);
+    mDel(pending, m.id);
     if (m.gen !== p.gen || p.gen !== gen) { p.reject(stale()); return; }  // an answer for an older page
     if (m.t === "err") p.reject(new TypeError(String(m.message || "request failed")));
     else p.resolve(m);

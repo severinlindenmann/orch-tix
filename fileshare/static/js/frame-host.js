@@ -29,7 +29,7 @@ export const LIMITS = {
   gestureGapMs: 1000,    // one action that needs a user gesture per this long
   rebuilds: 5,           // rebuilds per minute before the frame is left stopped
   helloMs: 6000,         // the shim must say hello within this
-  pingMs: 3000,          // heartbeat: a ping over the port; the next tick rebuilds the frame if it was not answered
+  pingMs: 1000,          // heartbeat: a ping over the port every second; the frame is rebuilt when two in a row go unanswered (about 2 s)
   writeLoads: 2,         // loads one document write of the shim may cause (Chromium and WebKit fire one more)
   writeMs: 1500,
   graceMs: 150,          // an unannounced load waits this long for the shim's announcement before it is treated as a navigation
@@ -80,6 +80,7 @@ export function createFrameHost(opts) {
   let port = null;         // the host's end of the channel; null until the shim proved the token
   let seq = 0;
   let pingTimer = null;
+  let missed = 0;          // pings in a row the shim has not answered
   let awaiting = false;    // a ping is out that the shim has not answered
   let lastPing = 0;
   let helloTimer = null;
@@ -163,6 +164,7 @@ export function createFrameHost(opts) {
     tok = randomToken();
     port = null;
     awaiting = false;
+    missed = 0;
     writeLoads = 0;
     writeUntil = 0;
     loadsExpected = 1;
@@ -210,7 +212,7 @@ export function createFrameHost(opts) {
   }
 
   function heartbeat() {
-    if (awaiting) { rebuild("no pong"); return; }
+    if (awaiting && ++missed >= 2) { rebuild("no pong"); return; }
     awaiting = true;
     lastPing = ++seq;
     send({ t: "ping", n: lastPing });
@@ -392,7 +394,7 @@ export function createFrameHost(opts) {
     const m = event.data;
     if (!boundedShape(m, limits)) return;
     switch (m.t) {
-      case "pong": if (m.n === lastPing) awaiting = false; return;
+      case "pong": if (m.n === lastPing) { awaiting = false; missed = 0; } return;
       case "write":
         abortAll();
         closePrompt(false);

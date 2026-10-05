@@ -52,7 +52,8 @@ WIDGET_PATH = "/sandbox/widget"
 # SecurityHeadersMiddleware and the route puts the same value on the shim. Scripts of the dashboard page are
 # re-created by the shim with the nonce; nothing else can run (no 'unsafe-inline' for scripts, no 'self'). Styles
 # are inline; images, fonts and media only from blob: and data: (the shim turns the page's files into blobs).
-# Nothing leaves (connect-src, frame-src, form-action 'none'); `sandbox` without allow-same-origin gives an opaque origin.
+# No fetch, frames or forms (connect-src, frame-src, form-action 'none'); there is no navigate-to, so the frame's own navigation is
+# contained by the shim, the channel and the heartbeat instead (docs/bridge-frame.md); `sandbox` without allow-same-origin gives an opaque origin.
 DASH_CSP = (
     "sandbox allow-scripts; default-src 'none'; script-src 'nonce-{nonce}'; style-src 'unsafe-inline'; "
     "img-src blob: data:; font-src blob: data:; media-src blob: data:; connect-src 'none'; frame-src 'none'; "

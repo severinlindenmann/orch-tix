@@ -901,6 +901,69 @@ def test_a_foreign_document_in_the_frame_gets_nothing_and_cannot_speak_as_the_fr
     dash.wait_title("steal")                                   # the new frame opens the page the app last knew
 
 
+FOREIGN = """<!doctype html><title>foreign</title><img src="https://evil.test/never.png"><script>
+window.__got = []; addEventListener('message', (e) => { window.__got.push(String(e.data && (e.data.t || JSON.stringify(e.data)))); });
+</script>"""
+
+
+def test_a_foreign_document_listening_on_window_receives_nothing_while_the_host_keeps_sending(dash, page):
+    """The host must never post to the frame's window after hello (mutation: a window postMessage beside the port post)."""
+    page.route("https://evil.test/**", lambda r: None if "never.png" in r.request.url else r.fulfill(status=200, content_type="text/html", body=FOREIGN))
+    dash.open({"pingMs": 60000})
+    f = dash.frame()
+    f.wait_for_function("() => document.documentElement.dataset.ran === '1'")
+    page.wait_for_function("() => window.__fake.streams.some((s) => !s.closed)")
+    f.evaluate("() => { fetch('/slow').catch(() => {}); }")                                  # an in-flight request, answered later
+    page.wait_for_function("() => window.__fake.calls.some((c) => c.path === '/slow')")
+    f.evaluate("() => { setTimeout(() => { location.href = 'https://evil.test/foreign'; }, 0); }")
+    page.wait_for_function("() => [...document.querySelectorAll('iframe.frame-dash')].length === 1")
+    for _ in range(100):
+        ev = [fr for fr in page.frames if "evil.test/foreign" in fr.url]
+        if ev:
+            break
+        page.wait_for_timeout(50)
+    assert ev, "the foreign document never arrived"
+    page.evaluate("window.__fake.streams.forEach((s) => s.push('data: LIVE\\n\\n'))")
+    page.evaluate("window.__release('/slow')")
+    page.evaluate("window.__host.go('/board')")                                               # and an app-started page
+    page.evaluate("window.__host.send({t: 'ping', n: 1})")
+    page.wait_for_timeout(700)
+    assert ev[0].evaluate("window.__got") == []
+
+
+POLLUTE_JS = """(() => {
+  window.__seen = { ports: 0, control: [] };
+  const look = (x) => { try { if (x instanceof MessagePort) window.__seen.ports++; if (x && typeof x === 'object' && ['ping', 'go', 'copied', 'write'].includes(x.t)) window.__seen.control.push(x.t); } catch (e) {} };
+  const each = Array.prototype.forEach;
+  const hook = (o, n) => { const f = o[n]; o[n] = function (...a) { look(this); Reflect.apply(each, a, [look]); return Reflect.apply(f, this, a); }; };
+  for (const n of ['get', 'set', 'delete', 'has']) hook(Map.prototype, n);
+  for (const n of ['push', 'slice', 'map', 'forEach', 'concat', 'includes', 'indexOf']) hook(Array.prototype, n);
+  for (const n of ['then', 'catch', 'finally']) hook(Promise.prototype, n);
+  for (const n of ['resolve', 'reject', 'all']) hook(Promise, n);
+  const g = Object.getOwnPropertyDescriptor(MessageEvent.prototype, 'data');
+  Object.defineProperty(MessageEvent.prototype, 'data', { configurable: true, get() { look(this.target); return g.get.call(this); } });
+  fetch('/api/x').then(() => { window.__done = 1; });
+  new EventSource('/events');
+})();"""
+
+
+def test_a_page_that_replaces_map_promise_and_array_methods_gets_neither_the_port_nor_a_control_message(dash, page):
+    _add_routes(page, {"/poll": {"body": f'<!doctype html><h1 id="h">poll</h1><script src="/static/poll.js?v={v(POLLUTE_JS)}"></script>', "headers": {"content-type": "text/html"}, "page": True},
+                       "/static/poll.js": {"body": POLLUTE_JS, "headers": {"content-type": "text/javascript"}}}, ["/poll"])
+    dash.open({"pingMs": 200})
+    page.evaluate("window.__host.go('/poll')")
+    dash.wait_title("poll")
+    f = dash.frame()
+    f.wait_for_function("() => window.__done === 1")
+    page.wait_for_function("() => window.__fake.streams.some((s) => !s.closed)")
+    page.evaluate("window.__fake.streams.forEach((s) => s.push('data: x\\n\\n'))")
+    f.evaluate("() => { window.orchHost.copy('t').catch(() => {}); }")
+    page.wait_for_selector(".frame-prompt")
+    page.click(".frame-prompt button:text-is('Dismiss')")
+    page.wait_for_timeout(1000)                                                          # several heartbeats
+    assert f.evaluate("window.__seen") == {"ports": 0, "control": []}
+
+
 def test_the_heartbeat_rebuilds_a_frame_that_stops_answering(dash, page):
     dash.open({"pingMs": 250})
     f = dash.frame()

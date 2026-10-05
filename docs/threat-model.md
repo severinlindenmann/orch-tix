@@ -135,16 +135,26 @@ What TIX protects, what it does not, and exactly which fields the server can rea
   navigate its own frame to an arbitrary URL (there's no `allow-top-navigation`, so it can't escape
   the frame, but a `location` change is itself a request). Either way it can only leak the
   attachment's own content, never tix's.
-- **The remote dashboard frame runs in an isolated sandbox** (`/sandbox/dash`, [bridge-frame.md](bridge-frame.md)):
-  an opaque origin with no network at all (`connect-src`, `frame-src` and `form-action` are `'none'`, files only as
-  `blob:` and `data:`), scripts only with a per-load nonce, and its only way out a `postMessage` to the TIX page.
-  The page that runs in it is a host's dashboard, so it is untrusted: every message is accepted only from that
-  iframe's window with the opaque origin, a one-time token proven once and a session id, under per-frame size and
-  rate caps; every request is validated against a scope table and goes to the transport, never to the network. A
-  load the app did not start destroys the frame. A compromised TIX site could still act as a paired device (see the
-  bridge threat model); the frame limits what a compromised *host* page can do to the TIX origin, which is nothing.
+- **The remote dashboard frame runs in a sandbox** (`/sandbox/dash`, [bridge-frame.md](bridge-frame.md)): an opaque
+  origin (no cookie, storage or access to the TIX page), scripts only with a per-load nonce, `connect-src`, `frame-src`
+  and `form-action` `'none'`, files only as `blob:` and `data:`. The policy has no `navigate-to`, so a document in the
+  frame can still navigate its own frame, and a navigation is a request: **the policy alone does not keep a foreign
+  page out or data in.** What does, together: the frame runs only the host's own `/static/` JavaScript (a script from
+  anywhere else, or of another type, never runs); every anchor in any namespace is intercepted; foreign SVG addresses,
+  SMIL and non-stylesheet links are removed; after a one-time-token `hello` everything travels on one transferred
+  `MessagePort`, so a document that replaces the shim holds no port and neither hears nor speaks (the host never posts
+  to the window after `hello`); a heartbeat over the port rebuilds a frame that stops answering (about 2 s), and any
+  load the app did not start rebuilds it at once. Every request is validated against a scope table and goes to the
+  transport, never to the network; opening, downloading, external links and history need a user gesture, and an outside
+  address, a download or a clipboard write waits for a click in the TIX page on a question that shows the exact text.
   Only a response the host tagged as a dashboard page is written into the frame; artifacts, widgets, addon files and
-  other types go to the viewer or a download. Host-supplied strings are drawn as text.
+  other types go to the viewer or a download. Host-supplied strings are drawn as text. **Residual risks:** a foreign
+  document can stay on screen for up to about 2 s before the heartbeat rebuilds the frame (it can draw a look-alike
+  prompt in that time but holds no channel); any script that runs in the frame can send data out in a navigation URL,
+  which needs a compromised host or a script that got past the `/static/` rule; the frame shares one JavaScript realm
+  with the page, so a page can replace built-ins after the shim has captured what it needs (it still cannot obtain the
+  port; it can see replies to its own requests). A compromised TIX site could still act as a paired device (see the
+  bridge threat model).
 
 ## Remote bridge (Orch Remote)
 

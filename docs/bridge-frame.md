@@ -67,8 +67,7 @@ is speaking. The frame host therefore does not trust a name; it hands the shim o
 4. A document that replaces the shim's (a navigation, a page that sets `location`) never holds the port: it cannot send
    to the host, and it cannot listen, because nothing is posted to a window any more. Replies, streams and pages go only
    through the port.
-5. A **heartbeat** runs over the port: the host pings every 3 seconds; if the previous ping is still unanswered at the
-   next tick the iframe is destroyed and a new one is built (new token, new nonce, the last page the host knows, at most
+5. A **heartbeat** runs over the port: the host pings every second; when two pings in a row are unanswered (about 2 s) the iframe is destroyed and a new one is built (new token, new nonce, the last page the host knows, at most
    5 rebuilds a minute, then the frame stays stopped). It does not depend on the iframe's `load` event, which a foreign
    document controls.
 6. **Loads.** The host expects one load, the document it asked for. Later loads are legitimate only inside the window
@@ -81,10 +80,12 @@ poison prototypes. Before any page script exists, the shim captures the port's `
 getters of `MessageEvent` (`data`, `ports`, `source`, `origin`) and the `onmessage` setter, and uses them only through the
 captured `Reflect.apply`; the port lives in a closure and is never put on an object a page can reach (an event's
 `target` is the port, which is why the event getters are captured too). Messages are object literals; `window.orchHost`
-and its sub-objects are frozen. The page scripts run only after the port exists, so a poisoned realm sees no port and
-no secret (`tests/browser/test_dash_frame.py`, `test_a_foreign_document_in_the_frame...`: hooks on `Function.prototype`
-`call/apply/bind`, `Object`, `Array`, `Map`, `Promise`, `JSON`, `Reflect`, `MessageEvent` and `MessagePort` prototypes
-collect no port and no secret). A hostile document cannot poison the realm *before* the shim runs: the shim is the first
+and its sub-objects are frozen. The page scripts run only after the port exists. `onPort` reaches its tables through captured `Map` methods; what a page
+hook can still observe is the data of replies to the page's own requests (through the `Promise` it is waiting on),
+which it receives anyway. It cannot obtain the port or a control message (`ping`, `go`, `copied`): a test replaces
+`Map`, `Array` and `Promise` methods and the `MessageEvent` `data` getter after shim init and checks that none reach it
+(`test_a_page_that_replaces_map_promise_and_array_methods...`), and another hooks `Function.prototype`, `Object`, `JSON`,
+`Reflect` and `MessagePort.prototype` (`test_a_foreign_document_in_the_frame...`). A hostile document cannot poison the realm *before* the shim runs: the shim is the first
 script of its document.
 
 ## The messages
