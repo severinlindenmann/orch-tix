@@ -869,3 +869,16 @@ test("needs-spaces: handled tickets, read messages and old 'Handled' notes leave
   await Promise.all(ev2.waits);
   assert.equal(w.notifications.length, 0);                                           // TIX-1 was handled meanwhile
 });
+
+test("needs-spaces never closes what the list cannot know yet: a notification newer than the request, or messages it could not read", async () => {
+  const w = load({ idb: LABELS });
+  await push(w, { v: 2, s: S1, t: "TIX-1", k: "question", n: 1, c: 2, cs: 1 });
+  await push(w, { v: 2, s: S2, t: "", k: "message", n: 1, c: 2 });
+  w.notifications.find((n) => n.tag === `tix:${S1}`).timestamp = 2000;          // shown after the page asked (at 1000)
+  const ask = async (data) => { const ev = { data: { type: "needs-spaces", ...data }, waits: [], waitUntil(p) { this.waits.push(p); } };
+    w.listeners.message(ev); await Promise.all(ev.waits); };
+  await ask({ spaces: [], tickets: [], messages: null, at: 1000 });              // unread count unreadable, S1 is newer
+  assert.deepEqual(w.notifications.map((n) => n.tag).sort(), [`tix:${S1}`, `tix:${S2}`].sort());
+  await ask({ spaces: [], tickets: [], messages: 0, at: 3000 });                 // now both are older than the request
+  assert.equal(w.notifications.length, 0);
+});

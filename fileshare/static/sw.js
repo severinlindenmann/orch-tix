@@ -201,7 +201,7 @@ self.addEventListener("fetch", (event) => {
 
 self.addEventListener("message", (event) => {
   if (event.data?.type === "needs-spaces") {
-    event.waitUntil(reconcileNeeds(event.data.spaces, event.data.tickets, event.data.messages).catch(() => {}));
+    event.waitUntil(reconcileNeeds(event.data.spaces, event.data.tickets, event.data.messages, event.data.at).catch(() => {}));
     return;
   }
   if (!event.data || event.data.type !== "cache-pages") return;
@@ -476,10 +476,14 @@ async function clearFor(d, s, m) {
 // The page tells the worker which workspaces have something that needs you (it just fetched the list): a notification
 // for a workspace that has nothing left is closed, so a banner a missed clear left behind does not stay until the
 // owner swipes it. Page-driven, not a push, so closing needs no replacement notification.
-async function reconcileNeeds(spaces, tickets, messages) {
+async function reconcileNeeds(spaces, tickets, messages, at) {
   const live = new Set((Array.isArray(spaces) ? spaces : []).filter((x) => typeof x === "string" && SPACE_ID.test(x)));
   const open = Array.isArray(tickets) ? new Set(tickets.filter((t) => typeof t === "string")) : null;
+  // `at`: when the page asked for its lists. A notification shown after that is newer than the answer (a push landed
+  // while it was on its way) and says something the list cannot know yet: leave it.
+  const newer = (n) => typeof at === "number" && typeof n.timestamp === "number" && n.timestamp > at;
   for (const x of await openSpaceTags()) {
+    if (newer(x)) continue;
     const sp = x.tag.slice(4);
     const isMsg = x.data?.msg === true;
     if (x.data?.handled) x.close();                                   // an old "Handled" note: nothing left to say
@@ -498,7 +502,7 @@ async function reconcileNeeds(spaces, tickets, messages) {
     }
   }
   const group = await groupNote();
-  if (group) {
+  if (group && !newer(group)) {
     const left = (group.data?.spaces || []).filter((x) => live.has(x));
     if (!left.length) group.close();
     else if (left.length !== (group.data?.spaces || []).length) {

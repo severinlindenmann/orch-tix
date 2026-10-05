@@ -151,3 +151,25 @@ test("tellWorkerNeeds sends the workspaces and tickets that need you, setAppBadg
   assert.deepEqual(calls, [3, 0]);
   tellWorkerNeeds([], 0, {});                                  // no worker: no throw
 });
+
+test("needsCount tells the worker when it asked, and null (not 0) when the unread messages could not be read", async () => {
+  const { needsCount } = await import("../../fileshare/static/js/nav.js");
+  const posted = [];
+  const nav = { serviceWorker: { controller: { postMessage: (m) => posted.push(m) } } };
+  const prev = globalThis.navigator;
+  Object.defineProperty(globalThis, "navigator", { value: nav, configurable: true });
+  try {
+    const before = Date.now();
+    const get = async (path) => {
+      if (path === "/api/mirrors") return { mirrors: [{ space: "a", id: "TIX-1", needs: "question" }] };
+      if (path.startsWith("/api/messages")) throw new Error("offline");
+      return { requests: [] };
+    };
+    await needsCount(get, async () => []);
+    assert.equal(posted.length, 1);
+    assert.equal(posted[0].messages, null);
+    assert.ok(posted[0].at >= before && posted[0].at <= Date.now());
+  } finally {
+    Object.defineProperty(globalThis, "navigator", { value: prev, configurable: true });
+  }
+});
