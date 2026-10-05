@@ -465,9 +465,13 @@ def test_get_name_collisions(cli, dev_repo):
     (dev_repo.root / "a.txt").write_text("v1")
     fid = cli(dev_repo.root, "share", "a.txt").out.strip()
     assert cli(dev_repo.root, "get", fid).code == 0
-    assert cli(dev_repo.root, "get", fid).code == 0
+    assert cli(dev_repo.root, "get", fid).code == 0          # the identical copy is reused (QA TF-19)
+    assert _share_dir_files(dev_repo.root) == ["a.txt"]
+    (dev_repo.root / "share" / "a.txt").write_text("local edit")
+    assert cli(dev_repo.root, "get", fid).code == 0          # a different file with that name: the prefixed copy
     assert _share_dir_files(dev_repo.root) == sorted(["a.txt", f"{fid}-a.txt"])
-    r = cli(dev_repo.root, "get", fid)
+    (dev_repo.root / "share" / f"{fid}-a.txt").write_text("another edit")
+    r = cli(dev_repo.root, "get", fid)                       # both names taken by other content: refused
     assert r.code == 6 and "--force" in r.err
     (dev_repo.root / "share" / "a.txt").write_text("local edit")
     assert cli(dev_repo.root, "get", fid, "--force").code == 0
