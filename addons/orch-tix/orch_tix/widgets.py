@@ -2,7 +2,7 @@
 Read-only: the addon's own state files and cached snapshots, never a command."""
 from __future__ import annotations
 
-from orch.addons.widgets import KV, Action, Callout, Card, Copy, Table, Text, Tile
+from orch.addons.widgets import KV, Action, Callout, Card, Chips, Copy, Link, Table, Text, Tile
 
 from .cli import configured_path
 from .mapping import LEVEL_LABEL
@@ -117,3 +117,25 @@ def summary_tile(addon, view) -> list:
 def page(addon, view) -> list:
     from .files_page import page as files_page
     return files_page(addon, view)
+
+
+def guide_section(addon, view) -> list:
+    """The TIX section of core's How it works page (slot `guide.section`). Plain explanation, no data: it reads
+    nothing from the workspace, and every claim is one docs/threat-model.md makes."""
+    return [Card("Answer a blocked agent from your phone", (
+        Text("When an agent stops to ask you something, the question can be waiting on your phone: pick an answer, approve "
+             "a plan or give a verdict from the train, the couch or the queue for coffee. The agent just keeps waiting "
+             "on orch wait and carries on when your decision arrives."),
+        Text("TIX is end-to-end encrypted. Titles, questions, answers, gate text and file names are sealed under your "
+             "master key before they leave this machine; the TIX server stores ciphertext and sees only ids, status, "
+             "priority and counts. It never sees what the ticket says."),
+        Text("Pair a phone once under Workspace & addons. From then on its decision is signed on the phone and checked by "
+             "orch itself (pairing, signature, age, and the hash of the exact text the phone showed) before it is applied "
+             "on your desktop. It lands in the same ledger as any decision you make here, marked as made from your phone. "
+             "A phone writes decisions, never tickets, and anything that does not check out waits for you under From addons."),
+        Text("Notifications carry only an id, a kind and two counts, never a title or text. When you decide on the desktop "
+             "first, the phone's alert is replaced by a quiet note, Handled on desktop, so it does not keep nagging you."),
+        Text("Honest limits: every device you approve in TIX can read your synced tickets, so choose Title only or Key only "
+             "for confidential clients, and revoke a lost phone at once."),
+        Chips((Link("Threat model", "https://github.com/severinlindenmann/orch-tix/blob/main/docs/threat-model.md"),)),
+    ))]

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.0
+
+- A TIX section on orch-core's How it works page (`guide.section`, needs the orch-core release that adds that slot; an older orch-core rejects the manifest, so this version needs it): answering a blocked agent from your phone, end-to-end encryption, pairing and signed decisions in the same ledger, and notifications that clear when you decided on the desktop. It shows only while the addon is enabled and replaces core's generic phone paragraph.
+
 ## 0.2.0
 
 - A ticket the server answered `gone` for is linked again on the next sync cycle as a new generation (once per cycle, when the sync policy would mirror it); by-hand unlinks and done cleanups stay retired. The link records why it was retired (`retired_why`).

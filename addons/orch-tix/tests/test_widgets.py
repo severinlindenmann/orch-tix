@@ -125,3 +125,19 @@ def test_ticket_panel_offers_no_send_at_key_only(tix_ws, tix, tmp_path):
     t = store.load(tix_ws.ws, tid)[1]
     ws = tix.obj.widgets("ticket.sync", _view(tix_ws, tix, "ticket.sync", t))
     assert not [w for w in _walk(ws) if isinstance(w, Action) and w.action == "send_artifact"]
+
+
+def test_guide_section_is_a_plain_card_that_core_accepts(tix_ws, tix):
+    ws = tix.obj.widgets("guide.section", _view(tix_ws, tix, "guide.section"))
+    _check(tix, "guide.section", ws)
+    (card,) = ws
+    assert isinstance(card, Card) and card.title == "Answer a blocked agent from your phone"
+    text = " ".join(w.text for w in card.body if isinstance(w, Text))
+    for claim in ("end-to-end encrypted", "ciphertext", "same ledger", "Handled on desktop", "never a title"):
+        assert claim in text
+    assert not any(isinstance(w, (Table, Action)) for w in _walk(ws))  # an explanation, not a status page
+
+
+def test_guide_section_is_declared_and_other_slots_are_unchanged(tix_ws, tix):
+    assert "guide.section" in tix.manifest.slots
+    assert tix.obj.widgets("no.such.slot", _view(tix_ws, tix, "today.summary")) == []

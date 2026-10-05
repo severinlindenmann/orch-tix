@@ -53,6 +53,8 @@ class TixAddon:
             return widgets.ticket_panel(self, view)
         if slot == "today.summary":
             return widgets.summary_tile(self, view)
+        if slot == "guide.section":
+            return widgets.guide_section(self, view)
         if slot == f"page.{self.ctx.name}":
             return widgets.page(self, view)
         return []
