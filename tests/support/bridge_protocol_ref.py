@@ -43,6 +43,8 @@ RID_RETENTION_MS = 900_000
 BUDGET = 10                                          # unverified refusals per minute, host-wide (§6.1)
 OFFER_BUDGET = 5                                     # refusals per minute for one open pairing offer (§8.1)
 MAX_OFFSET_MS = 24 * 3600 * 1000                     # a device adopts at most this clock offset (§5.1)
+PIN_FAILURES = 3                                     # pin failures in a row before "pair again" (§7)
+MAX_LABEL = 80                                       # code points (§8.1)
 BUDGET_WINDOW_MS = 60_000
 ZERO_NONCE = bytes(12)
 ZERO_ID = bytes(16)
@@ -337,7 +339,10 @@ def host_check(env: bytes, state: dict, now_ms: int, mailbox_id: str | None = No
                 return _unverified(state, now_ms, "bad_signature")
             if abs(now_ms - h.ts_ms) > WINDOW_MS:
                 return _unverified(state, now_ms, "stale_timestamp", host_ms=now_ms)
-            return {"result": "pair_status", "state": waiting["state"]}     # read-only: a replay changes nothing
+            answer = {"pair": waiting["state"]}                                 # read-only: a replay changes nothing
+            if waiting["state"] == "approved":
+                answer["scope"] = waiting["scope"]
+            return {"result": "pair_status", "answer": answer}
         return _unverified(state, now_ms, "not_paired")
     if dev.get("revoked"):
         return _unverified(state, now_ms, "revoked")
@@ -400,7 +405,8 @@ def _pair(state, h, hb, body, sig, meta, now_ms):
         return _unverified(state, now_ms, "stale_timestamp", host_ms=now_ms, **ob)
     if resend:                                     # nothing changes: the same answer again
         return {"result": "pair_pending", "fingerprint": device_fingerprint(pub), "device": h.device.hex(),
-                "scope": held["scope"], "phone_link": held["phone_link"]}
+                "scope": held["scope"], "phone_link": held["phone_link"], "label": held["label"],
+                "answer": pending_answer(state, pub)}
     offer["used"] = True
     link = None                                    # a phone link is recorded only with its proof (§8.2)
     phone_key = state.get("phones", {}).get(str(meta.get("phone_id", "")))
@@ -413,9 +419,53 @@ def _pair(state, h, hb, body, sig, meta, now_ms):
             link = meta["phone_id"]
     state.setdefault("pending_pairs", {})[h.device.hex()] = {"pub": pub.hex(), "state": "pending", "pairing_id": pid,
                                                              "scope": offer["scope"], "phone_link": link,
-                                                             "label": clean_shown(str(meta.get("label", "")))[:80]}
+                                                             "label": host_label(str(meta.get("label", "")))}
     return {"result": "pair_pending", "fingerprint": device_fingerprint(pub), "device": h.device.hex(),
-            "scope": offer["scope"], "phone_link": link}
+            "scope": offer["scope"], "phone_link": link, "label": host_label(str(meta.get("label", ""))),
+            "answer": pending_answer(state, pub)}
+
+
+def pending_answer(state, pub: bytes) -> dict:
+    """The meta of the `pending` response (§8.1 step 3): it carries the host key the device pins."""
+    return {"pair": "pending", "host_pub": state["host_pub"], "fingerprint": device_fingerprint(pub)}
+
+
+def host_label(s: str) -> str:
+    """The host stores a label cleaned like `shown` and truncated to 80 CODE POINTS (§8.1)."""
+    return clean_shown(s)[:MAX_LABEL]
+
+
+def device_label_ok(s: str) -> bool:
+    """The device refuses a label that is not scalar values or longer than 80 code points (§8.1)."""
+    return not any(0xD800 <= ord(c) <= 0xDFFF for c in s) and len(s) <= MAX_LABEL
+
+
+_FRAGMENT = __import__("re").compile(r"#?v1\.([0-9a-f]{32})\.([0-9a-f]{32})\.([A-Za-z0-9_-]{43})\.([A-Za-z0-9_-]{43})")
+
+
+def parse_pair_fragment(fragment: str):
+    """The pairing link fragment (§8.1), strictly: version v1, lower-case hex, canonical 32-byte b64u. None if not."""
+    m = _FRAGMENT.fullmatch(fragment) if isinstance(fragment, str) else None
+    if not m:
+        return None
+    s, pin = unb64u(m.group(3)), unb64u(m.group(4))
+    if len(s) != 32 or len(pin) != 32 or b64u(s) != m.group(3) or b64u(pin) != m.group(4):
+        return None
+    return {"workspace": m.group(1), "pairing_id": m.group(2), "secret": s.hex(), "host_pin": pin.hex()}
+
+
+_NONCE = __import__("re").compile(r"[0-9a-f]{64}")
+
+
+def parse_challenge_parts(meta: dict) -> tuple[bytes, int]:
+    """`nonce` and `expires_ms` of an assertion_required / credential_begin answer (§9.2, §9.4): 64 lower-case
+    hex characters, and a JSON integer of milliseconds. Raises ValueError otherwise."""
+    nonce, exp = meta.get("nonce"), meta.get("expires_ms")
+    if not isinstance(nonce, str) or not _NONCE.fullmatch(nonce):
+        raise ValueError("nonce must be 64 lower-case hex characters")
+    if type(exp) is not int or exp < 0:
+        raise ValueError("expires_ms must be a non-negative integer")
+    return bytes.fromhex(nonce), exp
 
 
 # --- the device's checks on a response chunk (§7) ------------------------------------------------
@@ -441,7 +491,13 @@ def device_check(env: bytes, ctx: dict, mailbox: dict, now_ms: int) -> dict:
             (h.rid.hex(), h.seq, bool(h.flags & F_LAST), bool(h.flags & F_STREAM)) or pend["stream"] != mailbox["stream"]:
         return _drop("mailbox_mismatch")
     if not verify(ctx["host_pub"], sig, signed_bytes(hb, body)):
-        return _drop("host_signature")
+        # only a K_ws holder can make the tag verify: only such a chunk is evidence the host key changed (§7)
+        try:
+            open_body(ctx["k_ws"], hb, body)
+            pin_failure = True
+        except InvalidTag:
+            pin_failure = False
+        return {**_drop("host_signature"), "pin_failure": pin_failure}
     try:
         meta, data = unframe(open_body(ctx["k_ws"], hb, body))
     except (InvalidTag, ValueError):
@@ -464,6 +520,56 @@ def device_check(env: bytes, ctx: dict, mailbox: dict, now_ms: int) -> dict:
         return _drop("stale_timestamp")
     pend["next"] += 1
     return res
+
+
+def pin_run(results: list[dict]) -> list[bool]:
+    """After each device_check result: has the device said "the host key changed: pair again"? A pin failure counts;
+    a verified (accepted) chunk resets the run; any other drop neither counts nor resets (§7)."""
+    run, alarm, out = 0, False, []
+    for r in results:
+        if r.get("pin_failure"):
+            run += 1
+            alarm = alarm or run >= PIN_FAILURES
+        elif r["result"] == "accept":
+            run = 0
+        out.append(alarm)
+    return out
+
+
+def open_pending_answer(env: bytes, ctx: dict, mailbox: dict, now_ms: int) -> dict:
+    """The one response checked before the device has a host key (§8.1 step 4): ctx has `host_pin` (from the link)
+    instead of `host_pub`. Tag first, then the pin of the `host_pub` it carries, then the signature with that key;
+    then the rest of §7. Dropped if any fails, before anything in it is used."""
+    if not OVERHEAD <= len(env) <= MAX_CHUNK:
+        return _drop("size")
+    hb, body, sig = split(env)
+    h = Header.decode(hb)
+    if h.magic != MAGIC or h.version != VERSION or h.direction != TO_DEVICE or h.flags != F_LAST:
+        return _drop("version_direction_or_flags")
+    if h.key_version != ctx["key_version"] or h.workspace.hex() != ctx["workspace"] or h.device.hex() != ctx["device"]:
+        return _drop("not_for_this_device")
+    pend = ctx["pending"].get(h.rid.hex())
+    if pend is None:
+        return _drop("unknown_request")
+    if (mailbox["id"], mailbox["idx"], mailbox["last"], mailbox["stream"]) != (h.rid.hex(), h.seq, True, False):
+        return _drop("mailbox_mismatch")
+    try:
+        meta, _ = unframe(open_body(ctx["k_ws"], hb, body))
+        host_pub = bytes.fromhex(meta["host_pub"])
+    except (InvalidTag, ValueError, KeyError, TypeError):
+        return _drop("tag_or_meta")
+    if meta.get("pair") != "pending" or len(host_pub) != 65:
+        return _drop("not_a_pending_answer")
+    if not hmac.compare_digest(host_pin(host_pub), bytes.fromhex(ctx["host_pin"])):
+        return _drop("host_pin")
+    if not verify(host_pub, sig, signed_bytes(hb, body)):
+        return _drop("host_signature")
+    if h.seq != pend["next"]:
+        return _drop("out_of_order")
+    if abs(now_ms + ctx.get("offset_ms", 0) - h.ts_ms) > WINDOW_MS:
+        return _drop("stale_timestamp")
+    pend["next"] += 1
+    return {"result": "accept", "host_pub": host_pub.hex(), "fingerprint": meta.get("fingerprint")}
 
 
 # --- the platform-authenticator binding (§9) ------------------------------------------------------
@@ -646,7 +752,8 @@ def build() -> dict:
                                           "high": 0, "bitmap": 0},
                             dev_b.hex(): {"pub": keys["device_b"]["pub"], "scope": "look", "revoked": False,
                                           "high": 0, "bitmap": 0}},
-                "rids": {}, "offers": {}, "pending_pairs": {}, "phones": {}, "streams": {}, "unverified": []}
+                "rids": {}, "offers": {}, "pending_pairs": {}, "phones": {}, "streams": {}, "unverified": [],
+                "host_pub": keys["host"]["pub"]}
 
     def jstate(s):
         return {k: v for k, v in s.items() if k != "k_ws"}
@@ -658,7 +765,7 @@ def build() -> dict:
     full = req(meta={"op": "http", "method": "POST", "path": "/api/tickets/T-1/move",
                      "headers": {"content-type": "application/json"}}, data=b'{"to":"testing"}', seq=7)
     host_cases = []
-    keep = ("result", "code", "scope", "meta", "data", "outcome", "high", "fingerprint", "state", "status",
+    keep = ("result", "code", "scope", "meta", "data", "outcome", "high", "fingerprint", "answer", "label", "status",
             "phone_link", "host_ms")
 
     def case(name, env, st, now_ms, mutate=None, mailbox_id=None):
@@ -824,6 +931,12 @@ def build() -> dict:
                                        (pair(status, signer="device_b", seq=4), now + 3000),
                                        (pair(other_pair, device=other_id, signer="authenticator", seq=1), now + 4000)], offer)
     case("pair_status_without_pairing", pair(status, seq=3), None, now)
+    for verdict in ("approved", "rejected"):
+        case(f"pair_status_{verdict}", pair(status, seq=3), None, now, lambda s, v=verdict: s["pending_pairs"].update(
+            {new_id.hex(): {"pub": new_pub.hex(), "state": v, "pairing_id": pid.hex(), "scope": "decide",
+                            "phone_link": None, "label": "Phone"}}))
+    long_label = "\U0001F44D" * 81                 # 81 code points, 162 UTF-16 units
+    case("pair_request_label_truncated_to_80_code_points", pair({**pair_meta, "label": long_label}), None, now, offer)
     out["host_cases"] = host_cases
     out["pairing"] = {"workspace": ws_hex, "pairing_id": pid.hex(), "secret": secret.hex(),
                       "host_pub": keys["host"]["pub"], "host_pin": host_pin(pub["host"]).hex(),
@@ -847,8 +960,10 @@ def build() -> dict:
 
     dev_cases = []
 
-    def dcase(name, env, now_ms=now + 2500, mailbox=None, offset=0, adopted=False):
+    def dcase(name, env, now_ms=now + 2500, mailbox=None, offset=0, adopted=False, stream_pending=False):
         c = ctx(offset, adopted)
+        if stream_pending:
+            c["pending"][rid.hex()]["stream"] = True
         hh = Header.decode(env)
         mb = mailbox or {"id": hh.rid.hex(), "idx": hh.seq, "last": bool(hh.flags & F_LAST),
                          "stream": bool(hh.flags & F_STREAM)}
@@ -857,7 +972,8 @@ def build() -> dict:
         dev_cases.append({"name": name, "envelope": env.hex(), "mailbox": mb, "pending": pend_before,
                           "offset_ms": offset, "now_ms": now_ms,
                           "expect": {**{k: v for k, v in res.items() if k in ("result", "last", "refusal", "meta", "data")},
-                                     "offset_ms": res.get("offset_ms"), "clock_wrong": res.get("clock_wrong")}})
+                                     "offset_ms": res.get("offset_ms"), "clock_wrong": res.get("clock_wrong"),
+                                     "pin_failure": res.get("pin_failure")}})
 
     ok = resp(data=b'{"moved":true}')
     dcase("full_response_chunk", ok)
@@ -885,7 +1001,131 @@ def build() -> dict:
                r=fake("old-request")[:16]), now_ms=skew)
     dcase("other_refusal_to_a_skewed_clock_is_not_exempt",
           resp(flags=F_LAST | F_REFUSAL, meta={"refusal": "rid_conflict", "host_ms": now + 2000}), now_ms=skew)
+    def raw_resp(direction=TO_DEVICE, flags=F_LAST, version=VERSION, key_version=1, workspace=ws, ts=now + 2000,
+                 meta=None, signer="host"):
+        h = Header(direction, flags, workspace, dev_a, rid, ZERO_ID, 0, ts, fake(f"salt-raw-{direction}-{flags}-{version}"
+                   f"-{key_version}-{workspace.hex()}-{ts}")[:16], key_version, version)
+        return envelope(k_ws, pk[signer], h, frame(meta if meta is not None else {"status": 200}))
+
+    mb0 = {"id": rid.hex(), "idx": 0, "last": True, "stream": False}
+    dcase("response_with_direction_to_host", raw_resp(direction=TO_HOST), mailbox=mb0)
+    dcase("response_of_version_2", raw_resp(version=2), mailbox=mb0)
+    dcase("response_with_an_unknown_flag", raw_resp(flags=F_LAST | 0x08), mailbox=mb0)
+    dcase("response_of_another_key_version", raw_resp(key_version=2), mailbox=mb0)
+    dcase("response_for_another_workspace", raw_resp(workspace=bytes(16)), mailbox=mb0)
+    dcase("response_exactly_300_s_old", raw_resp(), now_ms=now + 2000 + WINDOW_MS, mailbox=mb0)
+    dcase("response_exactly_300_s_ahead", raw_resp(), now_ms=now + 2000 - WINDOW_MS, mailbox=mb0)
+    dcase("response_300_s_and_1_ms_ahead", raw_resp(), now_ms=now + 2000 - WINDOW_MS - 1, mailbox=mb0)
+    dcase("response_mailbox_id_differs", ok, mailbox={**mb0, "id": fake("other")[:16].hex()})
+    dcase("response_mailbox_idx_differs", ok, mailbox={**mb0, "idx": 1})
+    dcase("response_mailbox_idx_not_an_integer", ok, mailbox={**mb0, "idx": "0"})
+    dcase("response_mailbox_says_stream", ok, mailbox={**mb0, "stream": True})
+    dcase("stale_timestamp_with_a_host_ms_that_is_not_an_integer",
+          resp(flags=F_LAST | F_REFUSAL, meta={"refusal": "stale_timestamp", "host_ms": str(now + 2000)}), now_ms=skew)
+    forged = bytearray(ok)
+    forged[HEADER_LEN:] = fake("forged-body")[:1] * (len(ok) - HEADER_LEN)   # what a relay without keys can make
+    dcase("response_random_body_and_signature", bytes(forged))
+    base = len(resp(meta={}))
+    dcase("response_larger_than_256_kib", resp(meta={}, data=bytes(MAX_CHUNK + 1 - base)))
+    dcase("stream_rid_answered_without_stream_mailbox_says_stream", ok, mailbox={**mb0, "stream": True},
+          stream_pending=True)
+    dcase("stream_rid_answered_without_stream", ok, mailbox=mb0, stream_pending=True)
     out["device_cases"] = dev_cases
+
+    # the pin alarm (§7): kinds name device cases above
+    kinds = {"pin": "response_signed_by_a_device", "forged": "response_random_body_and_signature", "ok": "full_response_chunk"}
+    by = {c["name"]: c for c in dev_cases}
+
+    def run(name, steps):
+        res = []
+        for k in steps:
+            c = by[kinds[k]]
+            res.append(device_check(bytes.fromhex(c["envelope"]), {**ctx(), "pending": json.loads(json.dumps(c["pending"]))},
+                                    c["mailbox"], c["now_ms"]))
+        return {"name": name, "steps": [kinds[k] for k in steps], "alarm": pin_run(res)}
+
+    out["pin_runs"] = [
+        run("three_pin_failures_in_a_row", ["pin", "pin", "pin"]),
+        run("forged_chunks_never_count", ["forged", "forged", "forged", "forged"]),
+        run("a_verified_chunk_resets", ["pin", "pin", "ok", "pin", "pin"]),
+        run("forged_chunks_neither_count_nor_reset", ["pin", "forged", "pin", "forged", "pin"]),
+    ]
+
+    # the pending answer (§8.1 step 4): checked against the link's pin, before any host key is pinned
+    prid = fake("pair-rid")[:16]
+
+    def pend_resp(host_pub_hex=keys["host"]["pub"], signer="host", key=k_ws, meta=None):
+        h = Header(TO_DEVICE, F_LAST, ws, dev_a, prid, ZERO_ID, 0, now + 2000, fake(f"pend-{signer}-{host_pub_hex[:8]}")[:16])
+        m = meta if meta is not None else {"pair": "pending", "host_pub": host_pub_hex,
+                                           "fingerprint": device_fingerprint(pub["device_a"])}
+        return envelope(key, pk[signer], h, frame(m))
+
+    pend_cases = []
+
+    def pcase(name, env):
+        c = {"workspace": ws_hex, "k_ws": k_ws, "key_version": 1, "device": dev_a.hex(), "host_pin": host_pin(pub["host"]).hex(),
+             "pending": {prid.hex(): {"next": 0, "stream": False}}, "offset_ms": 0}
+        mbp = {"id": prid.hex(), "idx": 0, "last": True, "stream": False}
+        res = open_pending_answer(env, c, mbp, now + 2500)
+        pend_cases.append({"name": name, "envelope": env.hex(), "mailbox": mbp, "host_pin": c["host_pin"],
+                           "pending": {prid.hex(): {"next": 0, "stream": False}}, "now_ms": now + 2500,
+                           "expect": {k: v for k, v in res.items() if k != "why"}})
+
+    pcase("pending_answer_accepted", pend_resp())
+    pcase("pending_answer_with_a_host_key_not_of_the_pin", pend_resp(keys["intruder"]["pub"], signer="intruder"))
+    pcase("pending_answer_signed_by_another_key", pend_resp(signer="intruder"))
+    pcase("pending_answer_sealed_under_another_key", pend_resp(key=workspace_key(mk, "0" * 32)))
+    pcase("pending_answer_without_host_pub", pend_resp(meta={"pair": "pending"}))
+    pcase("pending_answer_that_is_not_pending", pend_resp(meta={"pair": "approved", "host_pub": keys["host"]["pub"]}))
+    out["pending_answers"] = pend_cases
+
+    # labels (§8.1 step 2): code points, not UTF-16 units
+    def lab(name, s):
+        return {"name": name, "codepoints": [ord(c) for c in s], "device_accepts": device_label_ok(s),
+                "host_stores": [ord(c) for c in host_label(s)]}
+
+    out["labels"] = [
+        lab("eighty_ascii", "x" * 80), lab("eighty_one_ascii", "x" * 81),
+        lab("eighty_with_an_astral_character", "\U0001F44D" + "x" * 79),
+        lab("eighty_one_with_an_astral_character", "\U0001F44D" + "x" * 80),
+        lab("forty_one_astral_characters", "\U0001F44D" * 41),
+        lab("eighty_one_astral_characters", "\U0001F44D" * 81),
+    ]
+
+    # pairing link fragments (§8.1 step 1), strictly
+    good = out["pairing"]["link_fragment"]
+
+    def link(name, frag):
+        return {"name": name, "fragment": frag, "parsed": parse_pair_fragment(frag)}
+
+    out["links"] = [
+        link("valid", good), link("valid_with_hash", "#" + good),
+        link("version_2", good.replace("v1.", "v2.", 1)), link("version_11", good.replace("v1.", "v11.", 1)),
+        link("no_version", good.replace("v1.", "", 1)),
+        link("upper_case_workspace", good.replace(ws_hex, ws_hex.upper(), 1)),
+        link("upper_case_pairing_id", good.replace(pid.hex(), pid.hex().upper(), 1)),
+        link("secret_not_canonical", good.replace(b64u(secret), b64u(secret)[:-1] + "B", 1)),
+    ]
+
+    # nonce and expires_ms encodings (§9.2, §9.4)
+    def parts(name, meta):
+        try:
+            n, e = parse_challenge_parts(meta)
+            ok_ = {"nonce": n.hex(), "expires_ms": e}
+        except ValueError:
+            ok_ = None
+        return {"name": name, "meta": meta, "parsed": ok_}
+
+    nh = fake("assert-nonce").hex()
+    out["challenge_parts"] = [
+        parts("valid", {"nonce": nh, "expires_ms": now + 120_000}),
+        parts("nonce_upper_case", {"nonce": nh.upper(), "expires_ms": now + 120_000}),
+        parts("nonce_63_characters", {"nonce": nh[:63], "expires_ms": now + 120_000}),
+        parts("nonce_base64url", {"nonce": b64u(fake("assert-nonce")), "expires_ms": now + 120_000}),
+        parts("expires_as_a_string", {"nonce": nh, "expires_ms": str(now + 120_000)}),
+        parts("expires_as_a_boolean", {"nonce": nh, "expires_ms": True}),
+        parts("expires_negative", {"nonce": nh, "expires_ms": -1}),
+    ]
 
     # the `shown` text (§9.3)
     out["shown"] = [

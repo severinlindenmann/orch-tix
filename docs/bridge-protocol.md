@@ -5,7 +5,7 @@ This document says what is inside the sealed bodies that the bridge mailbox (`fi
 keys seal and sign, where each key lives, how a device is recognised, the exact bytes, and what each
 side does with an envelope that is not right.
 
-Status: **draft, revised after the first cryptography review; D1 and D8 decided by the owner** (ticket #58, part of #22 and orch-core#85).
+Status: **v1, merged (ticket #58), amended by #82**; D1 and D8 decided by the owner. Part of #22 and orch-core#85.
 The host side (orch-core R3, #89) and the TIX app side (R10, #25) implement this document. The contract
 is [`tests/bridge_vectors.json`](../tests/bridge_vectors.json). The reference implementation that
 produces it, [`tests/support/bridge_protocol_ref.py`](../tests/support/bridge_protocol_ref.py), is test
@@ -20,6 +20,23 @@ explanation.
 Primitives come only from WebCrypto and the Python `cryptography` package: AES-256-GCM with a 128-bit
 tag, HKDF-SHA-256 (RFC 5869), HMAC-SHA-256, ECDSA on P-256 with SHA-256, and SHA-256. There is no
 compression anywhere, because compression before encryption leaks content through length.
+
+## Changes since v1
+
+Amendment #82, found by the independent review of the browser module (PR #81) and by the builders of both
+sides. None changes the bytes on the wire; each fixes something the two sides would otherwise implement
+differently.
+
+- §7: a host-key failure counts only for a chunk whose tag verifies under K_ws; three in a row with no
+  verified chunk between raise "pair again". A chunk failing the tag never counts, never resets.
+- §8.1 step 3/4: the `pending` answer's meta is fixed, and it carries `host_pub`. That one response is
+  opened tag first, then pin, then signature, because the device has no host key yet.
+- §8.1 step 5: the `pair_status` answer's meta is fixed.
+- §8.1 step 2: a label is at most 80 Unicode code points (not UTF-16 units).
+- §8.1 step 1: the link fragment is parsed strictly (version `v1`, lower-case hex, canonical b64u).
+- §9.2, §9.4: `nonce` is 64 lower-case hex characters and `expires_ms` a JSON integer.
+- §12: device vectors for every §7 check and edge, pin runs, pending answers, labels, links and challenge
+  parts.
 
 ## 1. Threat model for the bridge
 
@@ -510,8 +527,14 @@ Vectors: `device_cases`. A chunk that a device key signed is not a response
 answering in the host's name. A refusal chunk is shown as the host's fixed message for its code.
 
 **Host key pin failure:** when the host signature does not verify with the pinned key, the device drops
-the chunk. If that happens to every response, the app says "the host key changed: pair again". It never
-trusts a new host key on first use, and never replaces the pin without a new pairing link (D6).
+the chunk. It counts a **pin failure** only if the chunk's tag verifies under K_ws (it opens the body once
+more just to find out): a relay holding no keys can produce chunks with any signature, but not one whose
+tag verifies, so it cannot raise the alarm. After **3 pin failures in a row**, with no verified chunk
+between them, the app says "the host key changed: pair again" and drops everything from that host. A
+verified (accepted) chunk resets the run; a chunk dropped for any other reason, including a failed tag,
+neither counts nor resets it (vectors `response_signed_by_a_device` with `pin_failure: true`,
+`response_random_body_and_signature` with `pin_failure: false`, `pin_runs`). The device never trusts a new
+host key on first use, and never replaces the pin without a new pairing link (D6).
 
 ## 8. Pairing and revocation
 
@@ -531,13 +554,20 @@ trusts a new host key on first use, and never replaces the pin without a new pai
    K_ws, generates its signing key (§2.4) and sends a request with `op = "pair"`:
 
    ```
-   meta = {"op": "pair", "pairing_id": hex, "pub": hex (65 bytes), "label": text (≤ 80),
+   meta = {"op": "pair", "pairing_id": hex, "pub": hex (65 bytes), "label": text (≤ 80 code points),
            "mac": hex HMAC-SHA-256(S, "sharing/bridge/pair/v1|" || workspace || pairing_id || pub),
            "phone_id": optional, "phone_proof": optional (§8.2)}
    ```
 
    The request is signed with the new key, as proof of possession, and its header device id is
-   `device_id(workspace, pub)`.
+   `device_id(workspace, pub)`. A `label` is at most **80 Unicode code points** (scalar values), not
+   UTF-16 units: the device refuses a longer one, and the host truncates what it receives to 80 code
+   points (after cleaning it like `shown`, §9.3). Vectors: `labels`, host case
+   `pair_request_label_truncated_to_80_code_points`.
+
+   The link fragment is parsed strictly: exactly `v1`, the workspace and pairing id as 32 lower-case hex
+   characters each, S and the pin as canonical 43-character b64u of 32 bytes; anything else is not a
+   pairing link (vectors `links`).
 3. **The host**, after §6.1 steps 1 and 2, checks in this order:
    - the offer exists, is open and has not expired. An offer already used is still open to **the device
      that holds its pending pairing**: a `pair` with the same device id and the same public key (its
@@ -554,16 +584,27 @@ trusts a new host key on first use, and never replaces the pin without a new pai
    Once the offer is known to be open, these refusals count against the offer's own budget, not the
    host-wide one (§6.1). The host then marks the offer used and shows on
    the Mac the label (as text, cleaned like `shown`, §9.3), the scope, the phone link (§8.2) and the
-   **device fingerprint**. It answers `pending` in a response signed by the host key.
-4. **The device** checks that `H("sharing/bridge/host/v1|" || host_pub)` equals `host_pin` from the
-   link, then verifies the response's signature with that `host_pub`, and pins it. It registers its
+   **device fingerprint**. It answers with a response signed by the host key whose meta is
+
+   ```
+   {"pair": "pending", "host_pub": hex (65 bytes), "fingerprint": the device fingerprint, as text}
+   ```
+4. **The device** cannot check this one response in §7's order, because it has no host key yet. It
+   opens the tag first (under K_ws), reads `host_pub` (as bytes), checks that
+   `H("sharing/bridge/host/v1|" || host_pub)` equals `host_pin` from the link, then verifies the response's
+   signature with that `host_pub`, and only then applies the rest of §7 (chunk order, window). If any of
+   these fails it drops the response before using anything in it. Then it pins `host_pub` (vectors
+   `pending_answers`: accepted; a host key not of the pin; signed by another key; sealed under another key;
+   no `host_pub`; not `pending`). It registers its
    platform credential now (§9.2) and shows its own device fingerprint: "compare this on your Mac".
 5. **The owner compares the fingerprints and decides on the Mac.** The Mac's default action is **Reject**.
    Approve becomes available only once the owner has confirmed the fingerprint shown on the device (for
    example by entering its last group). The Mac also shows whether a credential was registered, and
    whether it is synced (§9.6). The owner may lower the scope. The host then writes the registry entry
    and logs it (§2.7). The device asks with `op = "pair_status"` (signed with its key, read-only, so a
-   replay changes nothing) until the answer is `approved` or `rejected`.
+   replay changes nothing) until the answer is `approved` or `rejected`. The answer's meta is
+   `{"pair": "pending" | "approved" | "rejected"}`, and on `approved` it also carries `"scope"` (vectors
+   `pair_status_approved`, `pair_status_rejected`, and the pending step of `pair_request_then_status`).
 
 A device that gets `pairing_closed` for a link it just opened, **or no answer at all within 60 s**,
 MUST say: "this link was used by someone else: reject it on your Mac". Someone else holding the link is
@@ -647,7 +688,8 @@ cannot tell a platform authenticator from software, so a later registration from
 would be invisible.
 
 1. `op = "credential_begin"`, signed with the pending device key. The host returns `nonce` (32 random
-   bytes) and `expires_ms` (now + 120 s), single use.
+   bytes, as **64 lower-case hex characters**) and `expires_ms` (now + 120 s, a **JSON integer** of
+   milliseconds), single use. Anything else is refused by the device (vectors `challenge_parts`).
 2. The device computes
    `challenge = H("sharing/bridge/webauthn-reg/v1|" || workspace || device_id || expires_ms (8) || nonce)`
    (vector `assertion.registration_challenge`) and calls `navigator.credentials.create` (§10.5).
@@ -712,7 +754,8 @@ Vectors: `shown`.
    that the route needs an assertion. It checks the **fresh-action rate limit now** (D9), before issuing
    any challenge: over the limit, R1 is refused `assertion_failed` and nothing is parked. Otherwise it
    parks R1 (its exact digest) and answers R1 with the refusal `assertion_required` (or
-   `lease_required`). The refusal carries `purpose`, `scope`, `expires_ms`, `nonce` and `subject`.
+   `lease_required`). The refusal carries `purpose`, `scope`, `expires_ms` (a JSON integer of
+   milliseconds), `nonce` (64 lower-case hex characters) and `subject`.
 2. The TIX app shows `subject.shown`, recomputes the challenge from those parts itself, and calls
    `navigator.credentials.get` with that challenge and only its own credential id (§10.5).
 3. The device sends R2 with `op = "assert"` and `{"for": R1 rid hex, "credential_id",
@@ -923,16 +966,23 @@ checked too. The `why` fields are informative and not part of the contract.
 | `sign`, `sig_scalars` | valid, wrong key, changed message, the malleable twin, `r = 0`, `r = n`, `s = n`, `r = n + 1`, `r = n − 1`, short |
 | `ids` | device ids (and that another workspace gives another id), fingerprints, the host pin |
 | `host_cases` | full request; replay without an outcome, of a finished request, from another device's record; same rid with other content; old, future and edge timestamps; a future-dated envelope refused and then in the window; tampered tag and header; mailbox id mismatch; wrong-device signature; unknown device; refusal budget (unverified dropped, signed still runs); unknown version, direction, flag; another workspace's key; revoked; meta over 64 KiB; seq 0, repeated, below the window, reordered, the sliding window, stored refusal versus a moved window; a far-future `ts_ms` with bounded retention; a re-stamped replay; a stream opened through `STREAM`, used by its own device and refused to another; a stream never opened; oversize; budgets (any claimed device, an open offer's own budget, pairing under a spent host budget); pairing (first, twice, status, other key, bad MAC, no offer, stale, device id not of the key, phone link with and without proof) |
-| `device_cases` | full response chunk; signed by a device key; for another device; for an unknown request; tampered tag; old timestamp, and corrected by the offset; out of order; mailbox mismatch; refusal chunk; refusal without `LAST`; a `stale_timestamp` refusal to a skewed clock, adopted once per request, out of range, for a request not pending; another refusal code to a skewed clock (not exempt) |
+| `device_cases` | full response chunk; signed by a device key; for another device; for an unknown request; tampered tag; old timestamp, and corrected by the offset; out of order; mailbox mismatch; refusal chunk; refusal without `LAST`; a `stale_timestamp` refusal to a skewed clock, adopted once per request, out of range, for a request not pending; another refusal code to a skewed clock (not exempt); direction 1; version 2; an unknown flag; over 256 KiB; another key version; another workspace; exactly 300 s old and ahead, and 300 s and 1 ms ahead; mailbox id, idx (another, and not an integer) and stream mismatches; a stream's rid answered without STREAM; a `stale_timestamp` with a non-integer `host_ms`; random body and signature (no pin failure) |
 | `pairing` | the link fragment, host pin, pairing MAC, device id, fingerprint, phone-link proof |
+| `pin_runs` | three pin failures in a row; forged chunks never count; a verified chunk resets; forged chunks neither count nor reset |
+| `pending_answers` | the `pending` answer accepted; a host key not of the pin; signed by another key; sealed under another key; no `host_pub`; not `pending` |
+| `labels` | 80 and 81 code points, ASCII and with astral characters; 41 astral characters (82 UTF-16 units, accepted) |
+| `links` | valid, with `#`, version 2, version 11, no version, upper-case workspace, upper-case pairing id, a non-canonical secret |
+| `challenge_parts` | valid; nonce upper case, 63 characters, b64u; expires_ms as a string, a boolean, negative |
 | `shown` | controls and bidi removed; invisible, format, separator, tag, variation-selector, filler, private-use and unassigned code points removed; visible text kept; no normalisation; lone surrogate |
 | `assertion` | challenge inputs and bytes, lease challenge, registration challenge, 17 verification cases with a fake authenticator |
 
 Every MUST in §3–§9 that the reference implements has a negative vector. Every host case and step also
 pins the rid record's `until` (`record_until`), and every assertion case the stored count afterwards
-(`sign_count_after`). `tests/test_bridge_protocol_mutations.py` applies 61 mutations to the reference
-(the first review's 16, the second review's 12, the third review's boundaries, and one or more for each
-rule added since) and fails unless the vectors catch every one.
+(`sign_count_after`). `tests/test_bridge_protocol_mutations.py` applies 87 mutations to the reference
+(the first review's 16, the second review's 12, the third review's boundaries, the amendment's 26, and one
+or more for each rule added since) and fails unless the vectors catch every one. The browser module's
+`tests/js/bridge-mutations.test.mjs` applies its own mutations to the production device code, and the
+vectors alone catch every one of them.
 
 Not covered by vectors yet (F2): parsing a real WebAuthn attestation object (CBOR) at registration; the
 `credential_begin` / `credential_finish` requests of a pending device; and the host's park-and-run flow of

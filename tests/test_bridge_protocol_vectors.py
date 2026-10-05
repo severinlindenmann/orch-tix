@@ -178,8 +178,65 @@ def test_device_case(c):
     ctx = {"workspace": VEC["keys"]["workspace"], "k_ws": K_WS, "key_version": 1,
            "device": VEC["ids"]["device_a"]["device_id"], "host_pub": PUB["host"],
            "pending": json.loads(json.dumps(c["pending"])), "offset_ms": c["offset_ms"]}
-    res = ref.device_check(bytes.fromhex(c["envelope"]), ctx, c["mailbox"], c["now_ms"])
-    assert {k: res.get(k) for k in c["expect"]} == c["expect"]     # offset_ms / clock_wrong: None means absent
+    env = bytes(c["envelope_zeros"]) if "envelope_zeros" in c else bytes.fromhex(c["envelope"])
+    res = ref.device_check(env, ctx, c["mailbox"], c["now_ms"])
+    assert {k: res.get(k) for k in c["expect"]} == c["expect"]     # offset_ms / clock_wrong / pin_failure: None = absent
+
+
+def test_device_cases_cover_the_amendment_list():
+    names = {c["name"] for c in VEC["device_cases"]}
+    for n in ("response_with_direction_to_host", "response_of_version_2", "response_with_an_unknown_flag",
+              "response_larger_than_256_kib", "response_of_another_key_version", "response_for_another_workspace",
+              "response_exactly_300_s_old", "response_exactly_300_s_ahead", "response_mailbox_id_differs",
+              "response_mailbox_idx_differs", "response_mailbox_says_stream",
+              "stale_timestamp_with_a_host_ms_that_is_not_an_integer", "response_random_body_and_signature"):
+        assert n in names, n
+    assert {c["name"] for c in VEC["links"]} >= {"version_2", "upper_case_workspace"}
+
+
+def device_ctx(c):
+    return {"workspace": VEC["keys"]["workspace"], "k_ws": K_WS, "key_version": 1,
+            "device": VEC["ids"]["device_a"]["device_id"], "host_pub": PUB["host"],
+            "pending": json.loads(json.dumps(c["pending"])), "offset_ms": c["offset_ms"]}
+
+
+@by_name(VEC["pin_runs"])
+def test_pin_run(c):
+    by = {d["name"]: d for d in VEC["device_cases"]}
+    res = [ref.device_check(bytes.fromhex(by[n]["envelope"]), device_ctx(by[n]), by[n]["mailbox"], by[n]["now_ms"])
+           for n in c["steps"]]
+    assert ref.pin_run(res) == c["alarm"]
+
+
+@by_name(VEC["pending_answers"])
+def test_pending_answer(c):
+    ctx = {"workspace": VEC["keys"]["workspace"], "k_ws": K_WS, "key_version": 1,
+           "device": VEC["ids"]["device_a"]["device_id"], "host_pin": c["host_pin"],
+           "pending": json.loads(json.dumps(c["pending"])), "offset_ms": 0}
+    res = ref.open_pending_answer(bytes.fromhex(c["envelope"]), ctx, c["mailbox"], c["now_ms"])
+    assert {k: v for k, v in res.items() if k != "why"} == c["expect"]
+
+
+@by_name(VEC["labels"])
+def test_label(c):
+    s = "".join(map(chr, c["codepoints"]))
+    assert ref.device_label_ok(s) is c["device_accepts"]
+    assert [ord(x) for x in ref.host_label(s)] == c["host_stores"]
+
+
+@by_name(VEC["links"])
+def test_link(c):
+    assert ref.parse_pair_fragment(c["fragment"]) == c["parsed"]
+
+
+@by_name(VEC["challenge_parts"])
+def test_challenge_parts(c):
+    try:
+        n, e = ref.parse_challenge_parts(c["meta"])
+        got = {"nonce": n.hex(), "expires_ms": e}
+    except ValueError:
+        got = None
+    assert got == c["parsed"]
 
 
 def test_pairing_link():
