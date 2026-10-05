@@ -5,7 +5,7 @@ This document says what is inside the sealed bodies that the bridge mailbox (`fi
 keys seal and sign, where each key lives, how a device is recognised, the exact bytes, and what each
 side does with an envelope that is not right.
 
-Status: **draft, revised after the first cryptography review; D1 and D8 decided by the owner** (ticket #58, part of #22 and orch-core#85).
+Status: **v1, merged (ticket #58), amended by #82**; D1 and D8 decided by the owner. Part of #22 and orch-core#85.
 The host side (orch-core R3, #89) and the TIX app side (R10, #25) implement this document. The contract
 is [`tests/bridge_vectors.json`](../tests/bridge_vectors.json). The reference implementation that
 produces it, [`tests/support/bridge_protocol_ref.py`](../tests/support/bridge_protocol_ref.py), is test
@@ -20,6 +20,34 @@ explanation.
 Primitives come only from WebCrypto and the Python `cryptography` package: AES-256-GCM with a 128-bit
 tag, HKDF-SHA-256 (RFC 5869), HMAC-SHA-256, ECDSA on P-256 with SHA-256, and SHA-256. There is no
 compression anywhere, because compression before encryption leaks content through length.
+
+## Changes since v1
+
+Amendment #82, found by the independent review of the browser module (PR #81) and by the builders of both
+sides. None changes the bytes on the wire; each fixes something the two sides would otherwise implement
+differently.
+
+- §7: a host-key failure counts only for a chunk whose tag verifies under K_ws; three in a row with no
+  verified chunk between raise "pair again". A chunk failing the tag never counts, never resets.
+- §8.1 step 3/4: the `pending` answer's meta is fixed, and it carries `host_pub`. That one response is
+  opened tag first, then pin, then signature, because the device has no host key yet.
+- §8.1 step 5: the `pair_status` answer's meta is fixed. Both pairing answers name the field `state`.
+- §6.2, §8.1: every refusal to a `pair` request carries `host_pub` and is verified like the `pending`
+  answer; an unverifiable one counts as no answer. The `pending` answer has exactly three fields.
+- §3.5: a request's meta with a duplicate key, NaN or Infinity, a non-canonical b64u field or upper-case
+  hex is `malformed`.
+- §5.3: a finished record whose body was over 64 KiB answers a replay `already_done` with its stored
+  `status`. Per-device store quotas with a recorded `busy` refusal, and a global cap past which the host
+  drops (§5.3, §6.1 step 4b).
+- §6.2: a refusal's meta carries only its code and the fields documented for it.
+- §9.2: a failed `credential_finish` is `assertion_failed` and consumes its challenge; `fmt` and `attStmt`
+  are ignored. §9.4: a fresh grant must start before `expires_ms`.
+- §15: the host dispatcher's requirements (F7).
+- §8.1 step 2: a label is at most 80 Unicode code points (not UTF-16 units).
+- §8.1 step 1: the link fragment is parsed strictly (version `v1`, lower-case hex, canonical b64u).
+- §9.2, §9.4: `nonce` is 64 lower-case hex characters and `expires_ms` a JSON integer.
+- §12: device vectors for every §7 check and edge, pin runs, pending answers, labels, links and challenge
+  parts.
 
 ## 1. Threat model for the bridge
 
@@ -289,7 +317,17 @@ without the key, it binds the exact bytes, and the device can drop a forged resp
 plaintext = meta_len (4 bytes) || meta (canonical JSON, UTF-8, at most 65,536 bytes) || data (raw bytes)
 ```
 
-A `meta_len` above 65,536 or beyond the plaintext is malformed (vector `meta_longer_than_64_kib`).
+A `meta_len` above 65,536 or beyond the plaintext is malformed (vector `meta_longer_than_64_kib`). In a
+**request**, meta with a duplicate key, NaN or Infinity, a non-canonical b64u field, or a hex field in
+upper case or of the wrong length is also `malformed` (vectors `meta_with_a_duplicate_key`,
+`meta_with_nan`, `meta_with_infinity`, `pair_request_with_upper_case_hex`, `pair_request_with_a_short_mac`).
+The device writes canonical JSON with lower-case hex only, so it never sends such meta. In the other
+direction, the host MUST NOT send response meta with duplicate keys or non-finite numbers; the device
+parses response meta with `JSON.parse` and does not re-check.
+
+The non-canonical-b64u rule is pinned by vectors where the reference parses b64u: the pairing link's S and
+host pin (`links`: `secret_not_canonical`, `host_pin_not_canonical`). The b64u fields of request meta
+(`op = "assert"` and `credential_finish`) are tested by the host library (F2).
 Canonical JSON is TIX's (`crypto.js` `canonicalJson`, Python `json.dumps(sort_keys=True,
 separators=(",", ":"), ensure_ascii=False)`). `data` is the HTTP body or the stream bytes, unencoded.
 
@@ -416,7 +454,8 @@ For a known rid whose record has not expired:
 |---|---|
 | same device, same digest, finished | a **replay**: the stored outcome, re-sealed with a fresh salt. It never runs again (vector `replay_of_finished_request`). |
 | same device, same digest, refused | the stored refusal, re-stamped with the current `host_ms` / `high` (vectors `future_timestamp_then_in_window`, `repeated_sequence_then_replayed`, `sequence_refused_then_same_bytes_after_window_moved`) |
-| same device, same digest, no outcome (still running, or the host crashed between recording and finishing) | `already_done` with `status: "unknown"`. The app says "outcome unknown", never "failed" (vector `replayed_request`). |
+| same device, same digest, finished, body over 64 KiB | the host stored only the head, with `"body_stored": false`; the replay is answered `already_done` with the stored `status` (vector `replay_of_a_finished_request_whose_body_was_not_stored`) |
+| same device, same digest, no outcome (still running, or the host crashed between recording and finishing) | `already_done` with `status: "unknown"`. Only a record that never finished answers `unknown`. The app says "outcome unknown", never "failed" (vector `replayed_request`). |
 | anything else (another device, other bytes) | `rid_conflict` (vectors `same_rid_other_content`, `replay_from_other_device_record`) |
 
 When no response arrived, a device retrying MUST resend the identical envelope bytes. The mailbox refuses
@@ -425,6 +464,29 @@ request (`DELETE /api/bridge/{space}/requests/{id}`) or waits until the route's 
 Once the record has expired, the envelope's seq is consumed, so it is refused and never runs
 (`test_replay_never_runs_twice`). The signature is not in the digest because it is malleable
 (§3.4).
+
+**Store limits.** The request store keeps at most **1024** unexpired records per device (`PER_DEVICE`) and
+**16384** in total (`MAX_RECORDS`). Both count only unexpired records.
+
+- A device that already holds `PER_DEVICE` unexpired records is refused **`busy`** at §6.1 step 4b, right
+  after the replay step and before framing, so `busy` does **not** consume the sequence number. The refusal
+  is recorded like every refusal and then sent: one response chunk with flags `LAST | REFUSAL`, seq 0, the
+  host's clock and a fresh salt, sealed and signed with the host key. Its meta is exactly
+  `{"refusal": "busy"}`, with no other field and no text. A replay re-sends the stored refusal unchanged;
+  it has no `host_ms` or `high` to re-stamp. A redelivery after the quota has freed still gets the stored
+  `busy` and never runs.
+- A device may hold up to **64** recorded `busy` refusals above its quota (`BUSY_ALLOWANCE`, so at most
+  `PER_DEVICE + BUSY_ALLOWANCE` records in all). Past that its requests are **dropped**: a refusal that
+  could not be recorded would let the same bytes run later.
+- When the store holds `MAX_RECORDS` unexpired records, a host that cannot record **drops**, whoever
+  sends. Other devices are never refused `busy` because of one device's quota.
+
+One host-wide cap alone is not enough: ordinary typing or a Look-scope device could fill it and so silence
+every device. With 1024 records and 900 s of retention, one device sustains only about 1.1 requests per
+second, so typing one request per keystroke reaches `busy` within minutes (F4).
+
+Vectors use smaller limits, given as `state.limits` (`per_device`, `max_records`, `busy_allowance`): the
+host cases whose names start with `quota_`.
 
 ## 6. What the host does with a request
 
@@ -465,6 +527,10 @@ mailbox already shows that a response exists and its size.
    `pair_refusal_for_open_offer_under_spent_host_budget`, `pair_refusal_without_offer_under_spent_host_budget`,
    `pair_refusals_spent_the_offers_own_budget`, `pair_request_under_spent_host_budget_succeeds`).
 4. **Replay.** A known rid gets §5.3's answer.
+
+   4b. **Quota.** A device holding `PER_DEVICE` unexpired records: record, then refuse `busy` (§5.3). A
+   host that cannot record (the device past its allowance, or the store at `MAX_RECORDS`) drops, at this
+   step and at every later step that records.
 5. **Framing.** If the plaintext framing or the meta JSON is invalid: record, then refuse `malformed`.
    This comes before step 6, so a malformed envelope does **not** consume its seq (vector
    `malformed_does_not_consume_its_seq`).
@@ -486,8 +552,11 @@ to 20 requests per second, which bounds that work.
 
 `malformed`, `not_paired`, `revoked`, `bad_signature`, `rid_conflict`, `already_done`,
 `stale_timestamp`, `stale_sequence`, `pairing_closed`, `forbidden_scope`, `assertion_required`,
-`lease_required`, `assertion_failed`, `scope_changed`, `stopped`. The text of a refusal is fixed per code,
-and it never echoes request content.
+`lease_required`, `assertion_failed`, `scope_changed`, `stopped`, and `busy` (§5.3, no fields). A refusal's
+meta is `{"refusal": code}` plus only the fields documented for that code: `host_ms` (`stale_timestamp`),
+`high` (`stale_sequence`), `status` (`already_done`), the challenge fields of `assertion_required` /
+`lease_required` (§9.4), and `host_pub` on **every refusal to an `op = "pair"` request** (§8.1). It carries
+no text; the device shows its own fixed text for the code, and it never echoes request content.
 
 ## 7. What the device does with a response chunk
 
@@ -510,8 +579,14 @@ Vectors: `device_cases`. A chunk that a device key signed is not a response
 answering in the host's name. A refusal chunk is shown as the host's fixed message for its code.
 
 **Host key pin failure:** when the host signature does not verify with the pinned key, the device drops
-the chunk. If that happens to every response, the app says "the host key changed: pair again". It never
-trusts a new host key on first use, and never replaces the pin without a new pairing link (D6).
+the chunk. It counts a **pin failure** only if the chunk's tag verifies under K_ws (it opens the body once
+more just to find out): a relay holding no keys can produce chunks with any signature, but not one whose
+tag verifies, so it cannot raise the alarm. After **3 pin failures in a row**, with no verified chunk
+between them, the app says "the host key changed: pair again" and drops everything from that host. A
+verified (accepted) chunk resets the run; a chunk dropped for any other reason, including a failed tag,
+neither counts nor resets it (vectors `response_signed_by_a_device` with `pin_failure: true`,
+`response_random_body_and_signature` with `pin_failure: false`, `pin_runs`). The device never trusts a new
+host key on first use, and never replaces the pin without a new pairing link (D6).
 
 ## 8. Pairing and revocation
 
@@ -531,13 +606,20 @@ trusts a new host key on first use, and never replaces the pin without a new pai
    K_ws, generates its signing key (§2.4) and sends a request with `op = "pair"`:
 
    ```
-   meta = {"op": "pair", "pairing_id": hex, "pub": hex (65 bytes), "label": text (≤ 80),
+   meta = {"op": "pair", "pairing_id": hex, "pub": hex (65 bytes), "label": text (≤ 80 code points),
            "mac": hex HMAC-SHA-256(S, "sharing/bridge/pair/v1|" || workspace || pairing_id || pub),
            "phone_id": optional, "phone_proof": optional (§8.2)}
    ```
 
    The request is signed with the new key, as proof of possession, and its header device id is
-   `device_id(workspace, pub)`.
+   `device_id(workspace, pub)`. A `label` is at most **80 Unicode code points** (scalar values), not
+   UTF-16 units: the device refuses a longer one, and the host truncates what it receives to 80 code
+   points (after cleaning it like `shown`, §9.3). Vectors: `labels`, host case
+   `pair_request_label_truncated_to_80_code_points`.
+
+   The link fragment is parsed strictly: exactly `v1`, the workspace and pairing id as 32 lower-case hex
+   characters each, S and the pin as canonical 43-character b64u of 32 bytes; anything else is not a
+   pairing link (vectors `links`).
 3. **The host**, after §6.1 steps 1 and 2, checks in this order:
    - the offer exists, is open and has not expired. An offer already used is still open to **the device
      that holds its pending pairing**: a `pair` with the same device id and the same public key (its
@@ -554,16 +636,51 @@ trusts a new host key on first use, and never replaces the pin without a new pai
    Once the offer is known to be open, these refusals count against the offer's own budget, not the
    host-wide one (§6.1). The host then marks the offer used and shows on
    the Mac the label (as text, cleaned like `shown`, §9.3), the scope, the phone link (§8.2) and the
-   **device fingerprint**. It answers `pending` in a response signed by the host key.
-4. **The device** checks that `H("sharing/bridge/host/v1|" || host_pub)` equals `host_pin` from the
-   link, then verifies the response's signature with that `host_pub`, and pins it. It registers its
+   **device fingerprint**. It answers with a response signed by the host key whose meta is
+
+   ```
+   {"state": "pending", "host_pub": hex (65 bytes), "fingerprint": the device fingerprint, as text}
+   ```
+
+   Exactly these three fields; a device ignores any other (vector
+   `pending_answer_with_an_extra_field_is_accepted`). Every **refusal** to an `op = "pair"` request
+   (`pairing_closed`, `bad_signature`, `stale_timestamp`, `malformed`) also carries `host_pub`, a documented
+   field (§6.2).
+4. **The device** cannot check this one response in §7's order, because it has no host key yet. It
+   opens the tag first (under K_ws), reads `host_pub` (as bytes), checks that
+   `H("sharing/bridge/host/v1|" || host_pub)` equals `host_pin` from the link, then verifies the response's
+   signature with that `host_pub`, and only then applies the rest of §7 (chunk order, window). If any of
+   these fails it drops the response before using anything in it. Then it pins `host_pub`.
+
+   A refusal to its `pair` request is checked the same way: the device checks the refusal's `host_pub`
+   against the link's `host_pin` and verifies the signature with it, exactly as for the `pending` answer,
+   before acting on the refusal, including adopting the clock offset from `stale_timestamp` (§5.1, once per
+   pending rid, at most 24 h). A refusal it cannot verify counts as **no answer** (§8.1's 60 s rule). Without
+   this, a device with a skewed clock could never pair, and adopting an unverified offset would let any
+   K_ws holder shift its clock by up to 24 h. The pin check is what stops this attack: a K_ws holder can
+   seal a `stale_timestamp` refusal with its **own** key as `host_pub` and sign it with that key, and the
+   signature verifies; only the pin tells the device it is not the host's (vector
+   `stale_timestamp_pair_refusal_with_its_own_host_key_gives_no_offset`). The offset is adopted once per
+   pending rid (vector `stale_timestamp_pair_refusal_adopted_once_per_request`). A `host_pub` that is not
+   65 bytes is dropped too; it can never match the pin of a 65-byte key, so no separate vector tells that
+   check apart from the pin check (an equivalent mutant).
+
+   Vectors `pending_answers`: accepted; with an extra field; a host key not of the pin; signed by another
+   key; sealed under another key; no `host_pub`; not `pending`; outside the window; out of order; the
+   mailbox says stream; a verified `pairing_closed`; a verified `stale_timestamp` that adopts the offset,
+   and one more than 24 h off; refusals with a host key not of the pin, signed by another key, without
+   `host_pub`, without a code, without `LAST`, for a request not pending, and an unverified
+   `stale_timestamp` that adopts nothing. It registers its
    platform credential now (§9.2) and shows its own device fingerprint: "compare this on your Mac".
 5. **The owner compares the fingerprints and decides on the Mac.** The Mac's default action is **Reject**.
    Approve becomes available only once the owner has confirmed the fingerprint shown on the device (for
    example by entering its last group). The Mac also shows whether a credential was registered, and
    whether it is synced (§9.6). The owner may lower the scope. The host then writes the registry entry
    and logs it (§2.7). The device asks with `op = "pair_status"` (signed with its key, read-only, so a
-   replay changes nothing) until the answer is `approved` or `rejected`.
+   replay changes nothing) until the answer is `approved` or `rejected`. The answer's meta is exactly one
+   of `{"state": "pending"}`, `{"state": "approved", "scope": <scope>}` or `{"state": "rejected"}`, nothing
+   else (vectors
+   `pair_status_approved`, `pair_status_rejected`, and the pending step of `pair_request_then_status`).
 
 A device that gets `pairing_closed` for a link it just opened, **or no answer at all within 60 s**,
 MUST say: "this link was used by someone else: reject it on your Mac". Someone else holding the link is
@@ -647,7 +764,8 @@ cannot tell a platform authenticator from software, so a later registration from
 would be invisible.
 
 1. `op = "credential_begin"`, signed with the pending device key. The host returns `nonce` (32 random
-   bytes) and `expires_ms` (now + 120 s), single use.
+   bytes, as **64 lower-case hex characters**) and `expires_ms` (now + 120 s, a **JSON integer** of
+   milliseconds), single use. Anything else is refused by the device (vectors `challenge_parts`).
 2. The device computes
    `challenge = H("sharing/bridge/webauthn-reg/v1|" || workspace || device_id || expires_ms (8) || nonce)`
    (vector `assertion.registration_challenge`) and calls `navigator.credentials.create` (§10.5).
@@ -660,7 +778,9 @@ would be invisible.
    - the COSE key is EC2, P-256, alg −7.
 
    It stores the credential id, public key, sign count, the **BE** flag (backup eligible) and BS flag,
-   the rp id and the origin with the pending registration.
+   the rp id and the origin with the pending registration. A `credential_finish` that fails any check is
+   refused `assertion_failed`, and the registration challenge is consumed either way. The host ignores
+   `fmt` and `attStmt` and checks only `authData` and the client data (attestation none is requested).
 
 ### 9.3 The challenge
 
@@ -712,7 +832,8 @@ Vectors: `shown`.
    that the route needs an assertion. It checks the **fresh-action rate limit now** (D9), before issuing
    any challenge: over the limit, R1 is refused `assertion_failed` and nothing is parked. Otherwise it
    parks R1 (its exact digest) and answers R1 with the refusal `assertion_required` (or
-   `lease_required`). The refusal carries `purpose`, `scope`, `expires_ms`, `nonce` and `subject`.
+   `lease_required`). The refusal carries `purpose`, `scope`, `expires_ms` (a JSON integer of
+   milliseconds), `nonce` (64 lower-case hex characters) and `subject`.
 2. The TIX app shows `subject.shown`, recomputes the challenge from those parts itself, and calls
    `navigator.credentials.get` with that challenge and only its own credential id (§10.5).
 3. The device sends R2 with `op = "assert"` and `{"for": R1 rid hex, "credential_id",
@@ -722,8 +843,9 @@ Vectors: `shown`.
    - **fresh**: R1 runs exactly once, after its scope is checked again, and R2's response carries R1's
      result. R1's record then takes **the result of that run** as its outcome, replacing
      `assertion_required`, so a replay of R1 gets the result (§5.3), not a new prompt. The assertion
-     allows nothing else.
-   - **lease**: the host opens a **15-minute typing lease** for that device and runs R1. The lease uses
+     allows nothing else. A fresh grant must start running before its challenge's `expires_ms`.
+   - **lease**: once R1 has passed its re-check, the host opens a **15-minute typing lease** for that
+     device and runs R1. The lease uses
      the host clock and is not kept across a host restart. While it is open, that device's requests in
      the lease's class run without a new assertion. The lease ends at 15 minutes, on revocation, scope
      change, the kill switch, host restart, or when the owner ends it.
@@ -922,20 +1044,28 @@ checked too. The `why` fields are informative and not part of the contract.
 | `seal` | header encoding, K_msg, zero nonce, AAD, `ciphertext || tag` |
 | `sign`, `sig_scalars` | valid, wrong key, changed message, the malleable twin, `r = 0`, `r = n`, `s = n`, `r = n + 1`, `r = n − 1`, short |
 | `ids` | device ids (and that another workspace gives another id), fingerprints, the host pin |
-| `host_cases` | full request; replay without an outcome, of a finished request, from another device's record; same rid with other content; old, future and edge timestamps; a future-dated envelope refused and then in the window; tampered tag and header; mailbox id mismatch; wrong-device signature; unknown device; refusal budget (unverified dropped, signed still runs); unknown version, direction, flag; another workspace's key; revoked; meta over 64 KiB; seq 0, repeated, below the window, reordered, the sliding window, stored refusal versus a moved window; a far-future `ts_ms` with bounded retention; a re-stamped replay; a stream opened through `STREAM`, used by its own device and refused to another; a stream never opened; oversize; budgets (any claimed device, an open offer's own budget, pairing under a spent host budget); pairing (first, twice, status, other key, bad MAC, no offer, stale, device id not of the key, phone link with and without proof) |
-| `device_cases` | full response chunk; signed by a device key; for another device; for an unknown request; tampered tag; old timestamp, and corrected by the offset; out of order; mailbox mismatch; refusal chunk; refusal without `LAST`; a `stale_timestamp` refusal to a skewed clock, adopted once per request, out of range, for a request not pending; another refusal code to a skewed clock (not exempt) |
+| `host_cases` | the store quotas (`quota_*`: under, at the limit, another device unaffected, busy recorded and replayed after the quota frees, busy does not consume the seq, past the allowance, the global cap, expired records); full request; a replay of a finished request whose body was not stored; meta with a duplicate key, NaN, Infinity; a pair request with upper-case hex or a short MAC; replay without an outcome, of a finished request, from another device's record; same rid with other content; old, future and edge timestamps; a future-dated envelope refused and then in the window; tampered tag and header; mailbox id mismatch; wrong-device signature; unknown device; refusal budget (unverified dropped, signed still runs); unknown version, direction, flag; another workspace's key; revoked; meta over 64 KiB; seq 0, repeated, below the window, reordered, the sliding window, stored refusal versus a moved window; a far-future `ts_ms` with bounded retention; a re-stamped replay; a stream opened through `STREAM`, used by its own device and refused to another; a stream never opened; oversize; budgets (any claimed device, an open offer's own budget, pairing under a spent host budget); pairing (first, twice, status, other key, bad MAC, no offer, stale, device id not of the key, phone link with and without proof) |
+| `device_cases` | full response chunk; signed by a device key; for another device; for an unknown request; tampered tag; old timestamp, and corrected by the offset; out of order; mailbox mismatch; refusal chunk; refusal without `LAST`; a `stale_timestamp` refusal to a skewed clock, adopted once per request, out of range, for a request not pending; another refusal code to a skewed clock (not exempt); direction 1; version 2; an unknown flag; over 256 KiB; another key version; another workspace; exactly 300 s old and ahead, and 300 s and 1 ms ahead; mailbox id, idx (another, and not an integer) and stream mismatches; a stream's rid answered without STREAM; a `stale_timestamp` with a non-integer `host_ms`; random body and signature (no pin failure) |
 | `pairing` | the link fragment, host pin, pairing MAC, device id, fingerprint, phone-link proof |
+| `pin_runs` | three pin failures in a row; forged chunks never count; a verified chunk resets; forged chunks neither count nor reset |
+| `pending_answers` | every answer to a `pair` request: the `pending` answer accepted, with an extra field, with a host key not of the pin, signed by another key, sealed under another key, without `host_pub`, not `pending`, outside the window, out of order, the mailbox says stream; refusals verified (`pairing_closed`, `stale_timestamp` adopting the offset, more than 24 h off) and unverifiable (host key not of the pin, another signer, no `host_pub`, no code, no `LAST`, not pending, an unverified `stale_timestamp`) |
+| `labels` | 80 and 81 code points, ASCII and with astral characters; 41 astral characters (82 UTF-16 units, accepted) |
+| `links` | valid, with `#`, version 2, version 11, no version, upper-case workspace, upper-case pairing id, a non-canonical secret, a non-canonical host pin |
+| `challenge_parts` | valid; nonce upper case, 63 characters, b64u; expires_ms as a string, a boolean, negative |
 | `shown` | controls and bidi removed; invisible, format, separator, tag, variation-selector, filler, private-use and unassigned code points removed; visible text kept; no normalisation; lone surrogate |
 | `assertion` | challenge inputs and bytes, lease challenge, registration challenge, 17 verification cases with a fake authenticator |
 
 Every MUST in §3–§9 that the reference implements has a negative vector. Every host case and step also
 pins the rid record's `until` (`record_until`), and every assertion case the stored count afterwards
-(`sign_count_after`). `tests/test_bridge_protocol_mutations.py` applies 61 mutations to the reference
-(the first review's 16, the second review's 12, the third review's boundaries, and one or more for each
-rule added since) and fails unless the vectors catch every one.
+(`sign_count_after`). `tests/test_bridge_protocol_mutations.py` applies 117 mutations to the reference
+(the first review's 16, the second review's 12, the third review's boundaries, the amendment's 56, and one
+or more for each rule added since) and fails unless the vectors catch every one. The browser module's
+`tests/js/bridge-mutations.test.mjs` applies its own mutations to the production device code, and the
+vectors alone catch every one of them.
 
 Not covered by vectors yet (F2): parsing a real WebAuthn attestation object (CBOR) at registration; the
-`credential_begin` / `credential_finish` requests of a pending device; and the host's park-and-run flow of
+`credential_begin` / `credential_finish` requests of a pending device; the non-canonical-b64u rule on the
+b64u fields of request meta (tested by the host library); and the host's park-and-run flow of
 §9.4 (when the fresh-action rate limit is checked, and R1's outcome after it ran). The reference checks
 an assertion (§9.5) but does not run that flow.
 
@@ -1020,7 +1150,9 @@ exception (D4).
   - pairing offer: 10 minutes, single use;
   - assertion and registration challenges: 120 s;
   - rid records: `received_at + 900 s`, refusals included (never from `ts_ms`);
-  - stored replay body: 64 KiB;
+  - stored replay body: 64 KiB (beyond it only the head, `body_stored: false`);
+  - request store: 1024 unexpired records per device, 16384 in total; 64 recorded `busy` refusals above a
+    device's quota, then its requests are dropped (§5.3);
   - refusal budget: 10 per minute, host-wide; 5 per minute for each open pairing offer;
   - clock offset a device adopts: at most 24 h, once per pending request;
   - a pairing with no answer: 60 s, then the "used by someone else" warning;
@@ -1035,7 +1167,23 @@ exception (D4).
   `credential_begin` / `credential_finish`, with R3.
 - **F3:** the HTTP mapping inside `meta` (method, path, header allow-list, the remote client address) is
   R2/R3's; this document fixes only the envelope around it.
-- **F4:** keystroke requests show typing rhythm and length to the server (§4); R6 should batch or pad
-  them.
+- **F4 (R6, the terminal client), MUST:** the terminal client MUST batch input, or use a stream with its
+  own accounting. With 1024 records per device and 900 s of retention, a device sustains only about 1.1
+  requests per second, so unbatched typing (one request per keystroke) reaches `busy` within minutes.
+  Keystroke requests also show typing rhythm and length to the server (§4), which batching or padding
+  reduces.
 - **F5:** update `docs/threat-model.md` with the bridge's cleartext header fields once R3 and R10 ship.
 - **F6:** a KEK with the `unwrapKey` usage, so that raw MK never reaches JavaScript (§10.1).
+- **F7 (R3b, the host's dispatcher):**
+  - it MUST call `Host.still_authorized(run)` immediately before running, and again before sealing every
+    stream frame, ending the stream with the stored refusal when that returns False;
+  - when `finish()` returns False, it MUST send the record's stored refusal;
+  - offers, approvals and rejections run under the host lock;
+  - the random source is `os.urandom`;
+  - a damaged registry or store is shown to the owner, not just dropped.
+- **F8 (done):** the `busy` refusal's wire details and the store quotas are normative in §5.3, aligned with
+  the host library (orch-core PR #144), and have vectors (`quota_*`).
+- **F9 (R10b, the TIX app), MUSTs:** R10b parses `nonce` with `/^[0-9a-f]{64}$/` and `expires_ms` with
+  `Number.isSafeInteger(x) && x >= 0` before calling `assertionChallenge` or `registrationChallenge`;
+  `crypto.js` `hexToBytes` accepts upper case and must not be used unguarded. R10b opens every answer to a
+  `pair` request (the `pending` answer and every refusal) with the §8.1 step 4 check.

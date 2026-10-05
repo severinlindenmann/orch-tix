@@ -40,9 +40,14 @@ MAX_META = 64 * 1024
 WINDOW_MS = 300_000                                  # each way
 SEQ_WINDOW = 64
 RID_RETENTION_MS = 900_000
+PER_DEVICE = 1024                                    # unexpired records of one device before it is refused `busy`
+MAX_RECORDS = 16384                                  # unexpired records in total; past that the host drops
+BUSY_ALLOWANCE = 64                                  # recorded `busy` refusals a device may hold above PER_DEVICE
 BUDGET = 10                                          # unverified refusals per minute, host-wide (§6.1)
 OFFER_BUDGET = 5                                     # refusals per minute for one open pairing offer (§8.1)
 MAX_OFFSET_MS = 24 * 3600 * 1000                     # a device adopts at most this clock offset (§5.1)
+PIN_FAILURES = 3                                     # pin failures in a row before "pair again" (§7)
+MAX_LABEL = 80                                       # code points (§8.1)
 BUDGET_WINDOW_MS = 60_000
 ZERO_NONCE = bytes(12)
 ZERO_ID = bytes(16)
@@ -203,16 +208,39 @@ def frame(meta: dict, data: bytes = b"") -> bytes:
     return struct.pack(">I", len(m)) + m + data
 
 
-def unframe(pt: bytes) -> tuple[dict, bytes]:
+def _no_duplicates(pairs):
+    keys = [k for k, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate key")
+    return dict(pairs)
+
+
+def _no_constant(name):
+    raise ValueError(f"{name} is not JSON")
+
+
+def unframe(pt: bytes, strict: bool = False) -> tuple[dict, bytes]:
+    """strict (a request's meta, §3.5): a duplicate key, NaN or Infinity is malformed."""
     if len(pt) < 4:
         raise ValueError("short plaintext")
     n = struct.unpack(">I", pt[:4])[0]
     if n > MAX_META or 4 + n > len(pt):
         raise ValueError("bad meta length")
-    meta = json.loads(pt[4:4 + n].decode("utf-8"))
+    raw = pt[4:4 + n].decode("utf-8")
+    meta = json.loads(raw, object_pairs_hook=_no_duplicates, parse_constant=_no_constant) if strict else json.loads(raw)
     if not isinstance(meta, dict):
         raise ValueError("meta is not an object")
     return meta, pt[4 + n:]
+
+
+_HEX = __import__("re").compile(r"(?:[0-9a-f]{2})*")
+
+
+def hexfield(v, n_bytes: int) -> bytes:
+    """A hex field of a request's meta (§3.5): lower-case, exactly n_bytes. Anything else is malformed."""
+    if not isinstance(v, str) or len(v) != 2 * n_bytes or not _HEX.fullmatch(v):
+        raise ValueError("not lower-case hex of the right length")
+    return bytes.fromhex(v)
 
 
 def seal_body(k_ws: bytes, header: bytes, plaintext: bytes) -> bytes:
@@ -268,8 +296,31 @@ def _unverified(state: dict, now_ms: int, code: str, bucket: dict | None = None,
     return _refuse(code, **extra)
 
 
+class StoreFull(Exception):
+    """MAX_RECORDS unexpired records exist: nothing new can be recorded, so nothing new may be sent or run."""
+
+
+class DeviceFull(Exception):
+    """This device holds PER_DEVICE + BUSY_ALLOWANCE unexpired records: nothing more of it can be recorded."""
+
+
+def _limits(state) -> dict:
+    """The store limits (§5.3). A vector may set smaller ones in its state; the protocol's are the defaults."""
+    return {"per_device": PER_DEVICE, "max_records": MAX_RECORDS, "busy_allowance": BUSY_ALLOWANCE,
+            **state.get("limits", {})}
+
+
+def _count_for(state, device: str, now_ms: int) -> int:
+    return sum(1 for rec in state["rids"].values() if rec["device"] == device and now_ms < rec["until"])
+
+
 def _record(state, h: Header, env: bytes, now_ms: int, outcome) -> None:
     """Persisted (on a real host) before the refusal is sent or the request runs."""
+    lim = _limits(state)
+    if sum(1 for rec in state["rids"].values() if now_ms < rec["until"]) >= lim["max_records"]:
+        raise StoreFull()
+    if _count_for(state, h.device.hex(), now_ms) >= lim["per_device"] + lim["busy_allowance"]:
+        raise DeviceFull()
     state["rids"][h.rid.hex()] = {"device": h.device.hex(), "digest": digest(env).hex(), "outcome": outcome,
                                   "until": now_ms + RID_RETENTION_MS}       # never from the sender's ts_ms
 
@@ -326,7 +377,7 @@ def host_check(env: bytes, state: dict, now_ms: int, mailbox_id: str | None = No
     dev = state["devices"].get(did)
     if dev is None:
         try:
-            meta, _ = unframe(pt)
+            meta, _ = unframe(pt, strict=True)
         except ValueError:
             return _unverified(state, now_ms, "malformed")
         if meta.get("op") == "pair":
@@ -337,7 +388,10 @@ def host_check(env: bytes, state: dict, now_ms: int, mailbox_id: str | None = No
                 return _unverified(state, now_ms, "bad_signature")
             if abs(now_ms - h.ts_ms) > WINDOW_MS:
                 return _unverified(state, now_ms, "stale_timestamp", host_ms=now_ms)
-            return {"result": "pair_status", "state": waiting["state"]}     # read-only: a replay changes nothing
+            answer = {"state": waiting["state"]}                                 # read-only: a replay changes nothing
+            if waiting["state"] == "approved":
+                answer["scope"] = waiting["scope"]
+            return {"result": "pair_status", "answer": answer}
         return _unverified(state, now_ms, "not_paired")
     if dev.get("revoked"):
         return _unverified(state, now_ms, "revoked")
@@ -358,11 +412,26 @@ def host_check(env: bytes, state: dict, now_ms: int, mailbox_id: str | None = No
                 if "high" in extra:
                     extra["high"] = dev["high"]
                 return _refuse(out["refusal"], **extra)
+            if out.get("body_stored") is False:        # over 64 KiB: only the head was kept
+                return _refuse("already_done", status=out["status"])
             return {"result": "replay", "outcome": out}
         return _refuse("rid_conflict")
-    # 5. from here every refusal is recorded before it is sent
+    # from here every refusal is recorded before it is sent; a host that cannot record drops
     try:
-        meta, data = unframe(pt)
+        return _record_and_run(state, h, env, pt, dev, did, rid, now_ms)
+    except StoreFull:
+        return _drop("store_full")
+    except DeviceFull:
+        return _drop("busy_unrecordable")      # an unrecorded refusal could let the same bytes run later
+
+
+def _record_and_run(state, h, env, pt, dev, did, rid, now_ms):
+    # 4b. the device's quota, before framing and sequence: `busy` does not consume the seq (§5.3)
+    if _count_for(state, did, now_ms) >= _limits(state)["per_device"]:
+        return _recorded_refusal(state, h, env, now_ms, "busy")
+    # 5. framing
+    try:
+        meta, data = unframe(pt, strict=True)
     except ValueError:
         return _recorded_refusal(state, h, env, now_ms, "malformed")
     # sequence BEFORE time: a stale_timestamp refusal consumes its seq, so the same bytes can never run
@@ -382,15 +451,17 @@ def host_check(env: bytes, state: dict, now_ms: int, mailbox_id: str | None = No
 
 def _pair(state, h, hb, body, sig, meta, now_ms):
     try:
-        pid, pub, mac = meta["pairing_id"], bytes.fromhex(meta["pub"]), bytes.fromhex(meta["mac"])
+        pid, pub, mac = meta["pairing_id"], hexfield(meta["pub"], 65), hexfield(meta["mac"], 32)
+        hexfield(pid, 16)
         offer = state["offers"].get(pid)
     except (KeyError, TypeError, ValueError, AttributeError):
-        return _unverified(state, now_ms, "malformed")
+        return _unverified(state, now_ms, "malformed", host_pub=state["host_pub"])
     held = state.get("pending_pairs", {}).get(h.device.hex()) or {}
     resend = held.get("pairing_id") == pid and held.get("pub") == pub.hex()   # its `pending` answer was lost
     if offer is None or now_ms >= offer["expires_ms"] or (offer.get("used") and not resend):
-        return _unverified(state, now_ms, "pairing_closed")
-    ob = {"bucket": offer, "limit": OFFER_BUDGET}  # an open offer is not starved by the host-wide budget
+        return _unverified(state, now_ms, "pairing_closed", host_pub=state["host_pub"])
+    # an open offer is not starved by the host-wide budget; every refusal to a pair carries host_pub (§6.2, §8.1)
+    ob = {"bucket": offer, "limit": OFFER_BUDGET, "host_pub": state["host_pub"]}
     if device_id(h.workspace, pub) != h.device or not verify(pub, sig, signed_bytes(hb, body)):
         return _unverified(state, now_ms, "bad_signature", **ob)
     want = pair_mac(bytes.fromhex(offer["secret"]), h.workspace, bytes.fromhex(pid), pub)
@@ -400,22 +471,67 @@ def _pair(state, h, hb, body, sig, meta, now_ms):
         return _unverified(state, now_ms, "stale_timestamp", host_ms=now_ms, **ob)
     if resend:                                     # nothing changes: the same answer again
         return {"result": "pair_pending", "fingerprint": device_fingerprint(pub), "device": h.device.hex(),
-                "scope": held["scope"], "phone_link": held["phone_link"]}
+                "scope": held["scope"], "phone_link": held["phone_link"], "label": held["label"],
+                "answer": pending_answer(state, pub)}
     offer["used"] = True
     link = None                                    # a phone link is recorded only with its proof (§8.2)
     phone_key = state.get("phones", {}).get(str(meta.get("phone_id", "")))
     if phone_key is not None:
         try:
-            proof = bytes.fromhex(meta.get("phone_proof", ""))
+            proof = hexfield(meta.get("phone_proof", ""), 32)
         except (TypeError, ValueError):
             proof = b""
         if hmac.compare_digest(phone_link_proof(bytes.fromhex(phone_key), h.device), proof):
             link = meta["phone_id"]
     state.setdefault("pending_pairs", {})[h.device.hex()] = {"pub": pub.hex(), "state": "pending", "pairing_id": pid,
                                                              "scope": offer["scope"], "phone_link": link,
-                                                             "label": clean_shown(str(meta.get("label", "")))[:80]}
+                                                             "label": host_label(str(meta.get("label", "")))}
     return {"result": "pair_pending", "fingerprint": device_fingerprint(pub), "device": h.device.hex(),
-            "scope": offer["scope"], "phone_link": link}
+            "scope": offer["scope"], "phone_link": link, "label": host_label(str(meta.get("label", ""))),
+            "answer": pending_answer(state, pub)}
+
+
+def pending_answer(state, pub: bytes) -> dict:
+    """The meta of the `pending` response (§8.1 step 3): it carries the host key the device pins."""
+    return {"state": "pending", "host_pub": state["host_pub"], "fingerprint": device_fingerprint(pub)}
+
+
+def host_label(s: str) -> str:
+    """The host stores a label cleaned like `shown` and truncated to 80 CODE POINTS (§8.1)."""
+    return clean_shown(s)[:MAX_LABEL]
+
+
+def device_label_ok(s: str) -> bool:
+    """The device refuses a label that is not scalar values or longer than 80 code points (§8.1)."""
+    return not any(0xD800 <= ord(c) <= 0xDFFF for c in s) and len(s) <= MAX_LABEL
+
+
+_FRAGMENT = __import__("re").compile(r"#?v1\.([0-9a-f]{32})\.([0-9a-f]{32})\.([A-Za-z0-9_-]{43})\.([A-Za-z0-9_-]{43})")
+
+
+def parse_pair_fragment(fragment: str):
+    """The pairing link fragment (§8.1), strictly: version v1, lower-case hex, canonical 32-byte b64u. None if not."""
+    m = _FRAGMENT.fullmatch(fragment) if isinstance(fragment, str) else None
+    if not m:
+        return None
+    s, pin = unb64u(m.group(3)), unb64u(m.group(4))
+    if len(s) != 32 or len(pin) != 32 or b64u(s) != m.group(3) or b64u(pin) != m.group(4):
+        return None
+    return {"workspace": m.group(1), "pairing_id": m.group(2), "secret": s.hex(), "host_pin": pin.hex()}
+
+
+_NONCE = __import__("re").compile(r"[0-9a-f]{64}")
+
+
+def parse_challenge_parts(meta: dict) -> tuple[bytes, int]:
+    """`nonce` and `expires_ms` of an assertion_required / credential_begin answer (§9.2, §9.4): 64 lower-case
+    hex characters, and a JSON integer of milliseconds. Raises ValueError otherwise."""
+    nonce, exp = meta.get("nonce"), meta.get("expires_ms")
+    if not isinstance(nonce, str) or not _NONCE.fullmatch(nonce):
+        raise ValueError("nonce must be 64 lower-case hex characters")
+    if type(exp) is not int or exp < 0:
+        raise ValueError("expires_ms must be a non-negative integer")
+    return bytes.fromhex(nonce), exp
 
 
 # --- the device's checks on a response chunk (§7) ------------------------------------------------
@@ -441,7 +557,13 @@ def device_check(env: bytes, ctx: dict, mailbox: dict, now_ms: int) -> dict:
             (h.rid.hex(), h.seq, bool(h.flags & F_LAST), bool(h.flags & F_STREAM)) or pend["stream"] != mailbox["stream"]:
         return _drop("mailbox_mismatch")
     if not verify(ctx["host_pub"], sig, signed_bytes(hb, body)):
-        return _drop("host_signature")
+        # only a K_ws holder can make the tag verify: only such a chunk is evidence the host key changed (§7)
+        try:
+            open_body(ctx["k_ws"], hb, body)
+            pin_failure = True
+        except InvalidTag:
+            pin_failure = False
+        return {**_drop("host_signature"), "pin_failure": pin_failure}
     try:
         meta, data = unframe(open_body(ctx["k_ws"], hb, body))
     except (InvalidTag, ValueError):
@@ -454,6 +576,68 @@ def device_check(env: bytes, ctx: dict, mailbox: dict, now_ms: int) -> dict:
         # the host says this device's clock is off: never dropped for that clock, and adopted at most once
         # per pending request and only within 24 h (§5.1)
         if not pend.get("offset_adopted"):
+            pend["offset_adopted"] = True
+            off = meta["host_ms"] - now_ms
+            if abs(off) <= MAX_OFFSET_MS:
+                res["offset_ms"] = off
+            else:
+                res["clock_wrong"] = True
+    elif abs(now_ms + ctx.get("offset_ms", 0) - h.ts_ms) > WINDOW_MS:
+        return _drop("stale_timestamp")
+    pend["next"] += 1
+    return res
+
+
+def pin_run(results: list[dict]) -> list[bool]:
+    """After each device_check result: has the device said "the host key changed: pair again"? A pin failure counts;
+    a verified (accepted) chunk resets the run; any other drop neither counts nor resets (§7)."""
+    run, alarm, out = 0, False, []
+    for r in results:
+        if r.get("pin_failure"):
+            run += 1
+            alarm = alarm or run >= PIN_FAILURES
+        elif r["result"] == "accept":
+            run = 0
+        out.append(alarm)
+    return out
+
+
+def open_pending_answer(env: bytes, ctx: dict, mailbox: dict, now_ms: int) -> dict:
+    """Every answer to a `pair` request (§8.1 step 4): the `pending` answer, or a refusal. Checked before the device
+    has a host key: ctx has `host_pin` (from the link) instead of `host_pub`. Tag first, then the pin of the
+    `host_pub` it carries, then the signature with that key; then the rest of §7, where a verified
+    `stale_timestamp` refusal is exempt from the window and gives the offset. A drop counts as no answer."""
+    if not OVERHEAD <= len(env) <= MAX_CHUNK:
+        return _drop("size")
+    hb, body, sig = split(env)
+    h = Header.decode(hb)
+    if h.magic != MAGIC or h.version != VERSION or h.direction != TO_DEVICE or h.flags not in (F_LAST, F_LAST | F_REFUSAL):
+        return _drop("version_direction_or_flags")
+    refusal = bool(h.flags & F_REFUSAL)
+    if h.key_version != ctx["key_version"] or h.workspace.hex() != ctx["workspace"] or h.device.hex() != ctx["device"]:
+        return _drop("not_for_this_device")
+    pend = ctx["pending"].get(h.rid.hex())
+    if pend is None:
+        return _drop("unknown_request")
+    if (mailbox["id"], mailbox["idx"], mailbox["last"], mailbox["stream"]) != (h.rid.hex(), h.seq, True, False):
+        return _drop("mailbox_mismatch")
+    try:
+        meta, _ = unframe(open_body(ctx["k_ws"], hb, body))
+        host_pub = bytes.fromhex(meta["host_pub"])
+    except (InvalidTag, ValueError, KeyError, TypeError):
+        return _drop("tag_or_meta")
+    if len(host_pub) != 65 or (meta.get("refusal") is None if refusal else meta.get("state") != "pending"):
+        return _drop("not_a_pairing_answer")
+    if not hmac.compare_digest(host_pin(host_pub), bytes.fromhex(ctx["host_pin"])):
+        return _drop("host_pin")
+    if not verify(host_pub, sig, signed_bytes(hb, body)):
+        return _drop("host_signature")
+    if h.seq != pend["next"]:
+        return _drop("out_of_order")
+    res = {"result": "accept", "host_pub": host_pub.hex(), "fingerprint": None if refusal else meta.get("fingerprint"),
+           "refusal": meta["refusal"] if refusal else None, "offset_ms": None, "clock_wrong": None}
+    if refusal and meta["refusal"] == "stale_timestamp" and type(meta.get("host_ms")) is int:
+        if not pend.get("offset_adopted"):         # verified, so its clock may be adopted (§5.1)
             pend["offset_adopted"] = True
             off = meta["host_ms"] - now_ms
             if abs(off) <= MAX_OFFSET_MS:
@@ -546,6 +730,9 @@ def verify_assertion(cred: dict, pending: dict, sender_device: str, a: dict, now
     cred["sign_count"] = count
     return {"result": "verified"}
 
+
+# Every key of a host_check result that a vector's `expect` pins: an expect lists ALL of them the result has.
+HOST_EXPECT_KEYS = ("result", "code", "scope", "meta", "data", "outcome", "high", "fingerprint", "answer", "label", "status", "host_pub", "phone_link", "host_ms")
 
 # --- the vector file ------------------------------------------------------------------------------
 
@@ -646,7 +833,8 @@ def build() -> dict:
                                           "high": 0, "bitmap": 0},
                             dev_b.hex(): {"pub": keys["device_b"]["pub"], "scope": "look", "revoked": False,
                                           "high": 0, "bitmap": 0}},
-                "rids": {}, "offers": {}, "pending_pairs": {}, "phones": {}, "streams": {}, "unverified": []}
+                "rids": {}, "offers": {}, "pending_pairs": {}, "phones": {}, "streams": {}, "unverified": [],
+                "host_pub": keys["host"]["pub"]}
 
     def jstate(s):
         return {k: v for k, v in s.items() if k != "k_ws"}
@@ -658,8 +846,7 @@ def build() -> dict:
     full = req(meta={"op": "http", "method": "POST", "path": "/api/tickets/T-1/move",
                      "headers": {"content-type": "application/json"}}, data=b'{"to":"testing"}', seq=7)
     host_cases = []
-    keep = ("result", "code", "scope", "meta", "data", "outcome", "high", "fingerprint", "state", "status",
-            "phone_link", "host_ms")
+    keep = HOST_EXPECT_KEYS
 
     def case(name, env, st, now_ms, mutate=None, mailbox_id=None):
         s = st if st is not None else state()
@@ -708,6 +895,18 @@ def build() -> dict:
     done["rids"][fake("rid-7")[:16].hex()]["outcome"] = {"status": 200}
     case("replay_of_finished_request", full, done, now + 30_000)
     host_cases.pop(-2)
+    big_done = case("replay_of_a_finished_request_whose_body_was_not_stored", full, None, now + 1500)
+    big_done["rids"][fake("rid-7")[:16].hex()]["outcome"] = {"status": 200, "body_stored": False}
+    case("replay_of_a_finished_request_whose_body_was_not_stored", full, big_done, now + 30_000)
+    host_cases.pop(-2)
+
+    def raw_meta(text):
+        b_ = text.encode()
+        return struct.pack(">I", len(b_)) + b_
+
+    case("meta_with_a_duplicate_key", req(seq=5, raw_pt=raw_meta('{"op":"http","op":"cancel"}')), None, now)
+    case("meta_with_nan", req(seq=5, raw_pt=raw_meta('{"op":"http","n":NaN}')), None, now)
+    case("meta_with_infinity", req(seq=5, raw_pt=raw_meta('{"op":"http","n":-Infinity}')), None, now)
     case("replay_from_other_device_record", full, None, now + 1500,
          lambda s: s["rids"].update({fake("rid-7")[:16].hex(): {"device": dev_b.hex(), "digest": digest(full).hex(),
                                                                 "outcome": {"status": 200}, "until": now + 900_000}}))
@@ -770,6 +969,46 @@ def build() -> dict:
                                              (req(seq=69, rid=fake("rid-69b")[:16]), now + 30)], da(high=6, bitmap=1))
     case("oversize", b"\x00" * (MAX_REQUEST + 1), None, now)
 
+    # the request store's quotas (§5.3), with small limits in the vector's state
+    def held(device, n, until, tag):
+        """n unexpired records of `device` (other requests, still within their retention)."""
+        def f(s):
+            for i in range(n):
+                s["rids"][fake(f"held-{tag}-{device.hex()}-{i}")[:16].hex()] = {
+                    "device": device.hex(), "digest": "00" * 32, "outcome": {"status": 200}, "until": until}
+        return f
+
+    def limits(**kw):
+        return lambda s: s.update(limits=kw)
+
+    def both(*fs):
+        return lambda s: [f(s) for f in fs]
+
+    q = limits(per_device=2, max_records=16, busy_allowance=1)
+    case("quota_under_runs", req(seq=3), None, now, both(q, held(dev_a, 1, now + 500_000, "u")))
+    case("quota_at_limit_refused_busy", req(seq=3), None, now, both(q, held(dev_a, 2, now + 500_000, "q")))
+    case("quota_other_device_unaffected", req(signer="device_b", device=dev_b, seq=1), None, now,
+         both(q, held(dev_a, 2, now + 500_000, "o")))
+    busy_req = req(seq=3, rid=fake("busy-rid")[:16])
+    # busy is recorded and replayable; after the quota frees, a redelivery replays the stored busy and never runs
+    chain("quota_busy_recorded_then_replayed_after_the_quota_frees",
+          [(busy_req, now), (busy_req, now + 1000), (busy_req, now + 600_000)],
+          both(q, held(dev_a, 2, now + 500_000, "r")))
+    # busy does not consume the seq: once the quota frees, another request with the same seq runs
+    chain("quota_busy_does_not_consume_the_seq",
+          [(busy_req, now), (req(seq=3, rid=fake("after-busy")[:16], ts=now + 600_000), now + 600_000)],
+          both(q, held(dev_a, 2, now + 500_000, "s")))
+    # past the allowance the request is dropped: its busy could not be recorded
+    case("quota_past_the_busy_allowance_dropped", req(seq=3), None, now, both(q, held(dev_a, 3, now + 500_000, "p")))
+    case("quota_past_the_allowance_other_device_still_runs", req(signer="device_b", device=dev_b, seq=1), None, now,
+         both(q, held(dev_a, 3, now + 500_000, "pb")))
+    # the global cap: a host that cannot record drops, whoever sends
+    case("quota_store_full_drops", req(signer="device_b", device=dev_b, seq=1), None, now,
+         both(limits(per_device=2, max_records=3, busy_allowance=1), held(dev_a, 2, now + 500_000, "g"),
+              held(dev_b, 1, now + 500_000, "gb")))
+    case("quota_expired_records_do_not_count", req(seq=3), None, now,
+         both(q, held(dev_a, 2, now, "e")))
+
     # streams belong to the device that opened them (§4)
     term = fake("terminal-stream")[:16]
 
@@ -801,6 +1040,8 @@ def build() -> dict:
 
     case("pair_request_bad_mac", pair({**pair_meta, "mac": fake("wrong")[:32].hex()}), None, now, offer)
     case("pair_request_no_offer", pair(), None, now)
+    case("pair_request_with_upper_case_hex", pair({**pair_meta, "pub": new_pub.hex().upper()}), None, now, offer)
+    case("pair_request_with_a_short_mac", pair({**pair_meta, "mac": good_mac.hex()[:62]}), None, now, offer)
     spent = lambda s: s.update(unverified=[now - i for i in range(BUDGET)])   # noqa: E731
     case("pair_refusal_for_open_offer_under_spent_host_budget", pair({**pair_meta, "mac": fake("wrong")[:32].hex()}),
          None, now, lambda s: (offer(s), spent(s)))
@@ -824,6 +1065,12 @@ def build() -> dict:
                                        (pair(status, signer="device_b", seq=4), now + 3000),
                                        (pair(other_pair, device=other_id, signer="authenticator", seq=1), now + 4000)], offer)
     case("pair_status_without_pairing", pair(status, seq=3), None, now)
+    for verdict in ("approved", "rejected"):
+        case(f"pair_status_{verdict}", pair(status, seq=3), None, now, lambda s, v=verdict: s["pending_pairs"].update(
+            {new_id.hex(): {"pub": new_pub.hex(), "state": v, "pairing_id": pid.hex(), "scope": "decide",
+                            "phone_link": None, "label": "Phone"}}))
+    long_label = "\U0001F44D" * 81                 # 81 code points, 162 UTF-16 units
+    case("pair_request_label_truncated_to_80_code_points", pair({**pair_meta, "label": long_label}), None, now, offer)
     out["host_cases"] = host_cases
     out["pairing"] = {"workspace": ws_hex, "pairing_id": pid.hex(), "secret": secret.hex(),
                       "host_pub": keys["host"]["pub"], "host_pin": host_pin(pub["host"]).hex(),
@@ -847,8 +1094,10 @@ def build() -> dict:
 
     dev_cases = []
 
-    def dcase(name, env, now_ms=now + 2500, mailbox=None, offset=0, adopted=False):
+    def dcase(name, env, now_ms=now + 2500, mailbox=None, offset=0, adopted=False, stream_pending=False):
         c = ctx(offset, adopted)
+        if stream_pending:
+            c["pending"][rid.hex()]["stream"] = True
         hh = Header.decode(env)
         mb = mailbox or {"id": hh.rid.hex(), "idx": hh.seq, "last": bool(hh.flags & F_LAST),
                          "stream": bool(hh.flags & F_STREAM)}
@@ -857,7 +1106,8 @@ def build() -> dict:
         dev_cases.append({"name": name, "envelope": env.hex(), "mailbox": mb, "pending": pend_before,
                           "offset_ms": offset, "now_ms": now_ms,
                           "expect": {**{k: v for k, v in res.items() if k in ("result", "last", "refusal", "meta", "data")},
-                                     "offset_ms": res.get("offset_ms"), "clock_wrong": res.get("clock_wrong")}})
+                                     "offset_ms": res.get("offset_ms"), "clock_wrong": res.get("clock_wrong"),
+                                     "pin_failure": res.get("pin_failure")}})
 
     ok = resp(data=b'{"moved":true}')
     dcase("full_response_chunk", ok)
@@ -885,7 +1135,172 @@ def build() -> dict:
                r=fake("old-request")[:16]), now_ms=skew)
     dcase("other_refusal_to_a_skewed_clock_is_not_exempt",
           resp(flags=F_LAST | F_REFUSAL, meta={"refusal": "rid_conflict", "host_ms": now + 2000}), now_ms=skew)
+    def raw_resp(direction=TO_DEVICE, flags=F_LAST, version=VERSION, key_version=1, workspace=ws, ts=now + 2000,
+                 meta=None, signer="host"):
+        h = Header(direction, flags, workspace, dev_a, rid, ZERO_ID, 0, ts, fake(f"salt-raw-{direction}-{flags}-{version}"
+                   f"-{key_version}-{workspace.hex()}-{ts}")[:16], key_version, version)
+        return envelope(k_ws, pk[signer], h, frame(meta if meta is not None else {"status": 200}))
+
+    mb0 = {"id": rid.hex(), "idx": 0, "last": True, "stream": False}
+    dcase("response_with_direction_to_host", raw_resp(direction=TO_HOST), mailbox=mb0)
+    dcase("response_of_version_2", raw_resp(version=2), mailbox=mb0)
+    dcase("response_with_an_unknown_flag", raw_resp(flags=F_LAST | 0x08), mailbox=mb0)
+    dcase("response_of_another_key_version", raw_resp(key_version=2), mailbox=mb0)
+    dcase("response_for_another_workspace", raw_resp(workspace=bytes(16)), mailbox=mb0)
+    dcase("response_exactly_300_s_old", raw_resp(), now_ms=now + 2000 + WINDOW_MS, mailbox=mb0)
+    dcase("response_exactly_300_s_ahead", raw_resp(), now_ms=now + 2000 - WINDOW_MS, mailbox=mb0)
+    dcase("response_300_s_and_1_ms_ahead", raw_resp(), now_ms=now + 2000 - WINDOW_MS - 1, mailbox=mb0)
+    dcase("response_mailbox_id_differs", ok, mailbox={**mb0, "id": fake("other")[:16].hex()})
+    dcase("response_mailbox_idx_differs", ok, mailbox={**mb0, "idx": 1})
+    dcase("response_mailbox_idx_not_an_integer", ok, mailbox={**mb0, "idx": "0"})
+    dcase("response_mailbox_says_stream", ok, mailbox={**mb0, "stream": True})
+    dcase("stale_timestamp_with_a_host_ms_that_is_not_an_integer",
+          resp(flags=F_LAST | F_REFUSAL, meta={"refusal": "stale_timestamp", "host_ms": str(now + 2000)}), now_ms=skew)
+    forged = bytearray(ok)
+    forged[HEADER_LEN:] = fake("forged-body")[:1] * (len(ok) - HEADER_LEN)   # what a relay without keys can make
+    dcase("response_random_body_and_signature", bytes(forged))
+    base = len(resp(meta={}))
+    dcase("response_larger_than_256_kib", resp(meta={}, data=bytes(MAX_CHUNK + 1 - base)))
+    dcase("stream_rid_answered_without_stream_mailbox_says_stream", ok, mailbox={**mb0, "stream": True},
+          stream_pending=True)
+    dcase("stream_rid_answered_without_stream", ok, mailbox=mb0, stream_pending=True)
     out["device_cases"] = dev_cases
+
+    # the pin alarm (§7): kinds name device cases above
+    kinds = {"pin": "response_signed_by_a_device", "forged": "response_random_body_and_signature", "ok": "full_response_chunk"}
+    by = {c["name"]: c for c in dev_cases}
+
+    def run(name, steps):
+        res = []
+        for k in steps:
+            c = by[kinds[k]]
+            res.append(device_check(bytes.fromhex(c["envelope"]), {**ctx(), "pending": json.loads(json.dumps(c["pending"]))},
+                                    c["mailbox"], c["now_ms"]))
+        return {"name": name, "steps": [kinds[k] for k in steps], "alarm": pin_run(res)}
+
+    out["pin_runs"] = [
+        run("three_pin_failures_in_a_row", ["pin", "pin", "pin"]),
+        run("forged_chunks_never_count", ["forged", "forged", "forged", "forged"]),
+        run("a_verified_chunk_resets", ["pin", "pin", "ok", "pin", "pin"]),
+        run("forged_chunks_neither_count_nor_reset", ["pin", "forged", "pin", "forged", "pin"]),
+    ]
+
+    # the pending answer (§8.1 step 4): checked against the link's pin, before any host key is pinned
+    prid = fake("pair-rid")[:16]
+
+    def pend_resp(host_pub_hex=keys["host"]["pub"], signer="host", key=k_ws, meta=None, flags=F_LAST, seq=0,
+                  ts=now + 2000, r=prid):
+        h = Header(TO_DEVICE, flags, ws, dev_a, r, ZERO_ID, seq, ts,
+                   fake(f"pend-{signer}-{host_pub_hex[:8]}-{flags}-{seq}-{ts}-{r.hex()}")[:16])
+        m = meta if meta is not None else {"state": "pending", "host_pub": host_pub_hex,
+                                           "fingerprint": device_fingerprint(pub["device_a"])}
+        return envelope(key, pk[signer], h, frame(m))
+
+    def refusal(code, signer="host", host_pub_hex=keys["host"]["pub"], **extra):
+        return pend_resp(host_pub_hex, signer=signer, flags=F_LAST | F_REFUSAL,
+                         meta={"refusal": code, "host_pub": host_pub_hex, **extra})
+
+    pend_cases = []
+
+    def pcase(name, env, now_ms=now + 2500, mailbox=None, adopted=False):
+        pend0 = {"next": 0, "stream": False, **({"offset_adopted": True} if adopted else {})}
+        c = {"workspace": ws_hex, "k_ws": k_ws, "key_version": 1, "device": dev_a.hex(), "host_pin": host_pin(pub["host"]).hex(),
+             "pending": {prid.hex(): dict(pend0)}, "offset_ms": 0}
+        hh = Header.decode(env)
+        mbp = mailbox or {"id": hh.rid.hex(), "idx": hh.seq, "last": bool(hh.flags & F_LAST), "stream": False}
+        res = open_pending_answer(env, c, mbp, now_ms)
+        pend_cases.append({"name": name, "envelope": env.hex(), "mailbox": mbp, "host_pin": c["host_pin"],
+                           "pending": {prid.hex(): pend0}, "now_ms": now_ms,
+                           "expect": {k: v for k, v in res.items() if k != "why"}})
+
+    pcase("pending_answer_accepted", pend_resp())
+    pcase("pending_answer_with_a_host_key_not_of_the_pin", pend_resp(keys["intruder"]["pub"], signer="intruder"))
+    pcase("pending_answer_signed_by_another_key", pend_resp(signer="intruder"))
+    pcase("pending_answer_sealed_under_another_key", pend_resp(key=workspace_key(mk, "0" * 32)))
+    pcase("pending_answer_without_host_pub", pend_resp(meta={"state": "pending"}))
+    pcase("pending_answer_that_is_not_pending", pend_resp(meta={"state": "approved", "host_pub": keys["host"]["pub"]}))
+    pcase("pending_answer_with_an_extra_field_is_accepted", pend_resp(meta={
+        "state": "pending", "host_pub": keys["host"]["pub"], "fingerprint": device_fingerprint(pub["device_a"]),
+        "scope": "decide"}))
+    pcase("pending_answer_outside_the_window", pend_resp(), now_ms=now + 2000 + WINDOW_MS + 1)
+    pcase("pending_answer_out_of_order", pend_resp(seq=1))
+    pcase("pending_answer_mailbox_says_stream", pend_resp(),
+          mailbox={"id": prid.hex(), "idx": 0, "last": True, "stream": True})
+    # refusals to a pair request carry host_pub and are verified exactly like the pending answer
+    pcase("pairing_closed_refusal_verified", refusal("pairing_closed"))
+    skewed = now + 2000 + 400_000                       # the device's clock runs 400 s fast
+    pcase("stale_timestamp_refusal_to_a_pair_verified_adopts_the_offset", refusal("stale_timestamp", host_ms=now + 2000),
+          now_ms=skewed)
+    pcase("stale_timestamp_refusal_to_a_pair_more_than_24_h_off", refusal("stale_timestamp", host_ms=now + 2000),
+          now_ms=now + 2000 + MAX_OFFSET_MS + 1)
+    pcase("pair_refusal_with_a_host_key_not_of_the_pin",
+          refusal("pairing_closed", signer="intruder", host_pub_hex=keys["intruder"]["pub"]))
+    pcase("pair_refusal_signed_by_another_key", refusal("pairing_closed", signer="intruder"))
+    pcase("pair_refusal_without_host_pub", pend_resp(flags=F_LAST | F_REFUSAL, meta={"refusal": "pairing_closed"}))
+    pcase("stale_timestamp_pair_refusal_with_its_own_host_key_gives_no_offset",       # the attack the pin stops
+          refusal("stale_timestamp", signer="intruder", host_pub_hex=keys["intruder"]["pub"], host_ms=now + 2000),
+          now_ms=skewed)
+    pcase("stale_timestamp_pair_refusal_adopted_once_per_request", refusal("stale_timestamp", host_ms=now + 2000),
+          now_ms=skewed, adopted=True)
+    pcase("pair_refusal_stale_timestamp_unverified_does_not_adopt",
+          refusal("stale_timestamp", signer="intruder", host_ms=now + 2000), now_ms=skewed)
+    pcase("pair_refusal_for_a_request_not_pending", pend_resp(flags=F_LAST | F_REFUSAL, r=fake("old-pair")[:16],
+          meta={"refusal": "pairing_closed", "host_pub": keys["host"]["pub"]}))
+    pcase("pair_refusal_without_last", pend_resp(flags=F_REFUSAL,                 # the mailbox claims it is last
+          meta={"refusal": "pairing_closed", "host_pub": keys["host"]["pub"]}),
+          mailbox={"id": prid.hex(), "idx": 0, "last": True, "stream": False})
+    pcase("pair_refusal_without_a_code", pend_resp(flags=F_LAST | F_REFUSAL, meta={"host_pub": keys["host"]["pub"]}))
+    out["pending_answers"] = pend_cases
+
+    # labels (§8.1 step 2): code points, not UTF-16 units
+    def lab(name, s):
+        return {"name": name, "codepoints": [ord(c) for c in s], "device_accepts": device_label_ok(s),
+                "host_stores": [ord(c) for c in host_label(s)]}
+
+    out["labels"] = [
+        lab("eighty_ascii", "x" * 80), lab("eighty_one_ascii", "x" * 81),
+        lab("eighty_with_an_astral_character", "\U0001F44D" + "x" * 79),
+        lab("eighty_one_with_an_astral_character", "\U0001F44D" + "x" * 80),
+        lab("forty_one_astral_characters", "\U0001F44D" * 41),
+        lab("eighty_one_astral_characters", "\U0001F44D" * 81),
+    ]
+
+    # pairing link fragments (§8.1 step 1), strictly
+    good = out["pairing"]["link_fragment"]
+    B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+
+    def link(name, frag):
+        return {"name": name, "fragment": frag, "parsed": parse_pair_fragment(frag)}
+
+    out["links"] = [
+        link("valid", good), link("valid_with_hash", "#" + good),
+        link("version_2", good.replace("v1.", "v2.", 1)), link("version_11", good.replace("v1.", "v11.", 1)),
+        link("no_version", good.replace("v1.", "", 1)),
+        link("upper_case_workspace", good.replace(ws_hex, ws_hex.upper(), 1)),
+        link("upper_case_pairing_id", good.replace(pid.hex(), pid.hex().upper(), 1)),
+        link("secret_not_canonical", good.replace(b64u(secret), b64u(secret)[:-1] + "B", 1)),
+        link("host_pin_not_canonical", good[:-1] + B64[B64.index(good[-1]) ^ 1]),   # the low (padding) bit set
+    ]
+
+    # nonce and expires_ms encodings (§9.2, §9.4)
+    def parts(name, meta):
+        try:
+            n, e = parse_challenge_parts(meta)
+            ok_ = {"nonce": n.hex(), "expires_ms": e}
+        except ValueError:
+            ok_ = None
+        return {"name": name, "meta": meta, "parsed": ok_}
+
+    nh = fake("assert-nonce").hex()
+    out["challenge_parts"] = [
+        parts("valid", {"nonce": nh, "expires_ms": now + 120_000}),
+        parts("nonce_upper_case", {"nonce": nh.upper(), "expires_ms": now + 120_000}),
+        parts("nonce_63_characters", {"nonce": nh[:63], "expires_ms": now + 120_000}),
+        parts("nonce_base64url", {"nonce": b64u(fake("assert-nonce")), "expires_ms": now + 120_000}),
+        parts("expires_as_a_string", {"nonce": nh, "expires_ms": str(now + 120_000)}),
+        parts("expires_as_a_boolean", {"nonce": nh, "expires_ms": True}),
+        parts("expires_negative", {"nonce": nh, "expires_ms": -1}),
+    ]
 
     # the `shown` text (§9.3)
     out["shown"] = [

@@ -25,6 +25,8 @@ test("every vector, through the production module", async () => {
   assert.deepEqual(n, { hkdf: VEC.hkdf.length, seal: VEC.seal.length, sign: VEC.sign.length, sig_scalars: VEC.sig_scalars.length,
     ids: 3, pairing: 1, host_cases: VEC.host_cases.length,
     host_steps: VEC.host_cases.reduce((k, c) => k + (c.steps?.length ?? 0), 0), device_cases: VEC.device_cases.length,
+    pin_runs: VEC.pin_runs.length, pending_answers: VEC.pending_answers.length, labels: VEC.labels.length,
+    links: VEC.links.length, challenge_parts: VEC.challenge_parts.length,
     shown: VEC.shown.length, assertion_cases: VEC.assertion.cases.length, assertion_challenges: 3 });
 });
 

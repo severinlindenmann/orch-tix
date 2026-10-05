@@ -143,6 +143,15 @@ export async function conformance(B, C, VEC) {
     let framed;
     try { framed = B.unframe(pt); } catch { framed = null; }
     if (framed === null) { same(e.code, "malformed", `${name} framing`); return; }
+    if (e.code === "malformed") {       // the host's strict meta (§3.5): only meta the device would never write
+      let differs = toHex(B.frame(framed.meta, framed.data)) !== toHex(pt);
+      if (!differs && framed.meta.op === "pair") {
+        const { phone_proof: _p, ...mine } = await pairMeta(framed.meta), { phone_proof: _q, ...theirs } = framed.meta;
+        differs = canonicalJson(mine) !== canonicalJson(theirs);
+      }
+      same(differs, true, `${name}: malformed, but the device could have sent it`);
+      return;
+    }
     same(toHex(B.frame(framed.meta, framed.data)), toHex(pt), `${name} canonical meta`);
     if (e.meta !== undefined) same([framed.meta, toHex(framed.data)], [e.meta, e.data], `${name} meta and data`);
     const m = framed.meta, claimed = pubOf.get(toHex(h.device));
@@ -155,6 +164,10 @@ export async function conformance(B, C, VEC) {
       }
     } else if (!(["not_paired", "pairing_closed"].includes(e.code) || e.result === "drop")) {
       fail(`${name}: no key for the claimed device, but the host did not refuse`);
+    }
+    if (m.op === "pair" && [...m.label].length > 80) {   // the host truncates such a label; the device never sends one
+      await throws(() => pairMeta(m), `${name}: a label over 80 code points`);
+      return;
     }
     if (m.op === "pair") {                              // the production meta builder makes the same meta, MAC and proof
       const { phone_proof: mineProof, ...mine } = await pairMeta(m), { phone_proof: theirProof, ...theirs } = m;
@@ -183,11 +196,86 @@ export async function conformance(B, C, VEC) {
     if (r.result === "accept") Object.assign(got, { last: r.last, refusal: r.refusal, meta: r.meta, data: toHex(r.data) });
     got.offset_ms = r.offsetMs ?? null;
     got.clock_wrong = r.clockWrong ?? null;
+    got.pin_failure = r.pinFailure ?? null;
     same(got, c.expect, c.name);
     const before = c.pending[toHex(B.decodeHeader(hex(c.envelope).subarray(0, 104)).rid)];
     if (r.result === "accept") same(pending.get(r.rid).next, before.next + 1, `${c.name} next`);
     else for (const [k, v] of Object.entries(c.pending)) same(pending.get(k).next, v.next, `${c.name} unchanged`);
     count("device_cases");
+  }
+
+  const ai = VEC.assertion.challenge_inputs;
+  const parts = { workspace: hex(ai.workspace), deviceId: hex(ai.device), rid: hex(ai.rid), purpose: ai.purpose, scope: ai.scope,
+    expiresMs: ai.expires_ms, nonce: hex(ai.nonce), subject: ai.subject };
+  // pin_runs (§7): the run of pin failures the device counts; a verified chunk resets it, other drops neither count nor reset
+  const byName = new Map(VEC.device_cases.map((c) => [c.name, c]));
+  for (const c of VEC.pin_runs) {
+    let run = 0, alarm = false;
+    const got = [];
+    for (const name of c.steps) {
+      const d = byName.get(name);
+      const pending = new Map(Object.entries(d.pending).map(([k, v]) => [k, { ...v }]));
+      const r = await B.openResponse({ workspace: VEC.keys.workspace, kWs, keyVersion: 1, device: VEC.ids.device_a.device_id,
+        hostKey, pending, offsetMs: d.offset_ms }, hex(d.envelope), d.mailbox, d.now_ms);
+      if (r.pinFailure) { run += 1; alarm ||= run >= 3; } else if (r.result === "accept") run = 0;
+      got.push(alarm);
+    }
+    same(got, c.alarm, c.name);
+    count("pin_runs");
+  }
+
+  // pending_answers (§8.1 step 4): every answer to a pair request (the pending answer and refusals), opened before a host
+  // key is pinned. The composition of production primitives a caller uses: tag first, host_pub (bytes) against the
+  // link's pin, the signature with it, then §7 (openResponse, which also adopts a verified stale_timestamp's offset).
+  for (const c of VEC.pending_answers) {
+    const env = hex(c.envelope), { header, body, sig } = B.splitEnvelope(env);
+    let got;
+    try {
+      const { meta } = B.unframe(await B.openBody(kWs, header, body));
+      const refusal = !!(B.decodeHeader(header).flags & B.F_REFUSAL);
+      if (typeof meta.host_pub !== "string" || (refusal ? typeof meta.refusal !== "string" : meta.state !== "pending")) {
+        throw new Error("not an answer to a pair request");
+      }
+      const key = await B.hostKeyFromPin(hex(meta.host_pub), hex(c.host_pin));
+      if (!await B.verifySigned(key, sig, B.signedBytes(header, body))) throw new Error("host signature");
+      const pending = new Map(Object.entries(c.pending).map(([k, v]) => [k, { ...v, offsetAdopted: v.offset_adopted }]));
+      const r = await B.openResponse({ workspace: VEC.keys.workspace, kWs, keyVersion: 1, device: VEC.ids.device_a.device_id,
+        hostKey: key, pending, offsetMs: 0 }, env, c.mailbox, c.now_ms);
+      got = r.result !== "accept" ? { result: "drop" } : { result: "accept", host_pub: meta.host_pub,
+        fingerprint: refusal ? null : meta.fingerprint, refusal: refusal ? meta.refusal : null, offset_ms: r.offsetMs ?? null,
+        clock_wrong: r.clockWrong ?? null };
+    } catch {
+      got = { result: "drop" };
+    }
+    same(got, c.expect, c.name);
+    count("pending_answers");
+  }
+
+  // labels (§8.1 step 2): the device refuses more than 80 code points (the host's truncation is checked in Python)
+  for (const c of VEC.labels) {
+    const s = String.fromCodePoint(...c.codepoints);
+    let ok = true;
+    try { await B.pairRequestMeta({ link: B.parsePairFragment(p.link_fragment), pub: devPub, label: s }); } catch { ok = false; }
+    same(ok, c.device_accepts, c.name);
+    count("labels");
+  }
+
+  // links (§8.1 step 1)
+  for (const c of VEC.links) {
+    const l = B.parsePairFragment(c.fragment);
+    same(l && { workspace: l.workspace, pairing_id: toHex(l.pairingId), secret: toHex(l.secret), host_pin: toHex(l.hostPin) },
+      c.parsed, c.name);
+    count("links");
+  }
+
+  // challenge_parts (§9.2, §9.4): the module takes the nonce as bytes and expires_ms as an integer; parsing the host's
+  // answer (64 lower-case hex, a JSON integer) is the caller's. What the module itself refuses is checked here.
+  for (const c of VEC.challenge_parts) {
+    const exp = c.meta.expires_ms;
+    if (!Number.isSafeInteger(exp) || exp < 0) {
+      await throws(() => B.assertionChallenge({ ...parts, expiresMs: exp }), `${c.name}: expires_ms`);
+    }
+    count("challenge_parts");
   }
 
   // shown: the device never re-cleans; it takes exactly what it received, and refuses what is not scalar values
@@ -204,8 +292,6 @@ export async function conformance(B, C, VEC) {
 
   // assertion: the challenges the device recomputes, and for each verification case the challenge its client data names
   const a = VEC.assertion, i = a.challenge_inputs;
-  const parts = { workspace: hex(i.workspace), deviceId: hex(i.device), rid: hex(i.rid), purpose: i.purpose, scope: i.scope,
-    expiresMs: i.expires_ms, nonce: hex(i.nonce), subject: i.subject };
   same(canonicalJson(B.subjectOf(i.subject)), i.subject_json, "subject json");
   const ch = toHex(await B.assertionChallenge(parts));
   same(ch, a.challenge, "assertion challenge");
@@ -228,7 +314,7 @@ export async function conformance(B, C, VEC) {
   return n;
 }
 
-// §7 and §8.1 rules that tests/bridge_vectors.json has no device vector for (follow-up: add them to the vectors). Each
+// §7 and §8.1 rules checked a second time with chunks built here (the amended vectors, #82, now cover them too). Each
 // chunk here is sealed with K_ws and signed with the FAKE host key, so only the rule under test can drop it.
 export async function ownChecks(B, C, VEC) {
   const { hexToBytes: hex, b64u, bytesToHex: toHex } = C;

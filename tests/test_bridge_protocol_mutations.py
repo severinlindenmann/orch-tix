@@ -32,15 +32,55 @@ def run(ref):
             except Exception:
                 fails.append(c["name"]); break
             rec = s["rids"].get(st["mailbox_id"])
-            if {k: v for k, v in r.items() if k in st["expect"]} != st["expect"] or r["result"] != st["expect"]["result"] \
+            if {k: v for k, v in r.items() if k in ref.HOST_EXPECT_KEYS} != st["expect"] \
                     or (rec["until"] if rec else None) != st["record_until"]:
                 fails.append(c["name"]); break
     for c in VEC["device_cases"]:
         ctx = {"workspace": VEC["keys"]["workspace"], "k_ws": K, "key_version": 1,
                "device": VEC["ids"]["device_a"]["device_id"], "host_pub": host,
                "pending": json.loads(json.dumps(c["pending"])), "offset_ms": c["offset_ms"]}
-        r = ref.device_check(bytes.fromhex(c["envelope"]), ctx, c["mailbox"], c["now_ms"])
+        env = bytes(c["envelope_zeros"]) if "envelope_zeros" in c else bytes.fromhex(c["envelope"])
+        try:
+            r = ref.device_check(env, ctx, c["mailbox"], c["now_ms"])
+        except Exception:
+            fails.append(c["name"]); continue
         if {k: r.get(k) for k in c["expect"]} != c["expect"]:
+            fails.append(c["name"])
+    by = {d["name"]: d for d in VEC["device_cases"]}
+    for c in VEC["pin_runs"]:
+        res = []
+        for n in c["steps"]:
+            d = by[n]
+            ctx = {"workspace": VEC["keys"]["workspace"], "k_ws": K, "key_version": 1,
+                   "device": VEC["ids"]["device_a"]["device_id"], "host_pub": host,
+                   "pending": json.loads(json.dumps(d["pending"])), "offset_ms": d["offset_ms"]}
+            res.append(ref.device_check(bytes.fromhex(d["envelope"]), ctx, d["mailbox"], d["now_ms"]))
+        if ref.pin_run(res) != c["alarm"]:
+            fails.append(c["name"])
+    for c in VEC["pending_answers"]:
+        ctx = {"workspace": VEC["keys"]["workspace"], "k_ws": K, "key_version": 1,
+               "device": VEC["ids"]["device_a"]["device_id"], "host_pin": c["host_pin"],
+               "pending": json.loads(json.dumps(c["pending"])), "offset_ms": 0}
+        try:
+            r = ref.open_pending_answer(bytes.fromhex(c["envelope"]), ctx, c["mailbox"], c["now_ms"])
+        except Exception:
+            fails.append(c["name"]); continue
+        if {k: v for k, v in r.items() if k != "why"} != c["expect"]:
+            fails.append(c["name"])
+    for c in VEC["labels"]:
+        s = "".join(map(chr, c["codepoints"]))
+        if ref.device_label_ok(s) is not c["device_accepts"] or [ord(x) for x in ref.host_label(s)] != c["host_stores"]:
+            fails.append(c["name"])
+    for c in VEC["links"]:
+        if ref.parse_pair_fragment(c["fragment"]) != c["parsed"]:
+            fails.append(c["name"])
+    for c in VEC["challenge_parts"]:
+        try:
+            n_, e_ = ref.parse_challenge_parts(c["meta"])
+            got = {"nonce": n_.hex(), "expires_ms": e_}
+        except ValueError:
+            got = None
+        if got != c["parsed"]:
             fails.append(c["name"])
     for c in VEC["sign"]:
         if ref.verify(bytes.fromhex(c["pub"]), bytes.fromhex(c["sig"]), bytes.fromhex(c["msg"])) is not c["valid"]:
@@ -69,7 +109,10 @@ TIME = ('    if abs(now_ms - h.ts_ms) > WINDOW_MS:\n'
         '        return _recorded_refusal(state, h, env, now_ms, "stale_timestamp", host_ms=now_ms)\n')
 
 SEQ_NOTE = '    # sequence BEFORE time: a stale_timestamp refusal consumes its seq, so the same bytes can never run\n'
-MAL = ('    try:\n        meta, data = unframe(pt)\n    except ValueError:\n'
+BUSY = ('    # 4b. the device\'s quota, before framing and sequence: `busy` does not consume the seq (§5.3)\n'
+        '    if _count_for(state, did, now_ms) >= _limits(state)["per_device"]:\n'
+        '        return _recorded_refusal(state, h, env, now_ms, "busy")\n')
+MAL = ('    try:\n        meta, data = unframe(pt, strict=True)\n    except ValueError:\n'
        '        return _recorded_refusal(state, h, env, now_ms, "malformed")\n')
 
 MUTS = {
@@ -140,7 +183,94 @@ MUTS = {
     "replay_high_not_restamped": ('                    extra["high"] = dev["high"]', '                    pass'),
     "offset_adopted_every_time": ('if not pend.get("offset_adopted"):', "if True:"),
     "offset_unbounded": ("if abs(off) <= MAX_OFFSET_MS:", "if True:"),
-    "offer_budget_ignored": ('ob = {"bucket": offer, "limit": OFFER_BUDGET}', "ob = {}"),
+    "offer_budget_ignored": ('ob = {"bucket": offer, "limit": OFFER_BUDGET, "host_pub": state["host_pub"]}',
+                             'ob = {"host_pub": state["host_pub"]}'),
+    # the amendment (#82)
+    "pin_failure_for_any_bad_signature": ("            pin_failure = True\n        except InvalidTag:\n            pin_failure = False",
+                                          "            pin_failure = True\n        except InvalidTag:\n            pin_failure = True"),
+    "pin_failure_never": ("            open_body(ctx[\"k_ws\"], hb, body)\n            pin_failure = True",
+                          "            open_body(ctx[\"k_ws\"], hb, body)\n            pin_failure = False"),
+    "pin_run_not_reset": ('        elif r["result"] == "accept":\n            run = 0', '        elif False:\n            run = 0'),
+    "pin_run_forged_resets": ('        elif r["result"] == "accept":', '        elif r["result"] in ("accept", "drop"):'),
+    "pin_alarm_at_two": ("alarm = alarm or run >= PIN_FAILURES", "alarm = alarm or run >= PIN_FAILURES - 1"),
+    "pending_pin_not_checked": ('    if not hmac.compare_digest(host_pin(host_pub), bytes.fromhex(ctx["host_pin"])):\n        return _drop("host_pin")\n', ""),
+    "pending_signature_not_checked": ('    if not verify(host_pub, sig, signed_bytes(hb, body)):\n        return _drop("host_signature")\n    if h.seq != pend["next"]',
+                                      '    if h.seq != pend["next"]'),
+    "pending_not_required": ('else meta.get("state") != "pending")', 'else False)'),
+    "status_without_scope": ('            if waiting["state"] == "approved":\n                answer["scope"] = waiting["scope"]\n', ""),
+    "pending_answer_without_host_pub": ('{"state": "pending", "host_pub": state["host_pub"], ', '{"state": "pending", '),
+    "label_in_utf16_units": ("return clean_shown(s)[:MAX_LABEL]",
+                             'return clean_shown(s).encode("utf-16-le")[:2 * MAX_LABEL].decode("utf-16-le", "ignore")'),
+    "device_label_in_utf16_units": ("and len(s) <= MAX_LABEL", 'and len(s.encode("utf-16-le")) // 2 <= MAX_LABEL'),
+    "device_label_81": ("and len(s) <= MAX_LABEL", "and len(s) <= MAX_LABEL + 1"),
+    "link_upper_case_hex": (r'([0-9a-f]{32})\.([0-9a-f]{32})', r'([0-9a-fA-F]{32})\.([0-9a-fA-F]{32})'),
+    "link_other_version": (r'compile(r"#?v1\.', r'compile(r"#?v\\d+\.'),
+    "link_secret_not_canonical": ("b64u(s) != m.group(3) or ", ""),
+    "nonce_any_case": ('compile(r"[0-9a-f]{64}")', 'compile(r"[0-9a-fA-F]{64}")'),
+    "expires_any_type": ("if type(exp) is not int or exp < 0:", "if exp is None:"),
+    "device_direction_unchecked": ("h.version != VERSION or h.direction != TO_DEVICE or h.flags & ~(F_LAST | F_STREAM | F_REFUSAL)",
+                                   "h.version != VERSION or h.flags & ~(F_LAST | F_STREAM | F_REFUSAL)"),
+    "device_version_unchecked": ("h.magic != MAGIC or h.version != VERSION or h.direction != TO_DEVICE",
+                                 "h.magic != MAGIC or h.direction != TO_DEVICE"),
+    "device_flags_unchecked": ("h.direction != TO_DEVICE or h.flags & ~(F_LAST | F_STREAM | F_REFUSAL):",
+                               "h.direction != TO_DEVICE:"),
+    "device_size_unchecked": ("    if not OVERHEAD <= len(env) <= MAX_CHUNK:\n        return _drop(\"size\")\n    hb, body, sig = split(env)\n    h = Header.decode(hb)\n    if h.magic != MAGIC or h.version != VERSION or h.direction != TO_DEVICE or h.flags & ~",
+                              "    if not OVERHEAD <= len(env):\n        return _drop(\"size\")\n    hb, body, sig = split(env)\n    h = Header.decode(hb)\n    if h.magic != MAGIC or h.version != VERSION or h.direction != TO_DEVICE or h.flags & ~"),
+    "device_key_version_unchecked": ('    if h.key_version != ctx["key_version"] or h.workspace.hex() != ctx["workspace"] or h.device.hex() != ctx["device"]:\n        return _drop("not_for_this_device")\n    pend = ctx["pending"].get(h.rid.hex())\n    if pend is None:\n        return _drop("unknown_request")\n    if (mailbox["id"], mailbox["idx"], mailbox["last"], mailbox["stream"]) != \\',
+                                     '    if h.workspace.hex() != ctx["workspace"] or h.device.hex() != ctx["device"]:\n        return _drop("not_for_this_device")\n    pend = ctx["pending"].get(h.rid.hex())\n    if pend is None:\n        return _drop("unknown_request")\n    if (mailbox["id"], mailbox["idx"], mailbox["last"], mailbox["stream"]) != \\'),
+    "device_window_strict": ('    elif abs(now_ms + ctx.get("offset_ms", 0) - h.ts_ms) > WINDOW_MS:',
+                             '    elif abs(now_ms + ctx.get("offset_ms", 0) - h.ts_ms) >= WINDOW_MS:'),
+    "device_mailbox_stream_unchecked": ('bool(h.flags & F_STREAM)) or pend["stream"] != mailbox["stream"]:\n        return _drop("mailbox_mismatch")\n    if not verify(ctx',
+                                        'mailbox["stream"]) or pend["stream"] != mailbox["stream"]:\n        return _drop("mailbox_mismatch")\n    if not verify(ctx'),
+    # the amendment review: answers to a pair request
+    "pending_window_skipped": ('    elif abs(now_ms + ctx.get("offset_ms", 0) - h.ts_ms) > WINDOW_MS:\n        return _drop("stale_timestamp")\n    pend["next"] += 1\n    return res',
+                               '    pend["next"] += 1\n    return res'),
+    "pending_order_unchecked": ('    if h.seq != pend["next"]:\n        return _drop("out_of_order")\n    res = {"result": "accept", "host_pub"',
+                                '    res = {"result": "accept", "host_pub"'),
+    "pending_mailbox_stream_ignored": ('(h.rid.hex(), h.seq, True, False)', '(h.rid.hex(), h.seq, True, mailbox["stream"])'),
+    "pair_refusal_without_host_pub": ('"pairing_closed", host_pub=state["host_pub"])', '"pairing_closed")'),
+    "pair_refusals_in_offer_without_host_pub": ('"limit": OFFER_BUDGET, "host_pub": state["host_pub"]}', '"limit": OFFER_BUDGET}'),
+    "pair_refusal_unverified_accepted": ('    if not verify(host_pub, sig, signed_bytes(hb, body)):\n        return _drop("host_signature")\n    if h.seq != pend["next"]:\n        return _drop("out_of_order")\n    res = {',
+                                         '    if not refusal and not verify(host_pub, sig, signed_bytes(hb, body)):\n        return _drop("host_signature")\n    if h.seq != pend["next"]:\n        return _drop("out_of_order")\n    res = {'),
+    "pair_refusal_offset_not_adopted": ('                res["offset_ms"] = off\n            else:\n                res["clock_wrong"] = True\n    elif abs(now_ms + ctx.get("offset_ms", 0) - h.ts_ms) > WINDOW_MS:\n        return _drop("stale_timestamp")\n    pend["next"] += 1\n    return res',
+                                        '                pass\n            else:\n                res["clock_wrong"] = True\n    elif abs(now_ms + ctx.get("offset_ms", 0) - h.ts_ms) > WINDOW_MS:\n        return _drop("stale_timestamp")\n    pend["next"] += 1\n    return res'),
+    "pair_refusal_offset_unbounded": ('            if abs(off) <= MAX_OFFSET_MS:\n                res["offset_ms"] = off\n            else:\n                res["clock_wrong"] = True\n    elif abs(now_ms + ctx.get("offset_ms", 0) - h.ts_ms) > WINDOW_MS:\n        return _drop("stale_timestamp")\n    pend["next"] += 1\n    return res',
+                                      '            if True:\n                res["offset_ms"] = off\n            else:\n                res["clock_wrong"] = True\n    elif abs(now_ms + ctx.get("offset_ms", 0) - h.ts_ms) > WINDOW_MS:\n        return _drop("stale_timestamp")\n    pend["next"] += 1\n    return res'),
+    "pair_refusal_without_last_accepted": ("h.flags not in (F_LAST, F_LAST | F_REFUSAL)", "h.flags not in (F_LAST, F_REFUSAL, F_LAST | F_REFUSAL)"),
+    "pair_refusal_needs_no_code": ('(meta.get("refusal") is None if refusal else', '(False if refusal else'),
+    "link_host_pin_not_canonical": ("b64u(pin) != m.group(4)", "False"),
+    # the recheck of #87: the pin stops an offset from a K_ws holder's own key; once per request
+    "pin_unchecked_for_stale_timestamp_refusals": ('    if not hmac.compare_digest(host_pin(host_pub), bytes.fromhex(ctx["host_pin"])):',
+                                                   '    if not (refusal and meta.get("refusal") == "stale_timestamp") and not hmac.compare_digest(host_pin(host_pub), bytes.fromhex(ctx["host_pin"])):'),
+    "pair_refusal_offset_adopted_every_time": ('        if not pend.get("offset_adopted"):         # verified',
+                                               '        if True:         # verified'),
+    # busy and the store limits (§5.3)
+    "busy_never": ('    if _count_for(state, did, now_ms) >= _limits(state)["per_device"]:\n        return _recorded_refusal(state, h, env, now_ms, "busy")',
+                   '    if False:\n        return _recorded_refusal(state, h, env, now_ms, "busy")'),
+    "busy_at_one_below_the_quota": ('    if _count_for(state, did, now_ms) >= _limits(state)["per_device"]:',
+                                    '    if _count_for(state, did, now_ms) >= _limits(state)["per_device"] - 1:'),
+    "busy_not_recorded": ('        return _recorded_refusal(state, h, env, now_ms, "busy")', '        return _refuse("busy")'),
+    "busy_with_a_field": ('        return _recorded_refusal(state, h, env, now_ms, "busy")',
+                          '        return _recorded_refusal(state, h, env, now_ms, "busy", host_ms=now_ms)'),
+    "busy_after_the_sequence": (BUSY + "    # 5. framing\n" + MAL + SEQ_NOTE + SEQ,
+                                "    # 5. framing\n" + MAL + SEQ_NOTE + SEQ + BUSY),
+    "busy_counts_every_device": ('    return sum(1 for rec in state["rids"].values() if rec["device"] == device and now_ms < rec["until"])',
+                                 '    return sum(1 for rec in state["rids"].values() if now_ms < rec["until"])'),
+    "busy_counts_expired_records": ('if rec["device"] == device and now_ms < rec["until"])', 'if rec["device"] == device)'),
+    "no_busy_allowance": ('    if _count_for(state, h.device.hex(), now_ms) >= lim["per_device"] + lim["busy_allowance"]:\n        raise DeviceFull()',
+                          '    if False:\n        raise DeviceFull()'),
+    "no_global_cap": ('if sum(1 for rec in state["rids"].values() if now_ms < rec["until"]) >= lim["max_records"]:\n        raise StoreFull()',
+                      'if False:\n        raise StoreFull()'),
+    "store_full_refuses_instead_of_drop": ('        return _drop("store_full")', '        return _refuse("busy")'),
+    "device_full_refuses_instead_of_drop": ('        return _drop("busy_unrecordable")', '        return _refuse("busy")'),
+    "meta_duplicates_allowed": ("object_pairs_hook=_no_duplicates, ", ""),
+    "meta_nan_allowed": (", parse_constant=_no_constant", ""),
+    "meta_upper_case_hex": ('compile(r"(?:[0-9a-f]{2})*")', 'compile(r"(?:[0-9a-fA-F]{2})*")'),
+    "meta_hex_any_length": ("len(v) != 2 * n_bytes or ", ""),
+    "body_not_stored_replayed": ('            if out.get("body_stored") is False:', '            if False:'),
+    "pair_status_named_pair": ('answer = {"state": waiting["state"]}', 'answer = {"pair": waiting["state"]}'),
+    "device_host_ms_any_type": ('meta.get("refusal") == "stale_timestamp" and type(meta.get("host_ms")) is int:',
+                                'meta.get("refusal") == "stale_timestamp" and meta.get("host_ms") is not None:'),
     # the third review's 4 boundaries, and the pairing resend
     "offset_bound_strict_lt": ("if abs(off) <= MAX_OFFSET_MS:", "if abs(off) < MAX_OFFSET_MS:"),
     "keep_cr": ('    if c == "\\n":', '    if c in "\\n\\r":'),

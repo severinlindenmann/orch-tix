@@ -52,7 +52,7 @@ const MUTATIONS = [
   ["assertion label", 'label("assert/v1|")', 'label("assert/v1")'],
   ["registration label", 'label("webauthn-reg/v1|")', 'label("webauthn-reg/v1")'],
   ["a lone surrogate accepted", '|| !s.isWellFormed()', ""],
-  // pinned by ownChecks only: the vectors have no device case for these
+  // pinned by the amended vectors (#82) and, a second time, by ownChecks
   ["a chunk sent to the host accepted", "|| h.direction !== TO_DEVICE ", ""],
   ["another version accepted", "|| h.version !== 1 ", ""],
   ["an unknown flag accepted", "|| h.flags & ~(F_LAST | F_STREAM | F_REFUSAL)", ""],
