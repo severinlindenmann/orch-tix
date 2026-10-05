@@ -122,7 +122,7 @@ class _InlineAudit(html.parser.HTMLParser):
 
 @pytest.mark.parametrize("page", HTML_FILES, ids=lambda p: p.name)
 def test_html_has_no_inline_script_or_style(page):
-    audit = _InlineAudit(inline_ok=page.name == "sandbox-widget.html")
+    audit = _InlineAudit(inline_ok=page.name in ("sandbox-widget.html", "sandbox-dash.html"))
     audit.feed(page.read_text(encoding="utf-8"))
     assert audit.problems == []
 
@@ -173,7 +173,7 @@ ICON_LINKS = (
 
 # The sandbox frame (spec T15) is never navigated to directly or bookmarked: it's loaded invisibly
 # inside a sandboxed iframe to render an attachment, so it carries no icons, manifest or PWA tags.
-ICON_HTML_FILES = [p for p in HTML_FILES if p.name not in ("sandbox.html", "sandbox-widget.html")]
+ICON_HTML_FILES = [p for p in HTML_FILES if p.name not in ("sandbox.html", "sandbox-widget.html", "sandbox-dash.html")]
 
 
 @pytest.mark.parametrize("page", ICON_HTML_FILES, ids=lambda p: p.name)
@@ -268,7 +268,7 @@ def test_manifest_file_is_the_served_body(client):
 # The public-link viewer (§17) and the upload-link drop page (upload-links spec) are not the app:
 # someone without an account can't install them. The sandbox frame (spec T15) is likewise never
 # installed (see ICON_HTML_FILES above).
-APP_HTML_FILES = [p for p in HTML_FILES if p.name not in ("public.html", "drop.html", "sandbox.html", "sandbox-widget.html")]
+APP_HTML_FILES = [p for p in HTML_FILES if p.name not in ("public.html", "drop.html", "sandbox.html", "sandbox-widget.html", "sandbox-dash.html")]
 
 
 @pytest.mark.parametrize("page", APP_HTML_FILES, ids=lambda p: p.name)

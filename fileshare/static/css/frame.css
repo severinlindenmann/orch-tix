@@ -1,0 +1,6 @@
+/* the questions the dashboard frame puts to the person (js/frame-host.js loads this file itself, so the offline shell
+   budget of app.css is untouched) */
+.frame-prompt { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 95; width: min(520px, calc(100vw - 32px));
+  padding: 14px 16px; border-radius: 12px; background: var(--surface); color: var(--text); border: 1px solid var(--line); box-shadow: var(--shadow-pop); }
+.frame-prompt pre { margin: 8px 0 12px; max-height: 40vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 13px; }
+.frame-prompt .btn + .btn { margin-left: 8px; }

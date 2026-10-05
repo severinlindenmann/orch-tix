@@ -1,5 +1,6 @@
 {
  "test_auth_pages.py": 35,
+ "test_dash_frame.py": 35,
  "test_drop_page.py": 5,
  "test_files_page.py": 14,
  "test_instant_open.py": 71,

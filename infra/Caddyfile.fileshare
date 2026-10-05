@@ -25,11 +25,13 @@ FS_DOMAIN {
 		header_up X-Real-IP {remote_host}
 	}
 
-	# tix frames /sandbox/html itself (HTML previews), so that one path may be
-	# framed by the same origin; every other path stays DENY. The other headers
-	# are identical in both blocks - keep them in step.
-	@sandbox path /sandbox/html
-	@notsandbox not path /sandbox/html
+	# tix frames its sandbox pages itself (HTML previews, ticket widgets, the
+	# remote dashboard frame), so those paths may be framed by the same origin;
+	# every other path stays DENY. The other headers are identical in both
+	# blocks - keep them in step. (tests/test_infra.py derives the paths from
+	# FRAME_CSP in fileshare/headers.py.)
+	@sandbox path /sandbox/html /sandbox/widget /sandbox/dash
+	@notsandbox not path /sandbox/html /sandbox/widget /sandbox/dash
 
 	header @sandbox {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"

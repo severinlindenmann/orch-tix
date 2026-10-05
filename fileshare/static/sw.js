@@ -11,8 +11,8 @@
 //   A page is cached only when its X-Build is this worker's build; a newer build's page is not, and the
 //   open pages get "new-build" so they register that build's worker at once (swreg.js).
 // - static assets: cache first; a ?v= of another build goes to the network and is not cached.
-// - bypassed entirely (no respondWith): non-GET, cross-origin, /api/, /p/, /u/, /skill/, /onboarding*
-//   and /sw.js. They never touch the cache.
+// - bypassed entirely (no respondWith): non-GET, cross-origin, /api/, /p/, /u/, /skill/, /onboarding*,
+//   /sandbox/dash (the dashboard frame: a nonce and a token per load) and /sw.js. They never touch the cache.
 // - never cached: a response with Cache-Control no-store, an opaque or cross-origin response, a
 //   redirect, or an error status.
 // - message "cache-pages" (sent by signed-in pages): cache the pages a signed-out install skipped.
@@ -36,7 +36,8 @@ function bypassed(request) {
   if (request.method !== "GET") return true;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return true;
-  return BYPASS.test(url.pathname);
+  // /sandbox/dash is built per load (its nonce and token belong to that one document): never cached or replayed
+  return BYPASS.test(url.pathname) || url.pathname === "/sandbox/dash";
 }
 
 function cacheable(response) {

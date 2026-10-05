@@ -218,6 +218,26 @@ def sandbox_widget(request: Request):
     return render_page("sandbox-widget", request.app.state.settings, "no-cache")
 
 
+_DASH_TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{22,64}")
+# The shim is inline in the frame (its policy has no 'self'), so its source is read once and put into the page.
+_DASH_SHIM = (STATIC_DIR / "js" / "frame-shim.js").read_text(encoding="utf-8")
+assert "</script" not in _DASH_SHIM.lower() and "<!--" not in _DASH_SHIM
+
+
+@router.get("/sandbox/dash")
+def sandbox_dash(request: Request, tok: str = ""):
+    """The frame a remote dashboard page is drawn in (js/frame-host.js, docs/bridge-frame.md): its own CSP with a
+    per-load nonce (DASH_CSP, set by SecurityHeadersMiddleware), no session. The TIX page that creates the iframe
+    chooses `tok`; it is written into this document once and the shim proves it holds it. Never cached: the nonce
+    and the token belong to this one load."""
+    nonce = getattr(request.state, "frame_nonce", None)
+    if not nonce or not _DASH_TOKEN_RE.fullmatch(tok):
+        raise api_error(400, "bad_request", "a frame token is required")
+    html = (STATIC_DIR / "sandbox-dash.html").read_text(encoding="utf-8")
+    html = html.replace("{{TOK}}", tok).replace("{{NONCE}}", nonce).replace("{{SHIM}}", _DASH_SHIM)
+    return HTMLResponse(html, headers={"Cache-Control": "no-store", "X-Build": build_stamp()})
+
+
 @router.get("/sw.js")
 def service_worker():
     """Served from the root so its scope can be / (§16)."""
