@@ -2,8 +2,10 @@
 import sqlite3
 
 from fastapi import APIRouter, Depends, Request, Response
+from starlette.concurrency import run_in_threadpool
 
 from fileshare import mirrors, tickets
+from fileshare.db import ensure_epoch
 from fileshare.deps import Principal, api_error, get_db, require_any, require_session
 from fileshare.ids import parse_ticket_ref
 from fileshare.routes.files import UUID_RE, WRAPPED_DEK_LEN, check_envelope, read_bounded_json
@@ -119,7 +121,11 @@ async def mirror_changes(request: Request, after: str = "0", wait: str = "0"):
         return found
 
     found = await tickets.wait_for_events(request, request.app.state.ticket_bus, after_n, wait_s, fetch)
-    return {"mirrors": found, "cursor": cursor["seq"] if found else after_n}
+    # epoch and head let a client that holds a list + cursor notice a server that started over (see db.ensure_epoch):
+    # another epoch, or a head behind its cursor, means the cursor no longer belongs to this database.
+    epoch, head = await run_in_threadpool(_short, request, lambda conn: (
+        ensure_epoch(conn), conn.execute("SELECT COALESCE(MAX(seq), 0) FROM ticket_events").fetchone()[0]))
+    return {"mirrors": found, "cursor": cursor["seq"] if found else after_n, "epoch": epoch, "head": head}
 
 
 @router.get("/api/mirrors")
@@ -128,7 +134,8 @@ def list_mirrors(space: str | None = None, _: Principal = Depends(require_any), 
     asks /api/mirrors/changes?after=<cursor> for what changed instead of downloading the whole list again (the
     list is read after the cursor, so a change in between is replayed, never missed)."""
     cursor = conn.execute("SELECT COALESCE(MAX(seq), 0) FROM ticket_events").fetchone()[0]
-    return {"mirrors": mirrors.list_mirrors(conn, None if space is None else _space_id(space)), "cursor": cursor}
+    return {"mirrors": mirrors.list_mirrors(conn, None if space is None else _space_id(space)), "cursor": cursor,
+            "epoch": ensure_epoch(conn)}
 
 
 @router.get("/api/mirrors/u/{uuid}")

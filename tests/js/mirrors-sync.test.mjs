@@ -20,14 +20,15 @@ globalThis.window = { dispatchEvent() {} };
 globalThis.CustomEvent = class { constructor(type) { this.type = type; } };
 
 let calls = [];
-let server = { mirrors: [], cursor: 0, changes: [] };
+let server = { mirrors: [], cursor: 0, changes: [], epoch: "e1" };
+const headOf = () => Math.max(server.cursor, ...server.changes.map((c) => c.seq), 0);
 globalThis.fetch = async (path) => {
   calls.push(path);
   const body = path.startsWith("/api/mirrors/changes")
     ? (() => { const after = Number(new URL(path, "https://x").searchParams.get("after"));
         const rows = server.changes.filter((c) => c.seq > after);
-        return { mirrors: rows.map((c) => c.row), cursor: rows.length ? rows.at(-1).seq : after }; })()
-    : { mirrors: server.mirrors, cursor: server.cursor };
+        return { mirrors: rows.map((c) => c.row), cursor: rows.length ? rows.at(-1).seq : after, epoch: server.epoch, head: server.head ?? headOf() }; })()
+    : { mirrors: server.mirrors, cursor: server.cursor, epoch: server.epoch };
   return { ok: true, status: 200, json: async () => structuredClone(body) };
 };
 const { syncedMirrors, mergeMirrors, storedCursor } = await import("../../fileshare/static/js/mirrors-sync.js");
@@ -38,7 +39,7 @@ const reset = () => { calls = []; for (const k of Object.keys(stores)) delete st
 
 test("the first open takes the full list and keeps it with its cursor", async () => {
   reset();
-  server = { mirrors: [row("a", 5), row("b", 3)], cursor: 7, changes: [] };
+  server = { mirrors: [row("a", 5), row("b", 3)], cursor: 7, changes: [], epoch: "e1" };
   const r = await syncedMirrors();
   assert.deepEqual(calls, ["/api/mirrors"]);
   assert.equal(r.cursor, 7);
@@ -92,4 +93,44 @@ test("a list without a cursor (an older cache) is fetched in full", async () => 
 
 test("mergeMirrors replaces by uuid, drops tombstones and sorts newest first", () => {
   assert.deepEqual(mergeMirrors([row("a", 1), row("b", 2)], [row("a", 3), row("b", 0, { deleted: true })]).map((m) => m.uuid), ["a"]);
+});
+
+test("a server that started over (another epoch) is never answered with 'nothing changed'", async () => {
+  reset();
+  server = { mirrors: [row("a", 5), row("b", 3)], cursor: 500, changes: [], epoch: "old" };
+  await syncedMirrors();                                                  // stored: cursor 500, epoch "old"
+  await forgetShared();
+  // the database was wiped: new epoch, events numbered from 1 again, and a different list
+  server = { mirrors: [row("z", 9)], cursor: 4, changes: [], epoch: "new" };
+  calls = [];
+  const r = await syncedMirrors();
+  assert.ok(calls.includes("/api/mirrors"), calls.join());                // the full list, not the delta
+  assert.deepEqual(r.mirrors.map((m) => m.uuid), ["z"]);
+  assert.equal(await storedCursor(), 4);
+});
+
+test("a restored database whose head is behind the stored cursor takes the full list too", async () => {
+  reset();
+  server = { mirrors: [row("a", 5)], cursor: 90, changes: [], epoch: "same" };
+  await syncedMirrors();
+  await forgetShared();
+  server = { mirrors: [row("b", 6)], cursor: 40, changes: [], epoch: "same", head: 40 };
+  calls = [];
+  const r = await syncedMirrors();
+  assert.ok(calls.includes("/api/mirrors"), calls.join());
+  assert.deepEqual(r.mirrors.map((m) => m.uuid), ["b"]);
+});
+
+test("a stored list from before epochs existed is refreshed once, then deltas work again", async () => {
+  reset();
+  await forgetShared();
+  stores.lists = new Map([["mirrors", { body: { mirrors: [row("a", 5)], cursor: 7 }, at: Date.now(), fullAt: Date.now() }]]);
+  server = { mirrors: [row("a", 5)], cursor: 7, changes: [], epoch: "e1" };
+  calls = [];
+  await syncedMirrors();
+  assert.ok(calls.includes("/api/mirrors"));
+  await forgetShared();
+  calls = [];
+  await syncedMirrors();
+  assert.ok(!calls.includes("/api/mirrors"), calls.join());
 });

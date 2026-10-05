@@ -40,9 +40,16 @@ async function store(body, fullAt) {
 
 async function delta(body) {
   let { mirrors, cursor } = body;
+  const { epoch } = body;
   for (let page = 0; page < MAX_DELTA_PAGES; page++) {
     const r = await api("GET", `/api/mirrors/changes?after=${cursor}&wait=0`);
-    if (!r.mirrors?.length || !(r.cursor > cursor)) return { mirrors, cursor };
+    // A server that started over (a wiped or restored database) numbers its events from the start again: the stored
+    // cursor then means something else and "nothing changed" would hide a whole list. Another epoch, a stored list from
+    // before epochs existed, or a head behind our cursor: take the full list.
+    if (typeof epoch !== "string" || r.epoch !== epoch || (Number.isInteger(r.head) && r.head < cursor)) {
+      throw new Error("the server is not the one this list came from");
+    }
+    if (!r.mirrors?.length || !(r.cursor > cursor)) return { ...body, mirrors, cursor };
     mirrors = mergeMirrors(mirrors, r.mirrors);
     cursor = r.cursor;
   }

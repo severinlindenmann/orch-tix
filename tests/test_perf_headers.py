@@ -72,3 +72,45 @@ def test_stamped_static_is_immutable_only_for_the_deployed_build(client, monkeyp
     assert client.get("/static/css/app.css").headers["etag"]
     monkeypatch.setenv("FS_BUILD", "dev")
     assert cc("/static/css/app.css?v=dev") == "no-cache"
+
+
+def test_list_and_feed_carry_an_epoch_that_survives_restarts_but_not_a_wipe(owner_dc, session_client, settings):
+    """A client holding a list + cursor learns from the epoch that the server started over (a wiped database numbers
+    its events from 1 again, so an old cursor would answer 'nothing changed' and hide the whole list)."""
+    from fileshare.db import connect, ensure_epoch
+    owner_dc.put(f"/api/mirrors/{new_uuid()}", json=_body(needs="question"))
+    listed = session_client.get("/api/mirrors").json()
+    feed = session_client.get("/api/mirrors/changes", params={"after": listed["cursor"], "wait": 0}).json()
+    assert isinstance(listed["epoch"], str) and len(listed["epoch"]) >= 16
+    assert feed["epoch"] == listed["epoch"] and feed["head"] >= listed["cursor"]
+    conn = connect(settings.db_path)
+    assert ensure_epoch(conn) == listed["epoch"]                  # stable: a restart keeps it
+    other = connect(settings.data_dir / "other.db")
+    other.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    assert ensure_epoch(other) != listed["epoch"]                 # another database: another epoch
+
+
+def test_deploy_stamp_follows_the_shipped_static_files(tmp_path):
+    """`?v=<build>` is cached for a year (immutable): the stamp infra/sync.sh makes must change with a file's bytes even
+    when the commit does not (an uncommitted edit), and stay a valid stamp."""
+    import re
+    import subprocess
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    line = next(l for l in (root / "infra" / "sync.sh").read_text().splitlines() if l.startswith("BUILD="))
+    probe = root / "fileshare" / "static" / ".stamp-probe"
+
+    def stamp():
+        out = subprocess.run(["bash", "-c", f'cd "{root}" && {line} && printf %s "$BUILD"'], capture_output=True, text=True, check=True)
+        return out.stdout
+
+    before = stamp()
+    try:
+        probe.write_text("one")
+        one = stamp()
+        probe.write_text("two")
+        two = stamp()
+    finally:
+        probe.unlink(missing_ok=True)
+    assert re.fullmatch(r"[A-Za-z0-9._-]{1,40}", before) and len({before, one, two}) == 3
+    assert stamp() == before

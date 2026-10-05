@@ -13,7 +13,7 @@ from fileshare import messages as messages_mod
 from fileshare import mirrors as mirrors_mod
 from fileshare.bridge import Bridge
 from fileshare.blobs import BlobStore
-from fileshare.db import backfill_device_fingerprints, connect, migrate
+from fileshare.db import backfill_device_fingerprints, connect, ensure_epoch, migrate
 from fileshare.expiry import expire_files, expire_upload_links, sweep_forever
 from fileshare.headers import CompressionMiddleware, ConditionalMiddleware, SecurityHeadersMiddleware
 from fileshare.push import SubprocessPusher
@@ -52,6 +52,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     conn = connect(settings.db_path)
     try:
         migrate(conn)
+        ensure_epoch(conn)
         backfill_device_fingerprints(conn)  # rewrite pre-2026-09-25 8-char fingerprints (§4.6)
         expire_files(conn, blobs)          # startup expiry sweep (§14 E), before the orphan sweep
         expire_upload_links(conn, blobs)  # same, for dead upload links (upload-links spec, Task 3)
