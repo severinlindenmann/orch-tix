@@ -300,7 +300,7 @@ def test_signed_in_pages_and_login_register_the_worker(module):
     assert re.search(r'^import (\{ warmShell \} from )?"\./swreg\.js";$', text, re.M)
 
 
-@pytest.mark.parametrize("route", ["/", "/t", "/t/42", "/files", "/settings", "/login", "/pair"])
+@pytest.mark.parametrize("route", ["/", "/workspaces", "/t", "/t/42", "/files", "/settings", "/login", "/pair"])
 def test_shell_pages_revalidate_instead_of_no_store(owner, route):
     """The worker never caches a no-store response, so the shell pages it precaches are no-cache."""
     r = owner.client.get(route, follow_redirects=False)
@@ -317,7 +317,7 @@ def test_precache_list_is_served(client):
     r = client.get("/static/precache.json")
     assert r.status_code == 200
     body = r.json()
-    assert body["pages"] == ["/", "/t", "/files", "/settings", "/login", "/sandbox/html", "/sandbox/widget", "/pair"]
+    assert body["pages"] == ["/", "/workspaces", "/t", "/files", "/settings", "/login", "/sandbox/html", "/sandbox/widget", "/pair"]
     for path in body["assets"]:
         if path.startswith("/static/"):
             assert (pages.STATIC_DIR / path.removeprefix("/static/")).is_file(), path
@@ -359,9 +359,9 @@ def test_attachment_viewers_clear_the_side_notch_and_images_have_no_callout():
         assert "-webkit-touch-callout: none" in _css_rule(css, sel), sel
 
 
-# ---- the four tabs (TIX spec §10): Needs you · Tickets · Files · Settings ----
-NAV_PAGES = {"index.html", "ticket.html", "files.html", "settings.html"}
-TABS = [("/", "Needs you"), ("/?view=tickets", "Tickets"), ("/files", "Files"), ("/settings", "Settings")]
+# ---- the five tabs (TIX spec §10): Needs you · Tickets · Files · Settings ----
+NAV_PAGES = {"index.html", "ticket.html", "files.html", "settings.html", "workspaces.html"}
+TABS = [("/workspaces", "Workspaces"), ("/", "Needs you"), ("/?view=tickets", "Tickets"), ("/files", "Files"), ("/settings", "Settings")]
 
 
 def test_every_page_with_a_nav_has_the_four_tabs():
@@ -377,7 +377,8 @@ def test_every_page_with_a_nav_has_the_four_tabs():
         assert 'class="brand" href="/"' in text, name       # the brand is the way back to Needs you
     current = {n: re.search(r'href="([^"]+)" data-tab="\w+" aria-current="page"', (pages.STATIC_DIR / n).read_text()).group(1)
                for n in NAV_PAGES}
-    assert current == {"index.html": "/", "ticket.html": "/", "files.html": "/files", "settings.html": "/settings"}
+    assert current == {"index.html": "/", "ticket.html": "/", "files.html": "/files", "settings.html": "/settings",
+               "workspaces.html": "/workspaces"}
 
 
 def test_no_page_asks_google_for_fonts():
