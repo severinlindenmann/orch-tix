@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from orch.addons.api import Intent, PendingDecision, Snapshot
 
 from .cli import SharingError
+from .widgets import supports_origin
 
 MAX_AGE = timedelta(days=14)
 APPLYING_TIMEOUT = timedelta(minutes=10)
@@ -306,8 +307,9 @@ def pending_decisions(addon, view) -> list:
             body = f"{body}\nRequirements and plan together: approve them on the ticket page."
         else:
             choices = (("apply", "Apply"), ("ignore", "Ignore"))
+        extra = {"origin": "phone"} if supports_origin() else {}   # TF-20
         out.append(PendingDecision(did, title[:200], body[:2000], None if request else rec.get("ticket"), stale,
-                                   choices, "info", anchor))
+                                   choices, "info", anchor, **extra))
     return out
 
 
