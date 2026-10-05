@@ -21,6 +21,8 @@ export function validPath(value) {
   if (!/^\/(?![/\\])[\x21-\x7e]*$/.test(value) || /[\\#]/.test(value)) return null;
   const q = value.indexOf("?");
   const pathPart = q < 0 ? value : value.slice(0, q);
+  // one canonical spelling: no empty segment, and no percent-escape of a character that needs none (/%61/x is /a/x)
+  if (pathPart.includes("//") || /%(3\d|4[1-9A-F]|5[0-9A]|6[1-9A-F]|7[0-9A]|2[DE]|5F|7E)/i.test(pathPart)) return null;
   for (const raw of pathPart.split("/").slice(1)) {
     let seg;
     try { seg = decodeURIComponent(raw); } catch { return null; }

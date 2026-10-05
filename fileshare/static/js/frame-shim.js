@@ -6,9 +6,15 @@
 // XMLHttpRequest, EventSource, link clicks, form submits) becomes a message to the TIX page (js/frame-host.js), which
 // validates it and hands it to the transport. The shim is the polite path only; the host trusts nothing it says.
 //
-// Messages: {k: "orch-frame-1", t, ...}. To the host: hello {tok}, pong {n}, req, sopen, sclose, abort, write, rendered,
-// hist, theme, copy, open, download, log (each with sid once the host answered hello). From the host: ready {sid}, ping,
-// go {path}, res, page, handled, err, sdata, send, copied. docs/bridge-frame.md has the fields.
+// Channel. The one message that goes through window.postMessage is hello {k, t: "hello", tok}; the host answers
+// ready with ONE MessagePort and everything else, both ways, travels on that port: a document that replaces this one
+// (a navigation the shim did not see) never holds the port, so it can neither speak to the host nor listen. The port
+// and every built-in that touches it are captured below, before any page script exists, and used through the captured
+// Reflect.apply, so a page that poisons prototypes (Function.prototype.call, MessageEvent.prototype.data, Object.assign,
+// Array and Promise methods) never sees the port or a secret. Messages are built as object literals.
+// Messages on the port: {t, ...}. To the host: pong {n}, req, sopen, sclose, abort, write, rendered, hist, theme, copy,
+// open, download, log. From the host: ping {n}, go {path}, res, page, handled, err, sdata, send, copied.
+// docs/bridge-frame.md has the fields.
 (() => {
   "use strict";
   const K = "orch-frame-1";
@@ -18,10 +24,19 @@
   root.removeAttribute("data-tok");                  // the page that runs later must not find it
   const ORIGIN = location.origin;                    // the TIX origin the frame's URL is on; the document's own origin is opaque
   const parentWin = window.parent;
+  const apply = Reflect.apply;
+  const winPost = parentWin.postMessage;
+  const portPost = MessagePort.prototype.postMessage;
+  const portDesc = (proto, name) => Object.getOwnPropertyDescriptor(proto, name);
+  const evData = portDesc(MessageEvent.prototype, "data").get;
+  const evPorts = portDesc(MessageEvent.prototype, "ports").get;
+  const evSource = portDesc(MessageEvent.prototype, "source").get;
+  const evOrigin = portDesc(MessageEvent.prototype, "origin").get;
+  const portSetOnMessage = portDesc(MessagePort.prototype, "onmessage").set;
+  let port = null;                                   // the one MessagePort; never put on any object the page can reach
   const NativeRequest = Request, NativeResponse = Response, NativeURL = URL, NativeFormData = FormData;
   const CACHE_ENTRIES = 128, CACHE_BYTES = 24 * 1024 * 1024;
 
-  let sid = null;
   let gen = 0;                                       // the page generation: bumped by every document write
   let seq = 0;
   let navSeq = 0;                                    // the newest navigation; an older answer is dropped
@@ -30,7 +45,7 @@
   const streams = new Map();                         // stream id -> EventSource
   const copies = new Map();
 
-  const post = (m, transfer) => parentWin.postMessage(Object.assign({ k: K, sid }, m), ORIGIN, transfer || []);
+  const post = (m, transfer) => { if (port !== null) apply(portPost, port, [m, transfer || []]); };
   const log = (m) => { try { post({ t: "log", m: String(m).slice(0, 200) }); } catch (e) { /* nothing to tell */ } };
   const stale = () => new TypeError("the page changed");
   const aborted = () => new DOMException("aborted", "AbortError");
@@ -52,11 +67,11 @@
   function call(intent, method, path, headers, body) {
     let id = 0;
     const p = new Promise((resolve, reject) => {
-      if (sid === null) { reject(new TypeError("the frame is not connected")); return; }
+      if (port === null) { reject(new TypeError("the frame is not connected")); return; }
       id = ++seq;
       pending.set(id, { resolve, reject, gen });
-      const m = { t: "req", id, gen, intent, method, path, headers: headers || {} };
-      if (body) { m.body = body; post(m, [body]); } else post(m);
+      if (body) post({ t: "req", id, gen, intent, method, path, headers: headers || {}, body }, [body]);
+      else post({ t: "req", id, gen, intent, method, path, headers: headers || {} });
     });
     p.id = id;
     return p;
@@ -131,7 +146,7 @@
       this.withCredentials = false;
       this.readyState = 0;
       this._buf = ""; this._type = ""; this._data = [];
-      if (path === null || sid === null) { this.readyState = 2; queueMicrotask(() => this._fire("error")); return; }
+      if (path === null || port === null) { this.readyState = 2; queueMicrotask(() => this._fire("error")); return; }
       this._id = ++seq;
       streams.set(this._id, this);
       post({ t: "sopen", id: this._id, gen, path });
@@ -189,8 +204,14 @@
     const m = new Map();
     return { get: (k) => (m.has(k) ? m.get(k) : null), set: (k, v) => { m.set(k, String(v)); }, remove: (k) => { m.delete(k); } };
   };
+  const XLINK = "http://www.w3.org/1999/xlink";
+  // the address of an anchor in any namespace: <a href>, SVG <a xlink:href>, or an animated SVG href
+  const linkHref = (a) => {
+    const v = a.getAttribute("href") ?? a.getAttributeNS(XLINK, "href") ?? (a.href && typeof a.href === "object" ? a.href.animVal : null);
+    return typeof v === "string" ? v : "";
+  };
   function linkAction(a, out) {
-    const abs = resolveUrl(a.getAttribute("href"));
+    const abs = resolveUrl(linkHref(a));
     if (!abs) return;
     if (abs.origin !== ORIGIN) { if (abs.protocol === "https:" || abs.protocol === "http:") post({ t: "open", href: abs.href }); return; }
     const path = abs.pathname + abs.search;
@@ -199,7 +220,8 @@
     else if (path === current.split("#")[0] && abs.hash) { const t = document.getElementById(decodeURIComponent(abs.hash.slice(1))); if (t) t.scrollIntoView(); setCurrent(path + abs.hash); }
     else navigate("GET", path + abs.hash, null, null, true);
   }
-  const outClick = (e, a) => Boolean((a.target && a.target !== "_self") || e.ctrlKey || e.metaKey || e.shiftKey);
+  // (an SVG anchor's .target is an object, so the attribute is read)
+  const outClick = (e, a) => { const t = a.getAttribute("target"); return Boolean((t && t !== "_self") || e.ctrlKey || e.metaKey || e.shiftKey); };
   window.orchHost = {
     path: () => part(/^[^?#]*/),
     search: () => part(/\?[^#]*/),
@@ -223,8 +245,8 @@
       current: () => current,
     },
     setTheme(value) { post({ t: "theme", value: String(value) }); },
-    session: storeOf(),
-    local: storeOf(),
+    session: Object.freeze(storeOf()),
+    local: Object.freeze(storeOf()),
     copy(text) {
       return new Promise((resolve, reject) => {
         const id = ++seq;
@@ -233,9 +255,11 @@
         post({ t: "copy", id, text: String(text) });
       });
     },
-    openLink(a) { if (!a || !a.getAttribute || !a.getAttribute("href")) return false; linkAction(a, true); return true; },
-    download(a) { if (!a || !a.getAttribute || !a.getAttribute("href")) return false; linkAction(a, true); return true; },
+    openLink(a) { if (!a || !a.getAttribute || !linkHref(a)) return false; linkAction(a, true); return true; },
+    download(a) { if (!a || !a.getAttribute || !linkHref(a)) return false; linkAction(a, true); return true; },
   };
+  Object.freeze(window.orchHost.pageHistory);
+  Object.freeze(window.orchHost);                    // the dashboard copies the methods it needs; the page cannot swap them
 
   // ---- subresources ------------------------------------------------------------------------------------------
   const cache = new Map();                           // path -> Promise<{status, headers, body}>; assets only, never pages
@@ -267,7 +291,18 @@
   };
   const decode = (r) => new TextDecoder().decode(r.body);
   const hex = (buf) => Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, "0")).join("");
-  // A script runs only when the file's SHA-256 starts with the ?v= of its URL (the dashboard's content stamp).
+  // A script runs only when (1) its path is under the dashboard's own static files (a constant here, never taken from the
+  // page), (2) the answer is a JavaScript type (the shim fetched the bytes, so it does the nosniff check), and (3) the
+  // file's SHA-256 starts with the ?v= of its URL. (3) is cache busting and a check against an accidental mismatch only:
+  // the page writes both the URL and the stamp, so against hostile markup it adds nothing; (1) and (2) are what keep
+  // an artifact or any other file from running as a script.
+  const SCRIPT_PREFIXES = ["/static/"];
+  const JS_TYPE = /^(text|application)\/(x-)?(java|ecma)script$/;
+  const scriptAllowed = (path, r) => {
+    const pathname = path.split("?")[0];
+    const type = String((r && r.headers && r.headers["content-type"]) || "").split(";")[0].trim().toLowerCase();
+    return (!r || JS_TYPE.test(type)) && SCRIPT_PREFIXES.some((x) => pathname.startsWith(x)) && !pathname.includes("..");
+  };
   async function pinned(path, r) {
     const v = new NativeURL(path, ORIGIN).searchParams.get("v") || "";
     if (!/^[0-9a-f]{12,64}$/.test(v) || !crypto.subtle) return false;
@@ -291,12 +326,21 @@
   // similar URLs, srcdoc and any nonce attribute.
   const URL_ATTRS = /^(href|src|action|formaction|xlink:href|data|poster|background|ping|srcset|srcdoc|nonce)$/i;
   const BAD_URL = /^(javascript|vbscript|data:text\/html|data:application\/xhtml)/i;
+  const HTML_NS = "http://www.w3.org/1999/xhtml";
   function sanitize(root) {
-    root.querySelectorAll("script,noscript").forEach((n) => n.remove());
+    // scripts, and the SMIL elements that could set an address later (animate href to another origin)
+    root.querySelectorAll("script,noscript,animate,set,animateMotion,animateTransform,animateColor,discard").forEach((n) => n.remove());
     root.querySelectorAll("*").forEach((n) => {
       for (const a of [...n.attributes]) {
         const squashed = a.value.replace(/[\u0000-\u0020\u007f-\u009f]/g, "");
-        if (/^on/i.test(a.name) || /^(srcdoc|ping|nonce)$/i.test(a.name) || (URL_ATTRS.test(a.name) && BAD_URL.test(squashed))) n.removeAttribute(a.name);
+        if (/^on/i.test(a.name) || /^(srcdoc|ping|nonce)$/i.test(a.name) || (URL_ATTRS.test(a.name) && BAD_URL.test(squashed))) { n.removeAttribute(a.name); continue; }
+        // an SVG or MathML element (a link, a use, an image, an anchor in a foreignObject) points only into this page or this
+        // origin: any other address is dropped. HTML links keep theirs; the shim opens those through the TIX page.
+        if (n.namespaceURI !== HTML_NS && /^(xlink:)?href$/i.test(a.name) && !a.value.startsWith("#")) {
+          let same = false;
+          try { same = new NativeURL(a.value, ORIGIN + "/").origin === ORIGIN && !/^\s*\/\//.test(a.value); } catch (e) { /* not an address */ }
+          if (!same || n.localName === "use") n.removeAttribute(a.name);
+        }
       }
       if (n.localName === "template" && n.content) sanitize(n.content);
     });
@@ -307,7 +351,10 @@
     const doc = new DOMParser().parseFromString(html, "text/html");      // inert: nothing runs, nothing loads
     const jobs = [];
     const scripts = [];
-    doc.querySelectorAll("base,object,embed,applet,frame,frameset,meta[http-equiv],link[rel~=icon],link[rel~=preload],link[rel~=modulepreload],link[rel~=prefetch],link[rel~=manifest]").forEach((n) => n.remove());
+    doc.querySelectorAll("base,object,embed,applet,frame,frameset,meta[http-equiv]").forEach((n) => n.remove());
+    // links: an allow-list. Only a stylesheet stays (it becomes a style below); dns-prefetch, preconnect, prerender, next and
+    // the rest would reach out.
+    doc.querySelectorAll("link").forEach((l) => { if (!l.relList.contains("stylesheet")) l.remove(); });
     // a nested frame (an artifact, a widget) cannot run here: a link that opens it in the TIX viewer takes its place
     doc.querySelectorAll("iframe").forEach((f) => {
       const p = toPath(f.getAttribute("src") || "", pageBase);
@@ -324,7 +371,11 @@
       const type = (s.getAttribute("type") || "").toLowerCase();
       s.remove();
       if (p === null || (type && type !== "text/javascript" && type !== "application/javascript")) return;   // other scripts, inline ones, modules: gone
-      scripts.push(load(p).then(async (r) => ((await pinned(p, r)) ? decode(r) : (log(`script not run (version): ${p}`), null))).catch((e) => (log(`script: ${e.message}`), null)));
+      if (!scriptAllowed(p, null)) { log(`script not run (path): ${p}`); return; }
+      scripts.push(load(p).then(async (r) => {
+        if (!scriptAllowed(p, r)) return (log(`script not run (type): ${p}`), null);
+        return (await pinned(p, r)) ? decode(r) : (log(`script not run (version): ${p}`), null);
+      }).catch((e) => (log(`script: ${e.message}`), null)));
     });
     doc.querySelectorAll("link[rel~=stylesheet]").forEach((l) => {
       const p = toPath(l.getAttribute("href") || "", pageBase);
@@ -389,10 +440,14 @@
     if (e.defaultPrevented) return;
     const b = e.target && e.target.closest ? e.target.closest("button, input") : null;
     if (b && b.form && !b.disabled && (b.type === "submit" || b.type === "image")) ensureSubmit(b.form, b);
-    const a = e.target && e.target.closest ? e.target.closest("a[href], area[href]") : null;
-    if (!a || a.getAttribute("href").startsWith("#")) return;
+    // any anchor on the way up, whatever its namespace or attributes (HTML a, area, SVG a with href or xlink:href)
+    let a = null;
+    for (const n of e.composedPath()) { if (n.localName === "a" || n.localName === "area") { a = n; break; } }
+    if (!a) return;
+    const href = linkHref(a);
+    if (href.startsWith("#")) return;
     e.preventDefault();                                                    // the frame never navigates itself
-    linkAction(a, outClick(e, a));
+    if (href) linkAction(a, outClick(e, a));
   }
   function submitForm(form, submitter) {
     let fd;
@@ -452,20 +507,28 @@
   })));
   function arm() {
     window.addEventListener("click", onClick, false);
+    window.addEventListener("auxclick", onClick, false);
     window.addEventListener("submit", onSubmit, false);
     window.addEventListener("submit", () => { submits += 1; }, true);
     window.addEventListener("keydown", onKeydown, false);
     window.addEventListener("error", onError, true);
-    window.addEventListener("message", onMessage, false);
   }
   function watch() { imgs.disconnect(); if (document.documentElement) imgs.observe(document.documentElement, { childList: true, subtree: true }); }
 
   // ---- from the TIX page -----------------------------------------------------------------------------------
-  function onMessage(e) {
-    const m = e.data;
-    if (e.source !== parentWin || e.origin !== ORIGIN || m === null || typeof m !== "object" || m.k !== K) return;
-    if (m.t === "ready") { if (sid === null && typeof m.sid === "string") sid = m.sid; return; }
-    if (sid === null) return;
+  // Before the port exists: one window message, the host's ready, from the parent, carrying the port.
+  function onReady(e) {
+    if (port !== null || apply(evSource, e, []) !== parentWin || apply(evOrigin, e, []) !== ORIGIN) return;
+    const m = apply(evData, e, []);
+    const ports = apply(evPorts, e, []);
+    if (m === null || typeof m !== "object" || m.k !== K || m.t !== "ready" || ports.length !== 1) return;
+    port = ports[0];
+    apply(portSetOnMessage, port, [onPort]);
+    window.removeEventListener("message", onReady, false);
+  }
+  function onPort(e) {
+    const m = apply(evData, e, []);
+    if (m === null || typeof m !== "object") return;
     if (m.t === "ping") { post({ t: "pong", n: m.n }); return; }
     if (m.t === "go") { if (typeof m.path === "string") navigate("GET", m.path, null, null, false); return; }
     if (m.t === "copied") { const f = copies.get(m.id); copies.delete(m.id); if (f) f(m.ok === true); return; }
@@ -486,5 +549,6 @@
   }
 
   arm();
-  post({ t: "hello", tok: TOK });
+  window.addEventListener("message", onReady, false);
+  apply(winPost, parentWin, [{ k: K, t: "hello", tok: TOK }, ORIGIN]);
 })();

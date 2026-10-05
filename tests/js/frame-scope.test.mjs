@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { checkRequest, compileScopes, validPath, PATH_MAX, BODY_MAX } from "../../fileshare/static/js/frame-scope.js";
 import { classify, isNeverPage, NEVER_PAGE } from "../../fileshare/static/js/frame-render.js";
 import { fakeTransport, assertTransport } from "../../fileshare/static/js/bridge-transport.js";
+import { boundedShape, LIMITS } from "../../fileshare/static/js/frame-host.js";
 
 const scopes = compileScopes({ rules: [
   { methods: ["GET"], pattern: "/" }, { methods: ["GET"], pattern: "/t/:ref" }, { methods: ["GET"], pattern: "/static/*" },
@@ -20,6 +21,27 @@ test("validPath: one slash, printable ASCII, no dot segments, no encoded separat
     assert.equal(validPath(bad), null, JSON.stringify(bad));
   }
   assert.equal(validPath("/?a=../b"), "/?a=../b", "dots in a query are data, not a segment");
+});
+
+test("validPath: one canonical spelling (no escape of a character that needs none, no empty segment)", () => {
+  for (const bad of ["/%61/x", "/%41", "/a%7e", "/a%2d", "/a%5Fb", "/a%30", "/a//x", "/t/x//raw"]) assert.equal(validPath(bad), null, bad);
+  for (const ok of ["/a%20b", "/A/x", "/t/L-1", "/a/b/", "/a%C3%A9"]) assert.equal(validPath(ok), ok, ok);
+});
+
+test("never-a-page matches a canonical form: case, a trailing slash and repeated slashes do not slip past", () => {
+  for (const p of ["/A/x", "/a/X/", "/t/X/raw/", "/T/x/RAW", "/t/x//raw", "/Addons/n/Files/tok", "/WPF/a/b", "/w/x"]) assert.equal(isNeverPage(p), true, p);
+  for (const p of ["/t/x/rawer", "/t/x/ra", "/board", "/addons/n/", "/t/x"]) assert.equal(isNeverPage(p), false, p);
+  assert.equal(classify({ path: "/T/X/raw/", status: 200, headers: { "content-type": "text/html" }, page: true }), "viewer");
+});
+
+test("frame messages are bounded before anything reads them", () => {
+  assert.equal(boundedShape({ t: "req", id: 1 }), true);
+  for (const bad of [null, "x", 7, [1], [], new Map(), Object.create({ inherited: 1 }), {}, { t: 7 }, { t: "x".repeat(17) }, { t: "log", m: "y".repeat(LIMITS.string + 1) },
+    { t: "req", ...Object.fromEntries(Array.from({ length: LIMITS.keys }, (_, i) => [`k${i}`, 1])) }]) {
+    assert.equal(boundedShape(bad), false, JSON.stringify(bad));
+  }
+  assert.equal(boundedShape(JSON.parse('{"t":"req","__proto__":{"x":1}}')), true, "an own __proto__ key is data, and still bounded");
+  assert.equal(boundedShape({ t: "log", m: "y".repeat(LIMITS.string) }), true);
 });
 
 test("the scope table: method and path must both match; a stream needs a stream rule", () => {
@@ -54,6 +76,9 @@ test("checkRequest: a crafted path or method is refused before anything else", (
   assert.equal(code(req({ intent: "asset", method: "POST", path: "/t/L-1/answer" })), "method", "an asset is a GET");
   assert.equal(code(req({ intent: "open", method: "POST", path: "/t/L-1/answer" })), "method");
   assert.equal(code(req({ intent: "other" })), "shape");
+  assert.equal(code(req({ intent: "asset", path: "/secret" })), "scope", "an asset is no way round the table");
+  assert.equal(code(req({ intent: "open", path: "/secret" })), "scope");
+  assert.equal(code(req({ intent: "asset", path: "/static/x.js" })), "ok");
   assert.equal(code(req({ id: 0 })), "shape");
   assert.equal(code(req({ id: "1" })), "shape");
   assert.equal(code(req({ gen: -1 })), "shape");
@@ -142,4 +167,15 @@ test("the shim: no eval, no closing script tag, document writes only for the pag
   assert.doesNotMatch(src, /<\/script|<!--|\beval\(|new Function|innerHTML\s*=|insertAdjacentHTML/);
   assert.equal(src.match(/document\.write\(/g).length, 1);
   assert.doesNotMatch(src, /^\s*(import|export)\s/m, "a classic script: no import or export statements");
+});
+
+test("the shim talks to the host through one captured port: window.postMessage only for hello, no Object.assign on a message", () => {
+  const src = readFileSync(new URL("../../fileshare/static/js/frame-shim.js", import.meta.url), "utf8");
+  assert.equal((src.match(/apply\(winPost,/g) || []).length, 1, "one window message: hello");
+  assert.equal((src.match(/parentWin\.postMessage/g) || []).length, 1, "only the capture of the function");
+  assert.doesNotMatch(src, /window\.parent\.postMessage|\bsid\b/);
+  assert.match(src, /apply\(portPost, port,/, "the port is used through the captured Reflect.apply and postMessage");
+  assert.doesNotMatch(src, /Object\.assign\(\{ k: K/, "messages are literals");
+  assert.match(src, /^\s*Object\.freeze\(window\.orchHost\);/m);
+  assert.match(src, /^\s*Object\.freeze\(window\.orchHost\.pageHistory\);/m);
 });

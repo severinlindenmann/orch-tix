@@ -1,15 +1,16 @@
 // fileshare/static/js/frame-host.js — the TIX app's side of the dashboard frame (docs/bridge-frame.md).
-// Builds the sandboxed iframe (/sandbox/dash, sandbox="allow-scripts", opaque origin), talks to it over postMessage
-// and hands every request to the abstract transport (bridge-transport.js). Loaded by nothing yet: the unlock and
-// wiring ticket imports it.
+// Builds the sandboxed iframe (/sandbox/dash, sandbox="allow-scripts", opaque origin), talks to it and hands every
+// request to the abstract transport (bridge-transport.js). Loaded by nothing yet: the unlock and wiring ticket imports it.
 //
 // Who is talking. A sandboxed frame's origin is the string "null" for every document it ever holds, so the origin
-// proves nothing. A message counts only when (1) event.source is this iframe's window, (2) event.origin is "null",
-// (3) it is within the size and rate caps, and (4) after the shim proved it holds the one-time token written into its
-// document (hello), it carries the session id this host answered with. The host replies only to the frame after that,
-// and never while a load it did not expect is unproven. Any load the app did not start (a link, a form, location=,
-// a reload) destroys the iframe and builds a new one.
-import { el } from "./ui.js";
+// proves nothing, and the iframe's WindowProxy stays the same when a document replaces another. So identity is a
+// channel, not a name: the one window message this host accepts is hello, from this iframe's window with the opaque
+// origin, carrying the one-time token written into the document it asked for. The host answers with ONE MessagePort
+// (ready) and everything else, both ways, travels on that port. A document that replaced the shim's (a navigation the
+// shim did not start, a page that sets location) never holds the port: it cannot speak to the host and cannot listen.
+// Window messages other than a valid hello are dropped. A heartbeat over the port rebuilds the iframe when it stops
+// answering, whatever the iframe's load events did, and any load the app did not start rebuilds it at once.
+import { el, shown } from "./ui.js";
 import { PROTOCOL, BODY_MAX, checkRequest, compileScopes, validPath } from "./frame-scope.js";
 import { classify } from "./frame-render.js";
 import { assertTransport } from "./bridge-transport.js";
@@ -22,13 +23,18 @@ export const LIMITS = {
   response: 8 * 1024 * 1024,   // one buffered answer
   page: 4 * 1024 * 1024,       // one dashboard page
   copy: 2000,            // characters the dashboard may ask to copy (and the person sees all of them)
-  copyMs: 30000,         // how long the question stays up
-  copyGapMs: 2000,       // between two questions
+  promptMs: 30000,       // how long a question to the person stays up
+  promptGapMs: 2000,     // between two questions
+  promptDelayMs: 500,    // a click on a question's button counts only this long after it appeared
+  gestureGapMs: 1000,    // one action that needs a user gesture per this long
   rebuilds: 5,           // rebuilds per minute before the frame is left stopped
-  pongMs: 1500,
+  helloMs: 6000,         // the shim must say hello within this
+  pingMs: 3000,          // heartbeat: a ping over the port; the next tick rebuilds the frame if it was not answered
   writeLoads: 2,         // loads one document write of the shim may cause (Chromium and WebKit fire one more)
   writeMs: 1500,
   graceMs: 150,          // an unannounced load waits this long for the shim's announcement before it is treated as a navigation
+  string: 4096,          // longest string in a frame message
+  keys: 12,              // most own keys in a frame message
 };
 const REPLY_HEADERS = ["content-type", "etag", "last-modified", "cache-control", "content-language"];
 const THEMES = ["light", "dark", "system"];
@@ -36,11 +42,22 @@ const text = new TextDecoder();
 
 const randomToken = () => Array.from(crypto.getRandomValues(new Uint8Array(24)), (b) => b.toString(16).padStart(2, "0")).join("");
 
+// The cheapest checks first, before anything reads a field: the browser has already cloned the message (a hostile frame
+// can make that cost something; nothing here can stop it), so what is bounded is what the host does with it.
+export function boundedShape(m, limits = LIMITS) {
+  if (m === null || typeof m !== "object" || Array.isArray(m) || Object.getPrototypeOf(m) !== Object.prototype) return false;
+  const keys = Object.keys(m);
+  if (keys.length > limits.keys || typeof m.t !== "string" || m.t.length > 16) return false;
+  for (const k of keys) if (typeof m[k] === "string" && m[k].length > limits.string) return false;
+  return true;
+}
+
 // opts: mount (element), transport, scopes (table, see frame-scope.js), start (path),
 //   viewer({path, status, headers, body}), download({path, status, headers, body}), external(url),
 //   history({op: "push" | "replace" | "back" | "forward" | "go", path?, n?}), theme(value), copy(text) -> Promise,
 //   notice({kind, text}) (default: a line of text above the frame), log(text), limits (overrides LIMITS),
-//   tap(msg) (sees every message sent to the frame: tests and debugging).
+//   tap(msg) (sees every message sent to the frame), onPort(port) (the host's end of the channel) and isActive() (replaces
+//   navigator.userActivation.isActive, which a test driver's own scripts keep switching on): tests and debugging.
 export function createFrameHost(opts) {
   const transport = assertTransport(opts.transport);
   const scopes = compileScopes(opts.scopes);
@@ -59,21 +76,23 @@ export function createFrameHost(opts) {
 
   let frame = null;
   let tok = null;          // the one-time token of the document being built; null once used
-  let sid = null;          // set when the shim proved the token; every later frame message carries it
-  let suspect = true;      // a load happened that no pong has vouched for: nothing is sent to the frame meanwhile
-  let held = [];
+  let port = null;         // the host's end of the channel; null until the shim proved the token
   let seq = 0;
-  let pongTimer = null;
+  let pingTimer = null;
+  let awaiting = false;    // a ping is out that the shim has not answered
+  let lastPing = 0;
   let helloTimer = null;
+  let graceTimer = null;
   let writeLoads = 0;
   let writeUntil = 0;
   let loadsExpected = 0;   // the load of the document this host asked for
-  let lastPing = 0;
-  let graceTimer = null;
   let flooding = false;
   let current = opts.start || "/";
   let destroyed = false;
   let stopped = false;
+  let histBack = 0;        // history entries the frame pushed, and how many of them a Back has stepped over
+  let histFwd = 0;
+  let lastGesture = 0;
   const inflight = new Map();        // request id -> AbortController
   const streams = new Set();         // ids of inflight entries that are streams
   const rebuilds = [];
@@ -81,67 +100,87 @@ export function createFrameHost(opts) {
   let windowCount = 0;
   let overSeconds = 0;
 
-  // The clipboard. The frame can only ASK; the text is shown in the TIX page and written only by a click there (a real
-  // gesture), once, for the document the app just wrote. There is no way to read the clipboard.
-  let copyBox = null;
-  let lastCopy = 0;
-  function clearCopy(ok) {
-    if (!copyBox) return;
-    clearTimeout(copyBox.timer);
-    copyBox.node.remove();
-    const { id } = copyBox;
-    copyBox = null;
-    send({ t: "copied", id, ok: ok === true });
-  }
-  function askCopy(id, text) {
+  // A user gesture is a real one in the TIX page or in a frame inside it (user activation reaches the parent), at most
+  // one action per gestureGapMs. Without the API (an old browser) nothing that needs a gesture happens.
+  function gesture() {
     const now = Date.now();
-    if (suspect || copyBox || now - lastCopy < limits.copyGapMs) return send({ t: "copied", id, ok: false });
-    lastCopy = now;
-    const write = async () => {
+    const active = opts.isActive ? opts.isActive() : Boolean(navigator.userActivation && navigator.userActivation.isActive);
+    if (!active || now - lastGesture < limits.gestureGapMs) return false;
+    lastGesture = now;
+    return true;
+  }
+
+  // ---- questions to the person ---------------------------------------------------------------------------
+  // The frame can only ASK. A question shows the exact text (hidden and bidirectional characters made visible) in a
+  // fixed box that does not move the frame, and its button works only for a real click on it, not at once, once.
+  // There is no way to read the clipboard.
+  let prompt = null;
+  let lastPrompt = 0;
+  function closePrompt(ok) {
+    if (!prompt) return;
+    clearTimeout(prompt.timer);
+    clearTimeout(prompt.enable);
+    prompt.node.remove();
+    const { onClose } = prompt;
+    prompt = null;
+    if (onClose) onClose(ok === true);
+  }
+  // spec: {title, text, label, run: async () => void, onClose(ok)?}; false when another question is up or one came too soon
+  function ask(spec) {
+    const now = Date.now();
+    if (prompt || now - lastPrompt < limits.promptGapMs || !frame) return false;
+    lastPrompt = now;
+    const act = el("button", { type: "button", class: "btn", disabled: true, onclick: async (e) => {
+      if (!e.isTrusted || Date.now() - prompt.shownAt < limits.promptDelayMs) return;
       let ok = false;
-      try { await cb.copy(text); ok = true; } catch { /* the page is told it failed */ }
-      clearCopy(ok);
-    };
-    const node = el("div", { class: "frame-copy", role: "group", "aria-label": "Copy from the dashboard" },
-      el("p", {}, "The dashboard asks to copy this text:"), el("pre", {}, text),
-      el("button", { type: "button", class: "btn", onclick: write }, "Copy"),
-      el("button", { type: "button", class: "btn", onclick: () => clearCopy(false) }, "Dismiss"));
-    wrap.insertBefore(node, frame);
-    copyBox = { id, node, timer: setTimeout(() => clearCopy(false), limits.copyMs) };
+      try { await spec.run(); ok = true; } catch { /* reported by the callback's own failure */ }
+      closePrompt(ok);
+    } }, spec.label);
+    const node = el("div", { class: "frame-prompt", role: "group", "aria-label": spec.title },
+      el("p", {}, spec.title), el("pre", {}, shown(spec.text)),
+      act, el("button", { type: "button", class: "btn", onclick: () => closePrompt(false) }, "Dismiss"));
+    wrap.append(node);                                   // after the frame in the document, fixed on screen: the frame never moves
+    prompt = { node, shownAt: now, onClose: spec.onClose,
+      timer: setTimeout(() => closePrompt(false), limits.promptMs),
+      enable: setTimeout(() => { act.disabled = false; }, limits.promptDelayMs) };
+    return true;
   }
 
   const abortAll = () => { for (const ac of inflight.values()) ac.abort(); inflight.clear(); streams.clear(); };
-  const clearTimers = () => { clearTimeout(pongTimer); clearTimeout(helloTimer); clearTimeout(graceTimer); pongTimer = helloTimer = graceTimer = null; };
+  const clearTimers = () => {
+    clearInterval(pingTimer); clearTimeout(helloTimer); clearTimeout(graceTimer);
+    pingTimer = helloTimer = graceTimer = null;
+  };
 
   function send(msg, transfer) {
-    if (destroyed || !frame || sid === null) return;
-    if (suspect) { held.push([msg, transfer]); return; }
-    frame.contentWindow?.postMessage({ k: PROTOCOL, ...msg }, "*", transfer || []);
+    if (destroyed || !port) return;
+    port.postMessage(msg, transfer || []);
     if (opts.tap) opts.tap(msg);
   }
 
   function build() {
     tok = randomToken();
-    sid = null;
-    suspect = true;
-    held = [];
+    port = null;
+    awaiting = false;
     writeLoads = 0;
     writeUntil = 0;
     loadsExpected = 1;
+    histBack = histFwd = 0;
     windowStart = windowCount = overSeconds = 0;
     frame = el("iframe", { class: "frame-dash", sandbox: "allow-scripts", referrerpolicy: "no-referrer", loading: "eager",
       title: opts.title || "Dashboard", src: `/sandbox/dash?tok=${tok}` });
     frame.addEventListener("load", onLoad);
-    wrap.append(frame);
+    wrap.insertBefore(frame, line.nextSibling);
     // no hello in time: a frame that never started its shim is not the one this host built
-    helloTimer = setTimeout(() => rebuild("no hello"), limits.pongMs * 4);
+    helloTimer = setTimeout(() => rebuild("no hello"), limits.helloMs);
   }
 
   function rebuild(reason) {
     if (destroyed) return;
     clearTimers();
     abortAll();
-    clearCopy(false);
+    closePrompt(false);
+    if (port) { port.onmessage = null; port.close(); port = null; }
     frame?.remove();
     frame = null;
     const now = Date.now();
@@ -155,16 +194,13 @@ export function createFrameHost(opts) {
   function onLoad() {
     if (destroyed || !frame) return;
     if (loadsExpected > 0) { loadsExpected -= 1; return; }   // the document this host asked for: the hello vouches for it
-    suspect = true;
     // A later load: the shim's own document write announces up to a few, anything else is the page leaving. The
     // announcement (a message) and the load are separate tasks and may arrive in either order, so an unannounced
-    // load gets a short grace for the announcement; nothing is trusted meanwhile, and without it the frame is rebuilt.
-    if (!takeWriteLoad()) {
-      clearTimeout(graceTimer);
-      graceTimer = setTimeout(() => { graceTimer = null; if (takeWriteLoad()) ping(); else rebuild("unexpected load"); }, limits.graceMs);
-      return;
-    }
-    ping();
+    // load gets a short grace for the announcement, and without it the frame is rebuilt. (A foreign document can hold
+    // its own load back; the heartbeat covers that.)
+    if (takeWriteLoad()) return;
+    clearTimeout(graceTimer);
+    graceTimer = setTimeout(() => { graceTimer = null; if (!takeWriteLoad()) rebuild("unexpected load"); }, limits.graceMs);
   }
 
   function takeWriteLoad() {
@@ -172,19 +208,11 @@ export function createFrameHost(opts) {
     return false;
   }
 
-  function ping() {
-    const n = lastPing = ++seq;
-    clearTimeout(pongTimer);
-    // sent past `send` on purpose: it is what makes the frame trusted again
-    frame.contentWindow?.postMessage({ k: PROTOCOL, t: "ping", n }, "*");
-    pongTimer = setTimeout(() => rebuild("no pong"), limits.pongMs);
-  }
-
-  function trusted() {
-    suspect = false;
-    const queue = held;
-    held = [];
-    for (const [msg, transfer] of queue) send(msg, transfer);
+  function heartbeat() {
+    if (awaiting) { rebuild("no pong"); return; }
+    awaiting = true;
+    lastPing = ++seq;
+    send({ t: "ping", n: lastPing });
   }
 
   function rateOk() {
@@ -233,6 +261,18 @@ export function createFrameHost(opts) {
     return final && scopes.allows("GET", final) ? final : null;
   };
 
+  const nameOf = (view) => {
+    const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(String(view.headers["content-disposition"] || ""));
+    const fromPath = view.path.split("?")[0].split("/").pop();
+    return (m ? decodeURIComponent(m[1]) : fromPath || "file").slice(0, 120);
+  };
+  // A download is offered to the person (name and size shown); the bytes are handed over on a click in the app.
+  function offerDownload(view) {
+    const ok = ask({ title: "The dashboard offers a download:", text: `${nameOf(view)} (${view.body.length} bytes)`, label: "Download",
+      run: async () => { cb.download(view); } });
+    if (!ok) notice({ kind: "error", text: "Another question is waiting; try the download again." });
+  }
+
   async function handleRequest(req) {
     if (inflight.size >= limits.inflight) return refused(req, "busy");
     const ac = new AbortController();
@@ -247,9 +287,10 @@ export function createFrameHost(opts) {
       if (req.intent === "page" || req.intent === "open") {
         const kind = classify({ path, status: head.status, headers: view.headers, page: head.page }, { allowPage: req.intent === "page" });
         if (kind === "page") return send({ t: "page", id: req.id, gen: req.gen, path, html: text.decode(body) });
-        if (kind === "viewer") cb.viewer(view);
-        else if (kind === "download") cb.download(view);
-        else notice({ kind: "error", text: `The dashboard answered ${Number(head.status) || "with an error"} for ${path.slice(0, 120)}.` });
+        if (kind === "error") notice({ kind: "error", text: `The dashboard answered ${Number(head.status) || "with an error"} for ${path.slice(0, 120)}.` });
+        else if (req.intent === "page" && !gesture()) notice({ kind: "error", text: "Click the link to open that." });   // opening anything outside the frame needs a click
+        else if (kind === "viewer") cb.viewer(view);
+        else offerDownload(view);
         return send({ t: "handled", id: req.id, gen: req.gen, outcome: kind });
       }
       const headers = {};
@@ -292,7 +333,7 @@ export function createFrameHost(opts) {
       if (ac.signal.aborted) return;
       const final = answered(head, { path });
       if (!final) return;
-      if (head.status === 200) cb.download({ path: final, status: head.status, headers: head.headers || {}, body });
+      if (head.status === 200) offerDownload({ path: final, status: head.status, headers: head.headers || {}, body });
       else notice({ kind: "error", text: `The dashboard answered ${Number(head.status) || "with an error"} for ${final.slice(0, 120)}.` });
     } catch (e) {
       notice({ kind: "error", text: String(e?.message || "download failed").slice(0, 200) });
@@ -301,40 +342,62 @@ export function createFrameHost(opts) {
     }
   }
 
+  // An address outside the dashboard: shown to the person (as text) with a button; opened with noopener and noreferrer.
   function openOutside(m) {
     if (typeof m.href !== "string" || m.href.length > 2048) return;
     let url;
     try { url = new URL(m.href); } catch { return; }
-    if (url.protocol === "https:" || url.protocol === "http:") cb.external(url.href);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return;
+    if (!ask({ title: "The dashboard wants to open this address in a new tab:", text: url.href, label: "Open", run: async () => { cb.external(url.href); } })) {
+      notice({ kind: "error", text: "Another question is waiting; try the link again." });
+    }
   }
 
-  function onMessage(event) {
-    if (destroyed) { removeEventListener("message", onMessage); return; }
+  // History the frame asks for stays inside the entries the frame itself pushed (the app keeps its own history).
+  function history(op, path, n) {
+    if (op === "replace" || (op === "push" && !gesture())) { current = path; cb.history({ op: "replace", path }); return; }   // no gesture: no new entry
+    if (op === "push") { histBack += 1; histFwd = 0; current = path; cb.history({ op: "push", path }); return; }
+    const k = op === "back" ? -1 : op === "forward" ? 1 : n;
+    if (!Number.isSafeInteger(k) || k === 0 || (k < 0 ? -k > histBack : k > histFwd) || !gesture()) return;
+    histBack += k; histFwd -= k;
+    cb.history(op === "go" ? { op, n: k } : { op });
+  }
+
+  // ---- the one window message: hello ---------------------------------------------------------------------
+  function onWindowMessage(event) {
+    if (destroyed) { removeEventListener("message", onWindowMessage); return; }
     if (!frame || !frame.isConnected) return;
     if (!event.source || event.source !== frame.contentWindow) return;      // any other window (or none): not ours, not even counted
     if (event.origin !== "null") return;                    // a sandboxed document has the opaque origin
     if (!rateOk()) return;
     const m = event.data;
-    if (m === null || typeof m !== "object" || Object.getPrototypeOf(m) !== Object.prototype || m.k !== PROTOCOL || typeof m.t !== "string") return;
-    if (m.t === "hello") {
-      if (tok === null || sid !== null || m.tok !== tok) return;   // one time: the token is spent by the first proof
-      tok = null;
-      clearTimeout(helloTimer);
-      sid = randomToken();
-      suspect = false;
-      send({ t: "ready", sid });
-      send({ t: "go", path: current });
-      return;
-    }
-    if (sid === null || m.sid !== sid) return;
+    if (!boundedShape(m, limits) || m.k !== PROTOCOL || m.t !== "hello") return;
+    if (tok === null || port !== null || m.tok !== tok) return;             // one time: the token is spent by the first proof
+    tok = null;
+    clearTimeout(helloTimer);
+    const channel = new MessageChannel();
+    port = channel.port1;
+    port.onmessage = onPortMessage;
+    if (opts.onPort) opts.onPort(port);
+    frame.contentWindow.postMessage({ k: PROTOCOL, t: "ready" }, "*", [channel.port2]);   // the only message that names no secret
+    pingTimer = setInterval(heartbeat, limits.pingMs);
+    send({ t: "go", path: current });
+  }
+
+  // ---- everything else: on the port ----------------------------------------------------------------------
+  function onPortMessage(event) {
+    if (destroyed || !port) return;
+    if (!rateOk()) return;
+    const m = event.data;
+    if (!boundedShape(m, limits)) return;
     switch (m.t) {
-      case "pong": if (m.n === lastPing) { clearTimeout(pongTimer); trusted(); } return;
+      case "pong": if (m.n === lastPing) awaiting = false; return;
       case "write":
         abortAll();
-        clearCopy(false);
+        closePrompt(false);
         writeLoads = limits.writeLoads;
         writeUntil = Date.now() + limits.writeMs;
-        if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; if (takeWriteLoad()) ping(); }   // its load came first
+        if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; takeWriteLoad(); }   // its load came first
         return;
       case "req": case "sopen": {
         const r = checkRequest(m, scopes, { bodyMax: BODY_MAX });
@@ -349,28 +412,28 @@ export function createFrameHost(opts) {
       case "rendered": {
         const path = validPath(m.path);
         if (!path) return;
-        current = path;
-        if (m.push === true) cb.history({ op: "push", path });
+        if (m.push === true) history("push", path); else current = path;
         return;
       }
       case "hist": {
         if (m.op === "push" || m.op === "replace") {
           const path = validPath(m.path);
-          if (!path) return;
-          current = path;
-          cb.history({ op: m.op, path });
-        } else if (m.op === "back" || m.op === "forward") cb.history({ op: m.op });
-        else if (m.op === "go" && Number.isSafeInteger(m.n) && Math.abs(m.n) <= 50) cb.history({ op: "go", n: m.n });
+          if (path) history(m.op, path);
+        } else if (m.op === "back" || m.op === "forward" || m.op === "go") history(m.op, null, m.n);
         return;
       }
       case "theme": if (THEMES.includes(m.value)) cb.theme(m.value); return;
       case "copy": {
         if (!Number.isSafeInteger(m.id)) return;
-        if (typeof m.text !== "string" || m.text.length < 1 || m.text.length > limits.copy) return send({ t: "copied", id: m.id, ok: false });
-        askCopy(m.id, m.text);
+        const id = m.id;
+        if (typeof m.text !== "string" || m.text.length < 1 || m.text.length > limits.copy) return send({ t: "copied", id, ok: false });
+        const asked = ask({ title: "The dashboard asks to copy this text:", text: m.text, label: "Copy",
+          run: () => cb.copy(m.text), onClose: (ok) => send({ t: "copied", id, ok }) });
+        if (!asked) send({ t: "copied", id, ok: false });
         return;
       }
       case "open": {
+        if (!gesture()) return;
         if (m.path !== undefined) {
           const path = validPath(m.path);
           if (path && scopes.allows("GET", path)) handleRequest({ id: -(++seq), gen: 0, intent: "open", method: "GET", path, headers: {}, body: null });
@@ -378,6 +441,7 @@ export function createFrameHost(opts) {
         return;
       }
       case "download": {
+        if (!gesture()) return;
         const path = validPath(m.path);
         if (path && scopes.allows("GET", path)) handleDownload(path);
         return;
@@ -387,7 +451,7 @@ export function createFrameHost(opts) {
     }
   }
 
-  addEventListener("message", onMessage);
+  addEventListener("message", onWindowMessage);
   build();
 
   return {
@@ -407,8 +471,9 @@ export function createFrameHost(opts) {
       destroyed = true;
       clearTimers();
       abortAll();
-      removeEventListener("message", onMessage);
-      clearCopy(false);
+      removeEventListener("message", onWindowMessage);
+      closePrompt(false);
+      if (port) { port.onmessage = null; port.close(); port = null; }
       frame?.remove();
       frame = null;
       wrap.remove();

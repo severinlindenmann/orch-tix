@@ -13,7 +13,12 @@ export const NEVER_PAGE = [
   "/a/*", "/w/*", "/wp/*", "/wpf/*", "/addons/:name/files/*", "/t/:ref/raw",
 ].map((pattern) => compileScopes({ rules: [{ methods: ["GET", "POST"], pattern }] }));
 
-export const isNeverPage = (path) => NEVER_PAGE.some((s) => s.allows("GET", pathnameOf(path)));
+// Matched on a canonical form (lower case, no repeated or trailing slash), so no spelling of the path slips past a route
+// that a router might fold the same way.
+export const isNeverPage = (path) => {
+  const p = pathnameOf(path).toLowerCase().replace(/\/{2,}/g, "/").replace(/(.)\/+$/, "$1");
+  return NEVER_PAGE.some((s) => s.allows("GET", p));
+};
 
 const type = (headers) => String((headers || {})["content-type"] || "").split(";")[0].trim().toLowerCase();
 

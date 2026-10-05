@@ -15,7 +15,7 @@ BRIDGE_JS = ["bridge-crypto.js", "bridge-session.js", "bridge-store.js"]
 BRIDGE_JS_BUDGET = 30_000          # bytes, uncompressed
 # The dashboard frame (R10b, docs/bridge-frame.md) follows the same pattern: its own allowance, outside the shell's.
 FRAME_JS = ["bridge-transport.js", "frame-host.js", "frame-render.js", "frame-scope.js", "frame-shim.js"]
-FRAME_JS_BUDGET = 62_000           # bytes, uncompressed
+FRAME_JS_BUDGET = 72_000           # bytes, uncompressed
 
 
 def test_the_offline_shell_stays_within_its_budget():
