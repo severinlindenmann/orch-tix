@@ -108,7 +108,7 @@ def test_send_headers_and_a_gone_subscription(push_server):
         "ttl": 86400,
     }
     result = _run_send(req)
-    assert result == {"gone": ["psh_gone00000"], "failed": []}
+    assert result["gone"] == ["psh_gone00000"] and result["failed"] == []
     assert len(_Handler.requests) == 2
     ok = next(r for r in _Handler.requests if r["path"] == "/ok")
     assert ok["headers"]["Authorization"].startswith("vapid t=")
@@ -127,7 +127,7 @@ def test_send_refuses_http_without_the_env_flag(push_server):
         "payload": "{}", "ttl": 86400,
     }
     result = _run_send(req, allow_http=False)
-    assert result == {"gone": [], "failed": ["psh_x"]}
+    assert result["gone"] == [] and result["failed"] == ["psh_x"] and result["errors"] == {"psh_x": "endpoint_not_https"}
     assert _Handler.requests == []
 
 
