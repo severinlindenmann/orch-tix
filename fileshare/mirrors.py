@@ -408,6 +408,7 @@ class NeedsPushGate:
                 if held is None:
                     held = self._held[space] = []
                     self.timer(self.every_s - (now - last), lambda: self._trail(space, flush))
+                    log.info("push: needs held for the %ds window, summary in %ds", self.every_s, self.every_s - (now - last))
                 if ticket in held:
                     held.remove(ticket)
                 held.append(ticket)
@@ -464,6 +465,7 @@ def _flush_held(app, space: str, held: list[str]) -> None:
             if row is not None:
                 live.append((t, row["needs"], row["open_questions"]))
         if not live:
+            log.info("push: summary of %d held ticket(s): none needs you any more", len(held))
             return
         total = attention_total(c)
         gate = getattr(app.state, "needs_push_gate", None)
