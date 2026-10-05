@@ -798,3 +798,74 @@ test("pushsubscriptionchange subscribes again and replaces the server row", asyn
   await Promise.all(ev.waits);
   assert.deepEqual(calls.map((c) => c.join(" ")), ["GET /api/push/vapid", "POST /api/push/subscribe", "DELETE /api/push/subscribe"]);
 });
+
+// ---- the clear decides per workspace (`cs`), not from the global count or a remembered ticket list
+
+test("push v2: a clear with cs 0 is 'Handled' even though the global count is above 0 and the remembered list is stale", async () => {
+  const w = load({ idb: LABELS });
+  // earlier pushes left TIX-1 and TIX-2 on the notification; their clears were missed
+  await push(w, { v: 2, s: S1, t: "TIX-1", k: "question", n: 1, c: 1, cs: 1 });
+  await push(w, { v: 2, s: S1, t: "TIX-2", k: "question", n: 1, c: 2, cs: 2 });
+  const got = await push(w, { v: 2, s: S1, t: "TIX-3", k: "clear", n: 0, c: 3, cs: 0 });   // 3 needs elsewhere
+  assert.equal(got.title, "Handled on desktop");
+  assert.equal(got.options.body, "Handled on desktop · Acme Energy");
+  assert.equal(w.notifications.length, 1);
+});
+
+test("push v2: a clear with cs 2 re-shows the notification quietly with the honest remaining count", async () => {
+  const w = load({ idb: LABELS });
+  await push(w, { v: 2, s: S1, t: "TIX-1", k: "question", n: 1, c: 1, cs: 1 });
+  const got = await push(w, { v: 2, s: S1, t: "TIX-1", k: "clear", n: 0, c: 2, cs: 2 });
+  assert.equal(got.options.silent, true);
+  assert.equal(got.options.body, "2 still need you · Acme Energy");
+  const one = await push(w, { v: 2, s: S1, t: "TIX-1", k: "clear", n: 0, c: 1, cs: 1 });
+  assert.equal(one.options.body, "1 still needs you · Acme Energy");
+});
+
+test("push v2: the tix:all group drops a workspace whose cs is 0, whatever the global count says", async () => {
+  const w = load({ idb: LABELS });
+  for (const [s, t] of [[S1, "TIX-1"], [S2, "TIX-2"], [S3, "TIX-3"], [S4, "TIX-4"]]) {
+    await push(w, { v: 2, s, t, k: "question", n: 1, c: 4, cs: 1 });
+  }
+  const three = await push(w, { v: 2, s: S4, t: "TIX-4", k: "clear", n: 0, c: 3, cs: 0 });
+  assert.equal(three.options.body, "3 workspaces need you");
+  const stay = await push(w, { v: 2, s: S3, t: "TIX-3", k: "clear", n: 0, c: 3, cs: 1 });   // still needs you
+  assert.equal(stay.options.body, "3 workspaces need you");
+  for (const s of [S1, S2, S3]) await push(w, { v: 2, s, t: "TIX-9", k: "clear", n: 0, c: 3, cs: 0 });
+  assert.equal(json(w.shown.at(-1)).options.body, "Handled on desktop");     // the last one, with c still 3
+});
+
+test("needs-spaces from the page closes the notifications of workspaces with nothing left", async () => {
+  const w = load({ idb: LABELS });
+  await push(w, { v: 2, s: S1, t: "TIX-1", k: "question", n: 1, c: 2, cs: 1 });
+  await push(w, { v: 2, s: S2, t: "TIX-2", k: "approval", n: 0, c: 2, cs: 1 });
+  assert.equal(w.notifications.length, 2);
+  const ev = { data: { type: "needs-spaces", spaces: [S2] }, waits: [], waitUntil(p) { this.waits.push(p); } };
+  w.listeners.message(ev);
+  await Promise.all(ev.waits);
+  assert.deepEqual(w.notifications.map((n) => n.tag), [`tix:${S2}`]);
+});
+
+test("push v2: reading a message on the desktop is titled 'Read on desktop', not 'Handled on desktop'", async () => {
+  const w = load({ idb: LABELS });
+  await push(w, { v: 2, s: S1, t: "", k: "message", n: 1, c: 1 });
+  const got = await push(w, { v: 2, s: S1, t: "", k: "clear", w: "message", n: 0, c: 0, cs: 0 });
+  assert.equal(got.title, "Read on desktop");
+  assert.equal(got.options.body, "Read on desktop · Acme Energy");
+});
+
+test("needs-spaces: handled tickets, read messages and old 'Handled' notes leave the lock screen when the app opens", async () => {
+  const w = load({ idb: LABELS });
+  await push(w, { v: 2, s: S1, t: "TIX-1", k: "question", n: 1, c: 3, cs: 1 });
+  await push(w, { v: 2, s: S2, t: "", k: "message", n: 1, c: 3 });
+  await push(w, { v: 2, s: S3, t: "TIX-9", k: "approval", n: 0, c: 3, cs: 1 });
+  await push(w, { v: 2, s: S3, t: "TIX-9", k: "clear", n: 0, c: 2, cs: 0 });          // an old "Handled" note
+  const ev = { data: { type: "needs-spaces", spaces: [S1], tickets: [`${S1}|TIX-1`], messages: 0 }, waits: [], waitUntil(p) { this.waits.push(p); } };
+  w.listeners.message(ev);
+  await Promise.all(ev.waits);
+  assert.deepEqual(w.notifications.map((n) => n.tag), [`tix:${S1}`]);                 // the question is still open
+  const ev2 = { data: { type: "needs-spaces", spaces: [S1], tickets: [`${S1}|TIX-7`], messages: 0 }, waits: [], waitUntil(p) { this.waits.push(p); } };
+  w.listeners.message(ev2);
+  await Promise.all(ev2.waits);
+  assert.equal(w.notifications.length, 0);                                           // TIX-1 was handled meanwhile
+});

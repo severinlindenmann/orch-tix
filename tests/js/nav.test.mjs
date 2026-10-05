@@ -137,3 +137,17 @@ test("no page script builds a next= from location.hash", async () => {
     }
   }
 });
+
+test("tellWorkerNeeds sends the workspaces and tickets that need you, setAppBadge follows the count", async () => {
+  const { tellWorkerNeeds, setAppBadge } = await import("../../fileshare/static/js/nav.js");
+  const posted = [];
+  tellWorkerNeeds([{ space: "a", id: "TIX-1", needs: "question" }, { space: "a", id: "TIX-2", needs: null }, { space: "b", id: "TIX-3", needs: "approval" }],
+    2, { serviceWorker: { controller: { postMessage: (m) => posted.push(m) } } });
+  assert.deepEqual(posted, [{ type: "needs-spaces", spaces: ["a", "b"], tickets: ["a|TIX-1", "b|TIX-3"], messages: 2 }]);
+  const calls = [];
+  const nav = { setAppBadge: async (n) => calls.push(n), clearAppBadge: async () => calls.push(0) };
+  setAppBadge(3, nav);
+  setAppBadge(0, nav);
+  assert.deepEqual(calls, [3, 0]);
+  tellWorkerNeeds([], 0, {});                                  // no worker: no throw
+});

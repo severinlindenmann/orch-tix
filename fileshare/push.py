@@ -9,6 +9,7 @@ import sys
 import collections
 import threading
 import hashlib
+from urllib.parse import urlsplit
 import base64
 
 from fileshare.db import connect, get_meta, set_meta
@@ -18,6 +19,10 @@ log = logging.getLogger("fileshare.push")
 PUSH_TIMEOUT_S = 30
 GENKEYS_TIMEOUT_S = 30
 TTL_S = 86400
+# A "needs you" that reaches a phone late is worse than none (it can announce something already handled): needs-type
+# pushes expire at the push service after 30 minutes; a clear and the rest keep the day.
+NEEDS_TTL_S = 1800
+APPLE_PUSH_HOSTS = ("web.push.apple.com",)
 
 
 def ensure_vapid(conn) -> str:
@@ -56,6 +61,20 @@ def topic_for(payload: dict) -> str | None:
         return None
     key = f"{payload.get('s', '')}|{payload.get('t') or payload.get('k', '')}"
     return base64.urlsafe_b64encode(hashlib.sha256(key.encode()).digest()[:18]).decode().rstrip("=")   # 24 chars
+
+
+def ttl_for(payload: dict) -> int:
+    return NEEDS_TTL_S if payload.get("v") == 2 and payload.get("k") in ("question", "approval", "verdict", "batch", "message", "join") else TTL_S
+
+
+def replaces_by_tag(endpoint: str) -> bool:
+    """Chrome, Firefox and Android replace a notification by its tag; iOS (WebKit, web.push.apple.com) shows every
+    push as a NEW notification next to the old one (live test 2026-10-05), so a "clear" would only add noise there."""
+    try:
+        host = (urlsplit(endpoint).hostname or "").lower()
+    except ValueError:
+        return True
+    return not any(host == h or host.endswith("." + h) for h in APPLE_PUSH_HOSTS)
 
 
 class SubprocessPusher:
@@ -97,7 +116,8 @@ class SubprocessPusher:
     def notify_payload(self, payload: dict) -> None:
         """Push v2 (TIX spec §7): one ready cleartext payload to every subscription. The caller builds it
         from cleartext routing only (space id, TIX id, kind, counts), never a title or text."""
-        self._submit(self._deliver_payload, json.dumps(payload, separators=(",", ":")), topic_for(payload))
+        self._submit(self._deliver_payload, json.dumps(payload, separators=(",", ":")), topic_for(payload),
+                     ttl_for(payload), payload.get("k") == "clear")
 
     def _deliver(self, ticket: dict, event: dict) -> None:
         """Push v1 for a legacy ticket: build the fields, then hand the payload on."""
@@ -107,10 +127,12 @@ class SubprocessPusher:
             fields["m"] = True        # a manual test: nothing ran, so not "tests passed"
         self._deliver_payload(json.dumps(fields))
 
-    def _deliver_payload(self, payload: str, topic: str | None = None) -> None:
+    def _deliver_payload(self, payload: str, topic: str | None = None, ttl: int = TTL_S, is_clear: bool = False) -> None:
         conn = connect(self.db_path)
         try:
             subs = conn.execute("SELECT id, endpoint, p256dh, auth FROM push_subs").fetchall()
+            if is_clear:        # iOS cannot replace a notification by tag: a clear would only add one (see replaces_by_tag)
+                subs = [r for r in subs if replaces_by_tag(r["endpoint"])]
             if not subs:
                 return
             try:
@@ -131,7 +153,7 @@ class SubprocessPusher:
             "subs": [{"id": r["id"], "endpoint": r["endpoint"],
                       "keys": {"p256dh": r["p256dh"], "auth": r["auth"]}} for r in subs],
             "payload": payload,
-            "ttl": TTL_S,
+            "ttl": ttl,
             "topic": topic,
         }
         try:

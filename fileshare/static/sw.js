@@ -200,6 +200,10 @@ self.addEventListener("fetch", (event) => {
 });
 
 self.addEventListener("message", (event) => {
+  if (event.data?.type === "needs-spaces") {
+    event.waitUntil(reconcileNeeds(event.data.spaces, event.data.tickets, event.data.messages).catch(() => {}));
+    return;
+  }
   if (!event.data || event.data.type !== "cache-pages") return;
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE);
@@ -406,7 +410,7 @@ async function notificationFor(data) {
       renotify: true, icon: ICON, data: { url: "/", spaces, ts: byspace, title, body: workspacesText(spaces.length) } } };
   }
   return { title, options: { body, tag: s ? `tix:${s}` : "tix", renotify: true, icon: ICON,
-    data: { url: url2, s, ts: s ? byspace[s] : [], title, body } } };
+    data: { url: url2, s, ts: s ? byspace[s] : [], title, body, ...(d.k === "message" ? { msg: true } : {}) } } };
 }
 
 const ticketsOf = (n) => (Array.isArray(n?.data?.ts) ? n.data.ts.filter((t) => typeof t === "string") : []);
@@ -425,8 +429,8 @@ async function groupNote() {
 // silently without that ticket. A join request's clear (empty t) replaces its own notification.
 async function clearFor(d, s, m) {
   const { label } = await spaceInfo(s);
-  const handled = (tag, body) => ({ title: "Handled on desktop", options: { body, tag, silent: true, renotify: false,
-    icon: ICON, data: { url: "/", s } } });
+  const handled = (tag, body, title = "Handled on desktop") => ({ title, options: { body, tag, silent: true, renotify: false,
+    icon: ICON, data: { url: "/", s, handled: true } } });
   if (d.w === "message" && !m) {
     // The owner read the message(s) in the browser (QA N-04): replace the message notification, but leave a needs
     // notification of the same workspace (it shares the tag) as it was.
@@ -436,28 +440,74 @@ async function clearFor(d, s, m) {
       return { title: shown.data?.title || shown.title || "TIX", options: { body: shown.data?.body || shown.body || "", tag,
         silent: true, renotify: false, icon: ICON, data: shown.data } };
     }
-    return handled(tag, s ? `Read on desktop · ${label}` : "Read on desktop");
+    return handled(tag, s ? `Read on desktop · ${label}` : "Read on desktop", "Read on desktop");
   }
   if (!m) return handled(s ? `tix:join:${s}` : "tix", `Handled on desktop · ${label}`);
-  const quiet = (n, data) => ({ title: n.data?.title || n.title || "TIX", options: { body: n.data?.body || n.body || "",
+  const quiet = (n, data, body) => ({ title: n.data?.title || n.title || "TIX", options: { body: body ?? (n.data?.body || n.body || ""),
     tag: n.tag, silent: true, renotify: false, icon: ICON, data } });
-  const mine = (await openSpaceTags()).find((x) => x.tag === `tix:${s}`);
+  // `cs` is how many tickets of THIS workspace still need you, counted by the server in every needs push. It decides
+  // "Handled" versus "N still need you" for the workspace; the global `c` counts other workspaces too and the ticket
+  // list remembered on the notification can be stale (a clear that was missed or arrived out of order), so neither
+  // decides when `cs` is there. An older server sends no `cs`: the remembered list and `c` decide as before.
+  const cs = Number.isInteger(d.cs) && d.cs >= 0 ? d.cs : null;
+  const remaining = `${cs} still need${cs === 1 ? "s" : ""} you · ${label}`;
+  const mine = (await openSpaceTags()).find((x) => x.tag === `tix:${s}` && !x.data?.handled);
   if (mine) {
     const rest = ticketsOf(mine).filter((t) => t !== d.t);
+    if (cs !== null) {
+      return cs > 0 ? quiet(mine, { ...mine.data, ts: rest, body: remaining }, remaining) : handled(`tix:${s}`, `Handled on desktop · ${label}`);
+    }
     return rest.length && count(d.c) > 0 ? quiet(mine, { ...mine.data, ts: rest }) : handled(`tix:${s}`, `Handled on desktop · ${label}`);
   }
   const group = await groupNote();
   if (group && (group.data?.spaces || []).includes(s)) {
     const ts = { ...(group.data.ts || {}) };
     ts[s] = (ts[s] || []).filter((t) => t !== d.t);
-    if (!ts[s].length) delete ts[s];
-    const spaces = (group.data.spaces || []).filter((x) => x !== s || ts[x]);
-    if (!spaces.length || count(d.c) === 0) return handled("tix:all", "Handled on desktop");
+    if (!ts[s].length || cs === 0) delete ts[s];
+    const spaces = (group.data.spaces || []).filter((x) => x !== s || (cs === null ? ts[x] : cs > 0));
+    if (!spaces.length || (cs === null && count(d.c) === 0)) return handled("tix:all", "Handled on desktop");
     const body = workspacesText(spaces.length);
     return { title: group.data?.title || group.title || "TIX", options: { body, tag: "tix:all", silent: true, renotify: false,
       icon: ICON, data: { ...group.data, spaces, ts, body } } };
   }
   return handled(s ? `tix:${s}` : "tix", `Handled on desktop · ${label}`);
+}
+
+// The page tells the worker which workspaces have something that needs you (it just fetched the list): a notification
+// for a workspace that has nothing left is closed, so a banner a missed clear left behind does not stay until the
+// owner swipes it. Page-driven, not a push, so closing needs no replacement notification.
+async function reconcileNeeds(spaces, tickets, messages) {
+  const live = new Set((Array.isArray(spaces) ? spaces : []).filter((x) => typeof x === "string" && SPACE_ID.test(x)));
+  const open = Array.isArray(tickets) ? new Set(tickets.filter((t) => typeof t === "string")) : null;
+  for (const x of await openSpaceTags()) {
+    const sp = x.tag.slice(4);
+    const isMsg = x.data?.msg === true;
+    if (x.data?.handled) x.close();                                   // an old "Handled" note: nothing left to say
+    else if (isMsg) { if (messages === 0) x.close(); }
+    else if (!live.has(sp) && ticketsOf(x).length) x.close();
+    else if (open && ticketsOf(x).length) {
+      // the workspace still has something, but some tickets of this notification were handled
+      const rest = ticketsOf(x).filter((t) => open.has(`${sp}|${t}`));
+      if (!rest.length) x.close();
+      else if (rest.length !== ticketsOf(x).length) {
+        const { label } = await spaceInfo(sp);
+        const body = `${rest.length} still need${rest.length === 1 ? "s" : ""} you · ${label}`;
+        await self.registration.showNotification(x.data?.title || x.title || "TIX", { body, tag: x.tag, silent: true,
+          renotify: false, icon: ICON, data: { ...x.data, ts: rest, body } });
+      }
+    }
+  }
+  const group = await groupNote();
+  if (group) {
+    const left = (group.data?.spaces || []).filter((x) => live.has(x));
+    if (!left.length) group.close();
+    else if (left.length !== (group.data?.spaces || []).length) {
+      const ts = Object.fromEntries(Object.entries(group.data?.ts || {}).filter(([k]) => live.has(k)));
+      const body = workspacesText(left.length);
+      await self.registration.showNotification(group.data?.title || group.title || "TIX", { body, tag: "tix:all", silent: true,
+        renotify: false, icon: ICON, data: { ...group.data, spaces: left, ts, body } });
+    }
+  }
 }
 
 // The app icon badge (iOS 16.4+ installed web apps, Chrome): the server's `c` = what needs you across workspaces.

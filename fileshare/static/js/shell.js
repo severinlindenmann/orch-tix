@@ -37,4 +37,6 @@ if (typeof document !== "undefined") {
   markCurrentTab();
   refreshAttention();
   window.addEventListener("fs:needs-changed", () => refreshAttention());
+  // Back in the app (an installed iPhone app resumes without a reload): catch up with what was handled meanwhile.
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") refreshAttention(); });
 }

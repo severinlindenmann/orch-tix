@@ -1,6 +1,7 @@
 // Pure login guards and the Needs you nav badge, importable without a DOM (node tests import this module directly).
 import { unb64u } from "./crypto.js";
 import { api } from "./api.js";
+import { tellWorker } from "./swreg.js";
 
 export const MIN_ITERATIONS = 1000;
 export const MAX_ITERATIONS = 10_000_000;
@@ -75,6 +76,29 @@ const optional = async (p, pick) => {
   }
 };
 
+// Tells the service worker what needs you right now, so it closes the notifications of things that are handled
+// (sw.js reconcileNeeds). iOS never replaces a notification by tag, so the server sends it no "clear" push at all
+// (push.py); this is how its lock screen catches up when the app is opened. `messages`: unread messages to you.
+export function tellWorkerNeeds(mirrors, messages, nav = globalThis.navigator) {
+  try {
+    const live = (mirrors || []).filter((m) => m && m.needs);
+    tellWorker({ type: "needs-spaces", spaces: [...new Set(live.map((m) => m.space))],
+      tickets: live.map((m) => `${m.space}|${m.id}`), messages }, nav);
+  } catch {
+    /* no worker */
+  }
+}
+
+// The app icon badge follows what needs you (iOS 16.4+ installed web apps): the same count as the tab badge.
+export function setAppBadge(n, nav = globalThis.navigator) {
+  try {
+    if (n > 0) nav?.setAppBadge?.(n)?.catch?.(() => {});
+    else nav?.clearAppBadge?.()?.catch?.(() => {});
+  } catch {
+    /* no Badging API */
+  }
+}
+
 export async function needsCount(get = (path) => api("GET", path), openRows = openRowsHere) {
   const { mirrors = [] } = await get("/api/mirrors");
   const [rows, messages, joins] = await Promise.all([
@@ -82,7 +106,9 @@ export async function needsCount(get = (path) => api("GET", path), openRows = op
     optional(get("/api/messages?after=0&wait=0"), (r) => (r.messages || []).filter((m) => m.to_kind === "human").length),
     optional(get("/api/join-requests"), (r) => (r.requests || []).length),
   ]);
-  return rows.filter((r) => r && r.doc && r.needs).length + messages + joins;
+  const total = rows.filter((r) => r && r.doc && r.needs).length + messages + joins;
+  tellWorkerNeeds(mirrors, messages);
+  return total;
 }
 
 // Fills #needs-badge (the sidebar and the tab bar share it). Failures keep the badge as it was:
@@ -96,6 +122,7 @@ export async function refreshAttention(doc = document, get = (path) => api("GET"
   } catch {
     return;
   }
+  setAppBadge(n);
   const b = attentionBadge(n);
   badge.textContent = b.text;
   badge.title = b.title;

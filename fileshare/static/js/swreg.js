@@ -33,6 +33,15 @@ export async function warmShell(nav = globalThis.navigator) {
   }
 }
 
+// A message to the active worker (nav.js tells it what needs you, sw.js reconcileNeeds). Best effort.
+export function tellWorker(msg, nav = globalThis.navigator) {
+  try {
+    nav?.serviceWorker?.controller?.postMessage(msg);
+  } catch {
+    /* no worker */
+  }
+}
+
 // The worker saw a navigation answered by a newer build (sw.js "new-build"): register that build's worker
 // now, so it installs and takes over on this open rather than one deploy late.
 const STAMP = /^[A-Za-z0-9._-]{1,40}$/;
