@@ -144,6 +144,7 @@ def test_a_paired_ticket_request_is_signed_for_core(phone_page, mirror_with_ques
     page.get_by_role("button", name="Yes, pair").click()
     page.get_by_text("Paired with this workspace").wait_for()
     page.goto(f"{base}/?view=tickets")
+    page.get_by_text("New ticket request").click()
     page.get_by_label("Title").fill("  Rotate   the API key ")
     page.get_by_role("button", name="Send request").click()
     page.get_by_text("Sent · applying on your desktop").wait_for()

@@ -52,12 +52,22 @@ function pendingRow(d) {
   return r;
 }
 
+// An active device is one compact row: name, project and when it was last seen, the status and an outline Revoke
+// (a big filled red button next to a status badge was an accident waiting to happen). Host, fingerprint and the
+// dates sit under "Details"; a pending device keeps its fingerprint in plain view, that is what is compared.
 function activeRow(d) {
-  const r = baseRow(d);
-  const b = el("button", { class: "btn btn-danger", type: "button" }, "Revoke");
+  const b = el("button", { class: "btn btn-danger-line", type: "button" }, "Revoke");
   b.addEventListener("click", () => revoke(d));
-  r.append(b);
-  return r;
+  return el("div", { class: "device-row device-row-active", "data-device": d.id },
+    el("div", { class: "device-main" }, el("span", { class: "device mono" }, d.name),
+      el("span", { class: "project" }, `${d.project} · last seen ${d.last_seen_at ? relTime(d.last_seen_at) : "never"}`),
+      el("span", { class: `badge ${d.status}` }, d.status)),
+    b,
+    el("details", { class: "device-more" }, el("summary", {}, "Details"),
+      el("div", { class: "device-host mono" }, `${d.hostname || "—"} · ${d.platform || "?"}`),
+      el("div", { class: "device-fp mono" }, d.fingerprint),
+      el("div", { class: "device-dates" }, dates(d))),
+    d.mismatch ? el("p", { class: "fp-mismatch" }, MISMATCH[d.status] ?? MISMATCH.revoked) : null);
 }
 
 async function revoke(d) {
