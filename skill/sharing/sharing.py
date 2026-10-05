@@ -794,7 +794,7 @@ def is_secret_path(path: Path, repo_root: Path) -> bool:
 
 # =========================================================== config (Task 13)
 
-VERSION = "2.2.0"   # semver; bump on every skill change — the server's /skill/manifest.json reads it
+VERSION = "2.2.1"   # semver; bump on every skill change — the server's /skill/manifest.json reads it
 REPO_CONFIG = Path(".claude") / "skills" / "sharing" / "config.json"
 OLD_CONFIG = "config.json.old"   # the identity --force is replacing; lives beside config.json until the new one is approved
 TICKETS_SKILL_SRC = "tickets-SKILL.md"   # served beside SKILL.md; installed where Claude Code finds skills
@@ -2597,6 +2597,41 @@ def _download_decrypted(api: Api, blob_path: str, dek: bytes, file_uuid: bytes, 
     return size
 
 
+def _sha256_of(path: Path) -> bytes:
+    """Streamed: a 200 MiB file must not be read into memory twice to be compared."""
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.digest()
+
+
+def _identical_existing(api: Api, f: dict, dek: bytes, out_dir: Path, name: str, ref: str) -> Path | None:
+    """A copy of this very file already in out_dir (as NAME or REF-NAME): `get` again reuses it instead of
+    piling up FILE7-name copies until it is refused (QA TF-19). Compared by content: the file is decrypted
+    into a scratch folder beside it and hashed; only a regular, non-symlink file of the right size is considered."""
+    try:
+        size = plaintext_size(int(f["size"]))
+    except (KeyError, TypeError, ValueError):
+        return None
+    for cand in (out_dir / name, out_dir / f"{ref}-{name}"):
+        try:
+            if cand.is_symlink() or not cand.is_file() or cand.stat().st_size != size:
+                continue
+        except OSError:
+            continue
+        scratch = Path(tempfile.mkdtemp(dir=out_dir, prefix=".sharing-cmp-"))
+        try:
+            probe = scratch / "probe"
+            _download_decrypted(api, f"/api/files/{ref}/blob", dek, bytes.fromhex(f["uuid"]), probe)
+            same = _sha256_of(probe) == _sha256_of(cand)
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
+        if same:
+            return cand
+    return None
+
+
 def cmd_get(args) -> int:
     cfg = load_config(Path.cwd())
     api = Api(cfg.server_url, cfg.device_token)
@@ -2623,8 +2658,11 @@ def cmd_get(args) -> int:
             raise Refused(f"share/ points outside the repo (to {out_dir.resolve()}); refusing to write there. "
                           "Pass -o DIR to choose the output directory explicitly")
         ensure_self_ignore(out_dir)
-    target = choose_target(out_dir, ref, safe_name(meta["name"], f"{ref}.bin"), args.force)
-    _download_decrypted(api, f"/api/files/{ref}/blob", dek, bytes.fromhex(f["uuid"]), target)
+    name = safe_name(meta["name"], f"{ref}.bin")
+    target = None if args.force else _identical_existing(api, f, dek, out_dir, name, ref)
+    if target is None:
+        target = choose_target(out_dir, ref, name, args.force)
+        _download_decrypted(api, f"/api/files/{ref}/blob", dek, bytes.fromhex(f["uuid"]), target)
     d = describe_file(cfg.mk, f)
     d["path"] = str(target)
     d["acked"] = bool(f.get("acked_at"))
@@ -2632,6 +2670,9 @@ def cmd_get(args) -> int:
         try:
             api.send("POST", _file_path(ref, "/ack"))
             d["acked"] = True
+            if not d.get("acked_at"):      # fresh metadata: acked_at must agree with acked (QA TF-19)
+                with contextlib.suppress(ApiError):
+                    d = {**describe_file(cfg.mk, _fetch_file(api, ref)), "path": str(target), "acked": True}
         except ApiError as e:   # the file was delivered: warn, never fail the get
             d["acked"] = False
             _warn(f"{ref} was saved, but could not be acknowledged ({e.detail or e.code}); "

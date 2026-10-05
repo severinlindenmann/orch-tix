@@ -62,7 +62,7 @@ export function typeOf(mime = "", name = "") {
 export function matches(file, q) {
   const needle = String(q ?? "").trim().toLowerCase();
   if (!needle) return true;
-  if (/^\d+$/.test(needle) && String(file.n) === needle) return true;
+  if (/^\d+$/.test(needle)) return String(file.n) === needle; // a bare number is a file number: FILE40, not every name with a 40 in it (QA TF-23)
   const hay = [file.id, file.ok ? file.meta.name : "", file.ok ? file.meta.note : ""].join("\n").toLowerCase();
   return hay.includes(needle);
 }

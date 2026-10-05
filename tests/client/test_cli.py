@@ -280,8 +280,8 @@ def test_whoami_human_and_json(cli, dev_repo, live_server, sim):
     assert j["server"] == live_server.url and j["reachable"] is True
     fp = next(d for d in sim.devices() if d["id"] == dev_repo.device_id)["fingerprint"]
     assert j["fingerprint"] == fp
-    assert j["skill_version"] == "2.2.0"
-    assert j["latest_skill_version"] == "2.2.0" and j["update_available"] is False
+    assert j["skill_version"] == "2.2.1"
+    assert j["latest_skill_version"] == "2.2.1" and j["update_available"] is False
 
 
 def test_whoami_from_subdirectory(cli, dev_repo):
@@ -465,9 +465,13 @@ def test_get_name_collisions(cli, dev_repo):
     (dev_repo.root / "a.txt").write_text("v1")
     fid = cli(dev_repo.root, "share", "a.txt").out.strip()
     assert cli(dev_repo.root, "get", fid).code == 0
-    assert cli(dev_repo.root, "get", fid).code == 0
+    assert cli(dev_repo.root, "get", fid).code == 0          # the identical copy is reused (QA TF-19)
+    assert _share_dir_files(dev_repo.root) == ["a.txt"]
+    (dev_repo.root / "share" / "a.txt").write_text("local edit")
+    assert cli(dev_repo.root, "get", fid).code == 0          # a different file with that name: the prefixed copy
     assert _share_dir_files(dev_repo.root) == sorted(["a.txt", f"{fid}-a.txt"])
-    r = cli(dev_repo.root, "get", fid)
+    (dev_repo.root / "share" / f"{fid}-a.txt").write_text("another edit")
+    r = cli(dev_repo.root, "get", fid)                       # both names taken by other content: refused
     assert r.code == 6 and "--force" in r.err
     (dev_repo.root / "share" / "a.txt").write_text("local edit")
     assert cli(dev_repo.root, "get", fid, "--force").code == 0
@@ -712,9 +716,9 @@ def test_update_when_already_current(cli, dev_repo):
     # as the installer leaves it (a missing tickets-SKILL.md would be restored, see test_update.py)
     shutil.copy2(REPO / "skill" / "sharing" / "tickets-SKILL.md", dev_repo.config_path.parent)
     r = cli(dev_repo.root, "update")
-    assert r.code == 0 and "already up to date (2.2.0)" in r.out
+    assert r.code == 0 and "already up to date (2.2.1)" in r.out
     j = cli(dev_repo.root, "update", "--check", "--json").json()
-    assert j == {"old": "2.2.0", "new": "2.2.0", "changed": False, "update_available": False}
+    assert j == {"old": "2.2.1", "new": "2.2.1", "changed": False, "update_available": False}
 
 
 # ---- acceptance items beyond the brief
