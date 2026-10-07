@@ -18,6 +18,7 @@
 import { api, ApiError } from "./api.js";
 import { IntegrityError, openFileMeta, openTicket, openTicketEvent, sealTicketEvent } from "./crypto.js";
 import { clearKeys, loadKeys } from "./keystore.js";
+import { wipeBridge } from "./bridge-wipe.js";
 import { clearLists } from "./db.js";
 import { confirmDialog, el, icon, toast } from "./ui.js";
 import { humanSize, plainSize, shortAge } from "./format.js";
@@ -299,16 +300,23 @@ export async function clearOutbox() {
   await outbox.clear();
 }
 
-// Sign-out's local wipe: the keys first (they matter most), then the outbox, then the last-known lists
-// (sealed bodies, but they still say which tickets exist). Each has its own try, so one failing never
-// skips another. Resolves {keys, outbox, lists}: true for each store cleared.
-export async function clearLocalData({ keys = clearKeys, queue = clearOutbox, lists = clearLists } = {}) {
-  const done = { keys: false, outbox: false, lists: false };
+// Sign-out's local wipe: the keys first (they matter most), then the bridge database (device key, workspace keys,
+// pinned host keys, sequence counters), then the outbox, then the last-known lists (sealed bodies, but they still say
+// which tickets exist). Each has its own try, so one failing never skips another. Resolves {keys, bridge, outbox,
+// lists}: true for each store cleared.
+export async function clearLocalData({ keys = clearKeys, bridge = wipeBridge, queue = clearOutbox, lists = clearLists } = {}) {
+  const done = { keys: false, bridge: false, outbox: false, lists: false };
   try {
     await keys();
     done.keys = true;
   } catch (e) {
     console.error("clearing stored keys on sign-out", e);
+  }
+  try {
+    await bridge();
+    done.bridge = true;
+  } catch (e) {
+    console.error("clearing the bridge keys on sign-out", e);
   }
   try {
     await queue();
