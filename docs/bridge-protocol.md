@@ -348,7 +348,14 @@ Response `meta`:
 
 - chunk 0 has `status` and `headers`;
 - later chunks have `{}`, or `{"keepalive": true}` with empty `data`;
-- a refusal is a single chunk with `LAST | REFUSAL` and `meta = {"refusal": <code>, …}` (§6.2).
+- a refusal is a single chunk with `LAST | REFUSAL` and `meta = {"refusal": <code>, …}` (§6.2). When the
+  request it answers carries `STREAM`, the refusal chunk carries `STREAM` too (`LAST | REFUSAL | STREAM`),
+  whatever the code, `busy` included, and a stored refusal that is re-sent keeps it. The device checks the
+  chunk's `STREAM` against the mailbox and its pending request (§4, §7), so a refusal without it is
+  dropped and the stream never gets its end (vectors `stream_request_refused_busy_carries_stream`,
+  `stream_request_refusal_replayed_still_carries_stream`, `stream_request_refused_malformed_carries_stream`,
+  `plain_request_refused_busy_carries_no_stream`; device vectors `stream_request_busy_refusal_with_stream`,
+  `stream_request_busy_refusal_without_stream`, `plain_request_refusal_with_stream`).
 
 ## 4. Chunks and streams
 
@@ -470,7 +477,7 @@ Once the record has expired, the envelope's seq is consumed, so it is refused an
 
 - A device that already holds `PER_DEVICE` unexpired records is refused **`busy`** at §6.1 step 4b, right
   after the replay step and before framing, so `busy` does **not** consume the sequence number. The refusal
-  is recorded like every refusal and then sent: one response chunk with flags `LAST | REFUSAL`, seq 0, the
+  is recorded like every refusal and then sent: one response chunk with flags `LAST | REFUSAL` (plus `STREAM` when the request had it, §3.5), seq 0, the
   host's clock and a fresh salt, sealed and signed with the host key. Its meta is exactly
   `{"refusal": "busy"}`, with no other field and no text. A replay re-sends the stored refusal unchanged;
   it has no `host_ms` or `high` to re-stamp. A redelivery after the quota has freed still gets the stored
@@ -479,7 +486,11 @@ Once the record has expired, the envelope's seq is consumed, so it is refused an
   `PER_DEVICE + BUSY_ALLOWANCE` records in all). Past that its requests are **dropped**: a refusal that
   could not be recorded would let the same bytes run later.
 - When the store holds `MAX_RECORDS` unexpired records, a host that cannot record **drops**, whoever
-  sends. Other devices are never refused `busy` because of one device's quota.
+  sends. **A damaged file (unreadable, or failing its tag) in the store counts toward `MAX_RECORDS` like a
+  good record**, for the same 900 s from its last modification; it belongs to no device, so it counts toward
+  no device's `PER_DEVICE`. Otherwise damaged files could be used to evade the cap (vectors
+  `quota_damaged_files_count_toward_the_total_cap`, `quota_damaged_files_below_the_total_cap_do_not_block`,
+  `quota_damaged_files_are_no_device_s_quota`; a damaged record is `{"device": null, "damaged": true, "until": …}`). Other devices are never refused `busy` because of one device's quota.
 
 One host-wide cap alone is not enough: ordinary typing or a Look-scope device could fill it and so silence
 every device. With 1024 records and 900 s of retention, one device sustains only about 1.1 requests per
