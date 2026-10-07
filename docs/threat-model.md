@@ -294,5 +294,7 @@ Accepted limits:
 - Metadata: which workspace, which device, when, how much, and how often you type.
 - Machine and device names, until [#75](https://github.com/severinlindenmann/orch-tix/issues/75) ships.
 - Availability: the server can refuse to carry anything.
+- Tenancy: the mailbox lets any approved device or browser session act as a client of any workspace, which
+  holds only while an instance has a single owner; a second account needs a membership check first.
 - A compromised web app at pairing time, and a determined local agent on the host (see above).
 - Sealed content once it reaches a screen or a host: the host runs what a device with the right scope asks.

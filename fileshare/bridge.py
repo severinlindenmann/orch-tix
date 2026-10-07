@@ -30,6 +30,8 @@ CLIENT_STREAMS = 4              # of those, how many may be streams
 BOX_QUEUED_REQUESTS = 64        # requests waiting for the host in one mailbox
 BOX_PAGE_BYTES = 8 << 20        # undelivered page-response text in the database, per mailbox
 BOX_FRAME_BYTES = 4 << 20       # undelivered stream frames in memory, per mailbox
+BOX_FRAMES = 1024               # and their count, so many tiny frames cannot cost more than the bytes say
+ALL_FRAME_BYTES = 16 << 20      # undelivered stream frames in memory, across all mailboxes
 CLIENT_POLLS = 6                # concurrent bridge long polls per device or session (not the ticket slots)
 HOST_POLLS = 2
 HOST_REQUESTS_PER_POLL = 16
@@ -184,6 +186,8 @@ class Bridge:
     def reserve(self, space: str, rid: str, client: str, tab: str, stream: bool, now: float) -> None:
         """Register the request's route, finishing the quotas admit() started (the body is known now). No await
         between these checks and the registration, so two parallel posts cannot both slip under a limit."""
+        # duplicate_id is global per space and id, not per client: ids are 128-bit random, so squatting one needs
+        # a guess. Scope it per client only if ids ever become guessable.
         if (space, rid) in self.routes:
             raise api_error(409, "duplicate_id", "this request id is already in use")
         mine = [r for r in self.routes.values() if r.client == client]
@@ -249,7 +253,8 @@ class Bridge:
 
     def add_frame(self, space: str, rid: str, route: Route, idx: int, last: bool, body: str, now: float) -> None:
         box = self.box(space)
-        if box.frame_bytes + len(body) > BOX_FRAME_BYTES:
+        if (box.frame_bytes + len(body) > BOX_FRAME_BYTES or len(box.frames) >= BOX_FRAMES
+                or sum(b.frame_bytes for b in self.boxes.values()) + len(body) > ALL_FRAME_BYTES):
             self.refuse(space, 429, "mailbox_full", "undelivered stream frames are over the limit; slow down")
         box.frames.append(Frame(rid, idx, last, body, now + TTL_S))
         box.frame_bytes += len(body)
