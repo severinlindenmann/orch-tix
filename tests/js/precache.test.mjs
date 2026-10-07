@@ -31,7 +31,7 @@ test("precache assets are exactly the shell files under static/", () => {
 
 test("precache includes the manifest and every page as a navigation", () => {
   assert.ok(list.assets.includes("/manifest.webmanifest"));
-  assert.deepEqual(list.pages, ["/", "/workspaces", "/t", "/files", "/settings", "/login", "/sandbox/html", "/sandbox/widget", "/pair"]);
+  assert.deepEqual(list.pages, ["/", "/workspaces", "/t", "/files", "/settings", "/login", "/sandbox/html", "/sandbox/widget", "/pair", "/remote/pair"]);
 });
 
 test("nothing precached is ever a bypassed path", () => {

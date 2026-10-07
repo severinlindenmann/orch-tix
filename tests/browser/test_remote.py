@@ -240,3 +240,73 @@ def test_the_page_fits_a_phone(signed_in, live_server, make_host):
     signed_in.goto(f"{live_server.url}/remote?space={host.space}")
     wait_h1(signed_in, "Home dashboard")
     assert signed_in.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+
+
+# ---- review round -------------------------------------------------------------------------------------------------
+
+PROBE = """() => new Promise((resolve) => {
+  const r = indexedDB.open("fileshare-bridge");
+  let fresh = false;
+  r.onupgradeneeded = () => { fresh = true; };
+  r.onsuccess = () => { r.result.close(); if (fresh) indexedDB.deleteDatabase("fileshare-bridge"); resolve(fresh); };
+})"""
+LINK = "v1." + "a" * 32 + "." + "b" * 32 + "." + "A" * 43 + "." + "A" * 43
+
+
+def test_a_label_that_looks_like_markup_is_drawn_as_text(signed_in, live_server, make_host):
+    label = '<img src=x onerror="window.__x=1">'
+    host = make_host(label=label)
+    signed_in.goto(f"{live_server.url}/remote")
+    card = signed_in.locator(f'.wrow[data-space="{host.space}"]')
+    expect(card.locator(".wrow-name")).to_have_text(label)
+    assert card.locator("img").count() == 0
+    assert signed_in.evaluate("window.__x") is None
+
+
+def test_a_rejected_browser_is_not_shown_as_paired(signed_in, live_server, make_host):
+    host = make_host()
+    dev = pair(signed_in, live_server, host, approve=False)
+    host.reject(dev)
+    expect(signed_in.locator("#pair-state")).to_contain_text("rejected", timeout=30000)
+    signed_in.goto(f"{live_server.url}/remote")
+    card = signed_in.locator(f'.wrow[data-space="{host.space}"]')
+    expect(card).to_contain_text("not paired")
+    expect(card.get_by_role("button", name="Open Acme Energy")).to_be_disabled()
+
+
+def test_a_session_that_ends_deletes_the_bridge_database(signed_in, live_server, make_host):
+    host = make_host()
+    pair(signed_in, live_server, host)
+    signed_in.goto(f"{live_server.url}/remote")
+    assert signed_in.evaluate(PROBE) is False
+    signed_in.evaluate("window.dispatchEvent(new CustomEvent('fs:unauthenticated'))")
+    signed_in.wait_for_function("""() => new Promise((resolve) => {
+      const r = indexedDB.open("fileshare-bridge"); let fresh = false;
+      r.onupgradeneeded = () => { fresh = true; };
+      r.onsuccess = () => { r.result.close(); if (fresh) indexedDB.deleteDatabase("fileshare-bridge"); resolve(fresh); };
+    })""", timeout=15000)
+
+
+def test_an_offline_remote_pair_page_opens_its_own_shell_and_clears_the_hash(phone_page, context):
+    page = phone_page("light")
+    base = page.url.split("/", 3)[0] + "//" + page.url.split("/", 3)[2]
+    page.wait_for_function("async () => !!(await caches.match('/remote/pair'))")   # precached by the worker
+    context.set_offline(True)
+    page.goto(f"{base}/remote/pair#{LINK}")
+    expect(page.locator("#remote-pair-main h1")).to_have_text("Pair this browser")
+    assert page.evaluate("location.hash") == "" and "AAAA" not in page.url
+
+
+def test_a_slow_remote_pair_page_never_falls_back_to_the_app_shell(phone_page, context):
+    page = phone_page("light")
+    base = page.url.split("/", 3)[0] + "//" + page.url.split("/", 3)[2]
+    page.wait_for_function("async () => !!(await caches.match('/remote/pair'))")
+
+    def slow(route):
+        import time
+        time.sleep(5)                                     # past the worker's 4 s navigation timeout
+        route.continue_()
+    context.route("**/remote/pair", slow)
+    page.goto(f"{base}/remote/pair#{LINK}", wait_until="commit", timeout=60_000)
+    expect(page.locator("#remote-pair-main h1")).to_have_text("Pair this browser", timeout=60_000)
+    assert page.evaluate("location.hash") == "" and "AAAA" not in page.url

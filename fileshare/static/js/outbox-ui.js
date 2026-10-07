@@ -300,7 +300,7 @@ export async function clearOutbox() {
   await outbox.clear();
 }
 
-// Sign-out's local wipe: keys, bridge database, outbox, cached lists; each in its own try. Resolves true per store cleared.
+// Sign-out's wipe: one try per store.
 export async function clearLocalData({ keys = clearKeys, bridge = wipeBridge, queue = clearOutbox, lists = clearLists } = {}) {
   const done = { keys: false, bridge: false, outbox: false, lists: false };
   try {
@@ -313,7 +313,7 @@ export async function clearLocalData({ keys = clearKeys, bridge = wipeBridge, qu
     await bridge();
     done.bridge = true;
   } catch (e) {
-    console.error("clearing the bridge keys on sign-out", e);
+    console.error("bridge db", e);
   }
   try {
     await queue();

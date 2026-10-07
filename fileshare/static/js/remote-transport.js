@@ -112,7 +112,7 @@ export function bridgeTransport({ session, mailbox, onRefusal = () => {}, firstC
           if (ev.type === "head" && !req.stream && [301, 302, 303, 307, 308].includes(ev.status)) {
             const loc = validPath(ev.headers.location);
             if (!loc || hops >= MAX_REDIRECTS) throw new Error("The computer sent the page somewhere this app will not follow.");
-            redirect = loc;
+            redirect = loc;                                // ponytail: once SCOPES is narrowed, the target must pass scopes.allows too
             continue;                                      // drain the redirect's own body
           }
           if (redirect) continue;

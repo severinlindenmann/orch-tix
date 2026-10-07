@@ -10,7 +10,7 @@ import {
   F_REFUSAL, MESSAGES, PAIR_ANSWER_MS, decodeHeader, deviceFingerprint, deviceId, hostKeyFromPin, importPublicKey, openBody,
   pairRequestMeta, parsePairFragment, signedBytes, splitEnvelope, unframe, verifySigned,
 } from "./bridge-crypto.js";
-import { deviceKey, openWorkspaceKey, pinHost } from "./bridge-store.js";
+import { deviceKey, forgetWorkspace, openWorkspaceKey, pinHost, workspaceRecord } from "./bridge-store.js";
 import { createMailbox } from "./remote-mailbox.js";
 import { pairRefusalText } from "./remote-model.js";
 
@@ -58,10 +58,11 @@ export async function openPairAnswer(session, env, mailbox, hostPin) {
 // Resolves {approved: true, scope} | {approved: false, why} .
 export async function runPairing({ link, label, signal, now = Date.now, onFingerprint, onState,
   deps = {} }) {
-  const { openKey = openWorkspaceKey, device = deviceKey, pin = pinHost,
+  const { openKey = openWorkspaceKey, device = deviceKey, pin = pinHost, record = workspaceRecord, forget = forgetWorkspace,
     mailbox = createMailbox(link.workspace), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), pollMs = STATUS_EVERY_MS,
     answerMs = PAIR_ANSWER_MS, offerMs = OFFER_MS } = deps;
   const hostPin = link.hostPin;
+  const earlier = (await record(link.workspace))?.hostPub != null;      // paired before this link?
   const { kWs, keyVersion } = await openKey(link.workspace);
   const dk = await device();
   const dev = await deviceId(hexToBytes(link.workspace), dk.pub);
@@ -90,6 +91,12 @@ export async function runPairing({ link, label, signal, now = Date.now, onFinger
     return { silent: true };
   }
 
+  // Pinned but never approved: forget the pin, so /remote does not show a workspace this browser cannot open.
+  const undo = async (why) => {
+    if (!earlier) await forget(link.workspace).catch(() => {});
+    return { approved: false, why };
+  };
+
   try {
     onState?.("Asking the computer…");
     const sentAt = now();
@@ -110,9 +117,9 @@ export async function runPairing({ link, label, signal, now = Date.now, onFinger
       if (r.silent || r.refusal) continue;
       const st = r.meta?.state;
       if (st === "approved") return { approved: true, scope: typeof r.meta.scope === "string" ? r.meta.scope : "" };
-      if (st === "rejected") return { approved: false, why: "The computer rejected this browser." };
+      if (st === "rejected") return await undo("The computer rejected this browser.");
     }
-    return { approved: false, why: "The link expired. Make a new one on the computer." };
+    return await undo("The link expired. Make a new one on the computer.");
   } finally {
     mailbox.close();
   }

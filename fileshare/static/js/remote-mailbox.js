@@ -50,7 +50,7 @@ export function createMailbox(space, { fetchFn = (...a) => fetch(...a), tab = b6
           await sleep(retryMs);
           continue;
         }
-        for (const c of out.chunks || []) {
+        for (const c of out?.chunks || []) {
           const l = listeners.get(c.id);
           if (!l) continue;
           let env;

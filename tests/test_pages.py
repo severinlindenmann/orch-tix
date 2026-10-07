@@ -317,7 +317,7 @@ def test_precache_list_is_served(client):
     r = client.get("/static/precache.json")
     assert r.status_code == 200
     body = r.json()
-    assert body["pages"] == ["/", "/workspaces", "/t", "/files", "/settings", "/login", "/sandbox/html", "/sandbox/widget", "/pair"]
+    assert body["pages"] == ["/", "/workspaces", "/t", "/files", "/settings", "/login", "/sandbox/html", "/sandbox/widget", "/pair", "/remote/pair"]
     for path in body["assets"]:
         if path.startswith("/static/"):
             assert (pages.STATIC_DIR / path.removeprefix("/static/")).is_file(), path

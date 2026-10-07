@@ -12,7 +12,7 @@ import { UNKNOWN_SPACE } from "./mirror-model.js";
 import { SPACE_ID, stateOf } from "./workspaces-model.js";
 import { createFrameHost } from "./frame-host.js";
 import { DeviceSession } from "./bridge-session.js";
-import { deviceKey, pinnedHostKey, workspaceRecord } from "./bridge-store.js";
+import { deviceKey, forgetWorkspace, pinnedHostKey, workspaceRecord } from "./bridge-store.js";
 import { deviceId } from "./bridge-crypto.js";
 import { hexToBytes } from "./crypto.js";
 import { createMailbox } from "./remote-mailbox.js";
@@ -81,7 +81,10 @@ async function select(state, id) {
   const session = await openSession(id).catch(() => null);
   if (!session || !canOpen(s, true)) { render(state); notice(session ? hostMessage(s?.state) : "This browser is not paired with this workspace."); return; }
   const mailbox = createMailbox(id);
-  const transport = bridgeTransport({ session, mailbox, onRefusal: (_code, text) => { state.refusal = text; notice(text); } });
+  const transport = bridgeTransport({ session, mailbox, onRefusal: (code, text) => {
+    state.refusal = text; notice(text);
+    if (code === "not_paired") forgetWorkspace(id).then(() => { state.paired.set(id, false); render(state); }).catch(() => {});   // the host does not know us
+  } });
   state.mailbox = mailbox;
   state.host = createFrameHost({ mount: $("remote-frame"), transport, scopes: SCOPES, start: "/", title: `Dashboard of ${state.labels.get(id) || "a workspace"}`,
     viewer: () => toast("Opening files from the dashboard comes later.", "info"),

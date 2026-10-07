@@ -8,7 +8,8 @@
     "/login",
     "/sandbox/html",
     "/sandbox/widget",
-    "/pair"
+    "/pair",
+    "/remote/pair"
   ],
   "assets": [
     "/manifest.webmanifest",

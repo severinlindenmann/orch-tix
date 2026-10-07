@@ -188,3 +188,40 @@ test("a host that does not answer is said in words, and only an online, paired w
   assert.equal(M.canOpen({ state: "not_answering" }, true), false);
   assert.equal(M.pairRefusalText("pairing_closed"), B.MESSAGES.usedElsewhere);
 });
+
+// ---- review round: redirect limit, an empty poll answer, session expiry --------------------------------------------
+
+test("at most five redirects are followed; the sixth is refused", async () => {
+  const hop = (n) => accept({ status: 302, headers: { Location: `/h${n}` } });
+  const five = rig([...[1, 2, 3, 4, 5].map(hop), accept({ status: 200, headers: {} }, "end")]);
+  const ev = await collect(T.bridgeTransport(five).request(REQ));
+  assert.equal(ev[0].url, "/h5");
+  const six = rig([...[1, 2, 3, 4, 5, 6].map(hop), accept({ status: 200, headers: {} }, "end")]);
+  await assert.rejects(collect(T.bridgeTransport(six).request(REQ)), /will not follow/);
+});
+
+test("a poll answered with no body (204) is an empty poll, not a crash", async () => {
+  const { createMailbox } = await import(new URL("remote-mailbox.js", JS));
+  let polls = 0;
+  const got = [];
+  const fetchFn = async (url, init) => {
+    if (init.method === "POST") return { ok: true, status: 201, json: async () => ({}) };
+    polls++;
+    if (polls === 1) return { ok: true, status: 204, json: async () => { throw new Error("no body"); } };
+    return { ok: true, status: 200, json: async () => ({ chunks: [{ id: "a".repeat(32), idx: 0, last: true, stream: false, body: "AQID" }] }) };
+  };
+  const mb = createMailbox("b".repeat(32), { fetchFn });
+  await mb.post("a".repeat(32), new Uint8Array([1]), false, { chunk: (c) => { got.push(c); mb.close(); }, fail: (e) => got.push(e) });
+  for (let i = 0; i < 50 && !got.length; i++) await new Promise((r) => setTimeout(r, 10));
+  assert.equal(got.length, 1);
+  assert.deepEqual([...got[0].env], [1, 2, 3]);
+});
+
+test("a session that ends deletes the bridge database too (signInAgain)", async () => {
+  const names = [];
+  globalThis.indexedDB = { open() { throw new Error("no idb"); }, deleteDatabase: (n) => { names.push(n); const r = {}; queueMicrotask(() => r.onsuccess()); return r; } };
+  globalThis.location = { pathname: "/remote", search: "", replace() {} };
+  const { signInAgain } = await import(new URL("mirrors-data.js", JS));
+  await signInAgain();
+  assert.deepEqual(names, ["fileshare-bridge"]);
+});

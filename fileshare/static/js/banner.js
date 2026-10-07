@@ -1,6 +1,7 @@
 // fileshare/static/js/banner.js
 import { el } from "./ui.js";
 import { clearKeys } from "./keystore.js";
+import { wipeBridge } from "./bridge-wipe.js";
 import { clearLists } from "./db.js";
 import { loginHref } from "./nav.js";
 
@@ -34,6 +35,7 @@ export function showBanner(kind, text, link = null) {
 if (typeof window !== "undefined") {
   window.addEventListener("fs:unauthenticated", () => {
     clearKeys().catch(() => {});
+    wipeBridge().catch(() => {});
     clearLists().catch(() => {});
     hideBanner("decrypt");
     showBanner("session", "Session expired — log in again", { href: loginHref(location), label: "Log in" });
