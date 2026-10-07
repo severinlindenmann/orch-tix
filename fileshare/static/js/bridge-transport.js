@@ -1,6 +1,6 @@
 // fileshare/static/js/bridge-transport.js — the transport the frame host talks to (docs/bridge-frame.md).
-// The frame host (frame-host.js) knows nothing about keys, envelopes or the mailbox. A later ticket implements this
-// interface with the real crypto (bridge-crypto.js) and the mailbox; the tests use fakeTransport below.
+// The frame host (frame-host.js) knows nothing about keys, envelopes or the mailbox. js/remote-transport.js implements this
+// interface with the real crypto (bridge-session.js) and the mailbox; the tests use fakeTransport below.
 //
 //   transport.request(req) -> async iterable of events
 //

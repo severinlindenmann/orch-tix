@@ -381,6 +381,29 @@ test("an offline /pair navigation gets the cached pair shell, never /", async ()
   assert.equal((await ev2.responded).body, "cached pair");
 });
 
+test("/remote/pair is treated like /pair: offline or slow it gets its own shell, never /", async (t) => {
+  const w = load({ net: async () => { throw new TypeError("Failed to fetch"); } });
+  const c = await w.caches.api.open("shell-abc");
+  await c.put("/", res("cached root"));
+  const ev = fetchEvent("/remote/pair", { mode: "navigate" });
+  w.listeners.fetch(ev);
+  await assert.rejects(ev.responded, "nothing cached: the network's error, not the / shell");
+  await c.put("/remote/pair", res("cached remote pair"));
+  const ev2 = fetchEvent("/remote/pair", { mode: "navigate" });
+  w.listeners.fetch(ev2);
+  assert.equal((await ev2.responded).body, "cached remote pair");
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const slow = load({ net: () => new Promise(() => {}) });
+  const c2 = await slow.caches.api.open("shell-abc");
+  await c2.put("/", res("cached root"));
+  await c2.put("/remote/pair", res("cached remote pair"));
+  const ev3 = fetchEvent("/remote/pair", { mode: "navigate" });
+  slow.listeners.fetch(ev3);
+  await new Promise((r) => setImmediate(r));
+  t.mock.timers.tick(4000);
+  assert.equal((await ev3.responded).body, "cached remote pair");
+});
+
 test("a navigation without its own cached page, slower than 4 s, falls back to the cached /", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const w = load({ net: () => new Promise(() => {}) }); // never answers

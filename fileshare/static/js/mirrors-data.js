@@ -14,6 +14,7 @@ import { clearKeys, loadKeys } from "./keystore.js";
 import { boundToRow, openDecision, openMirror, openSpaceLabel } from "./mirror-crypto.js";
 import { hexToBytes } from "./crypto.js";
 import { loginHref } from "./nav.js";
+import { wipeBridge } from "./bridge-wipe.js";
 import { keyMapOf, saveKeyMap } from "./ticket-cache.js";
 
 const POLL_WAIT_S = 25;
@@ -33,7 +34,7 @@ export async function keysOrLogin() {
 // A 401 although this browser still holds keys: the session is gone. The keys and the last-known lists
 // are dropped (banner.js does too; this waits for it), then the page goes to sign in.
 export async function signInAgain() {
-  await Promise.all([clearKeys().catch(() => {}), clearLists().catch(() => {})]);
+  await Promise.all([clearKeys(), clearLists(), wipeBridge()].map((p) => p.catch(() => {})));
   location.replace(loginHref(location));
 }
 

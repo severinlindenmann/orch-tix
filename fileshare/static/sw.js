@@ -115,9 +115,8 @@ const shellKey = (path) => (/^\/t\/[0-9]{1,12}$/.test(path) ? "/t" : path);
 
 async function navigate(event) {
   const url = new URL(event.request.url);
-  // /pair carries a pairing key in its fragment. It never gets another page's shell (that page's
-  // scripts would see the key in location): the network, else its own precached shell.
-  if (url.pathname === "/pair") return pairPage(event);
+  // /pair and /remote/pair: a secret in the fragment, so never another page's shell: network, else their own.
+  if (url.pathname === "/pair" || url.pathname === "/remote/pair") return pairPage(event, url.pathname);
   const key = shellKey(url.pathname);
   const network = fetch(event.request).then(async (response) => {
     // cacheable() refuses a redirect (signed out: /login), so it never replaces a cached shell; another
@@ -157,7 +156,7 @@ async function navigate(event) {
   return network; // nothing cached yet: whatever the network finally does
 }
 
-async function pairPage(event) {
+async function pairPage(event, path) {
   const network = fetch(event.request);
   event.waitUntil(network.catch(() => {}));
   let timer;
@@ -170,7 +169,7 @@ async function pairPage(event) {
   } finally {
     clearTimeout(timer);
   }
-  return (await fromCache("/pair")) || network;
+  return (await fromCache(path)) || network;
 }
 
 async function asset(request) {

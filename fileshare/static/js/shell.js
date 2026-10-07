@@ -23,7 +23,7 @@ export async function logout() {
     // The session may already be gone; local data is cleared either way.
   }
   const done = await clearLocalData();
-  const cleared = done.keys && done.outbox && done.lists;
+  const cleared = done.keys && done.bridge && done.outbox && done.lists;
   if (!cleared) toast(CLEAR_FAILED, "error");
   // Leave the toast readable for a moment when clearing failed; redirect either way.
   setTimeout(() => location.replace("/login"), cleared ? 0 : LOGOUT_WARN_MS);

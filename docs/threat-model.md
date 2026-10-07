@@ -265,10 +265,12 @@ out of the browser (§2.4); the master key is likewise held as a non-extractable
 never stored (§2.1). A person holding an unlocked, signed-in browser can still act at that device's scope, and
 the Type scope and Factory actions additionally need a fresh platform confirmation (Face ID, Touch ID,
 Windows Hello or device PIN, §9). Revoke the device on the host (it takes effect on the next request and
-ends its streams, §8.3) and sign it out on the Devices page. **Not yet in place:** signing out must clear the browser's bridge database (device key, channel keys,
-sequence counters). The TIX app does not store any of these yet, so there is nothing to clear today; making
-sign-out clear them is a required item of a later ticket (the app side of the bridge, #25), and until it
-ships, revoking the device on the host is the control.
+ends its streams, §8.3) and sign it out on the Devices page. **In place (R10 wiring):** the browser keeps the device key, the channel keys, the pinned host keys and the
+sequence counters in its own `fileshare-bridge` database, and deletes the whole database on sign-out and when the
+session expires (a 401), so the next account on a shared browser never inherits this device key. The cost: after
+an expiry the browser pairs again. **Limits that remain:** a signed-in browser can act at its scope; deleting the
+database cannot reach anything a script already did with the keys (they are non-extractable, so their use, not
+their bytes, is exposed); revoking the device on the host remains the control for a stolen profile.
 
 ### What each scope allows, and the accepted limits
 

@@ -31,7 +31,7 @@ test("precache assets are exactly the shell files under static/", () => {
 
 test("precache includes the manifest and every page as a navigation", () => {
   assert.ok(list.assets.includes("/manifest.webmanifest"));
-  assert.deepEqual(list.pages, ["/", "/workspaces", "/t", "/files", "/settings", "/login", "/sandbox/html", "/sandbox/widget", "/pair"]);
+  assert.deepEqual(list.pages, ["/", "/workspaces", "/t", "/files", "/settings", "/login", "/sandbox/html", "/sandbox/widget", "/pair", "/remote/pair"]);
 });
 
 test("nothing precached is ever a bypassed path", () => {
@@ -40,11 +40,9 @@ test("nothing precached is ever a bypassed path", () => {
   }
 });
 
-// The bridge's device module (R10a, docs/bridge-protocol.md) ships before the page that uses it (R10b, #25). It is
-// precached and tested (tests/js/bridge-*.test.mjs, tests/browser/test_bridge_module.py), but no page imports its
-// entry point yet. The dashboard frame host (R10b, docs/bridge-frame.md) is likewise imported by the wiring step that
-// follows. Nothing else may be listed here.
-const NOT_YET_LOADED = ["bridge-session.js", "frame-host.js"];
+// Nothing waits to be loaded any more: the bridge module and the frame host are imported by the Remote pages
+// (remote.js, remote-pair.js). A new script that no page loads must not be listed here.
+const NOT_YET_LOADED = [];
 
 test("every precached script is loaded by a page or imported by another module (no dead code)", () => {
   const html = readdirSync(STATIC).filter((n) => n.endsWith(".html")).map((n) => readFileSync(join(STATIC, n), "utf8"));

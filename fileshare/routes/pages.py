@@ -110,6 +110,21 @@ def workspaces_page(request: Request, conn=Depends(get_db)):
     return _gated(request, conn, "workspaces", "/workspaces")
 
 
+@router.get("/remote")
+def remote_page(request: Request, conn=Depends(get_db)):
+    """Opens a paired workspace's dashboard in the sandboxed frame (Remote R10, docs/bridge-frame.md). Gated like the
+    status page; the frame itself is /sandbox/dash with its own policy."""
+    return _gated(request, conn, "remote", "/remote")
+
+
+@router.get("/remote/pair")
+def remote_pair_page(request: Request):
+    """Where a workspace's pairing link lands (docs/bridge-protocol.md §8.1). No session is required to load the shell:
+    the secret is only in the URL fragment, which no browser sends; remote-pair-ui.js removes it from the address first,
+    then asks the signed-in browser to pair. Never cached beyond revalidation."""
+    return render_page("remote-pair", request.app.state.settings, SHELL_CACHE)
+
+
 @router.get("/files")
 def files_page(request: Request, conn=Depends(get_db)):
     # As "/" was before Task 9: the shell needs setup only; files.js sends a signed-out browser to login.
