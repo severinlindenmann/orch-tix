@@ -18,8 +18,8 @@ FRAME_JS = ["bridge-transport.js", "frame-host.js", "frame-render.js", "frame-sc
 FRAME_CSS = ["frame.css"]          # loaded by frame-host.js itself, so app.css (and the shell budget) stay as they were
 FRAME_JS_BUDGET = 72_000           # bytes, uncompressed (the scripts)
 # The Remote pages' glue (R10 wiring: the ceremony, the workspace list, the transport over the mailbox) is likewise its
-# own allowance; only the tiny sign-out wipe (bridge-wipe.js) is loaded by every page and stays in the shell's.
-REMOTE_JS = ["remote.js", "remote-mailbox.js", "remote-model.js", "remote-pair.js", "remote-pair-ui.js", "remote-transport.js"]
+# own allowance; the tiny sign-out wipe (bridge-wipe.js) is counted here too.
+REMOTE_JS = ["bridge-wipe.js", "remote.js", "remote-mailbox.js", "remote-model.js", "remote-pair.js", "remote-pair-ui.js", "remote-transport.js"]
 REMOTE_JS_BUDGET = 32_000          # bytes, uncompressed
 
 

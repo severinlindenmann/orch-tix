@@ -360,7 +360,7 @@ def test_attachment_viewers_clear_the_side_notch_and_images_have_no_callout():
 
 
 # ---- the five tabs (TIX spec §10): Needs you · Tickets · Files · Settings ----
-NAV_PAGES = {"index.html", "ticket.html", "files.html", "settings.html", "workspaces.html"}
+NAV_PAGES = {"index.html", "ticket.html", "files.html", "settings.html", "workspaces.html", "remote.html"}
 TABS = [("/workspaces", "Workspaces"), ("/", "Needs you"), ("/?view=tickets", "Tickets"), ("/files", "Files"), ("/settings", "Settings")]
 
 
@@ -378,7 +378,7 @@ def test_every_page_with_a_nav_has_the_four_tabs():
     current = {n: re.search(r'href="([^"]+)" data-tab="\w+" aria-current="page"', (pages.STATIC_DIR / n).read_text()).group(1)
                for n in NAV_PAGES}
     assert current == {"index.html": "/", "ticket.html": "/", "files.html": "/files", "settings.html": "/settings",
-               "workspaces.html": "/workspaces"}
+               "workspaces.html": "/workspaces", "remote.html": "/workspaces"}
 
 
 def test_no_page_asks_google_for_fonts():
