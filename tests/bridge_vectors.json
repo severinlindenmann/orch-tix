@@ -2762,6 +2762,431 @@
    "record_until": 1790000900000
   },
   {
+   "name": "quota_damaged_files_count_toward_the_total_cap",
+   "envelope": "53485242010100013e7afa7ff8e262a2b4d26f4442d0b890c97c83c6fe2bb707e6a45dba5b4f1367520eef07028bab0aba7e811e6d7bba79000000000000000000000000000000000000000000000001000001a0c4506c0065ab862cf07b0242bb9aac7223a5ca22692fa2ff8e5a88a8201637d5e2db996cf425f3373b5dfc4138d545f3721cc95d3b4e0b81e160b7080f07587be4e8682d9623b573fc9d4de8e35ae1f2d1e62eebd98ad0fe36f0453a3bc2e6e0ff0ef9e4504b738a013c81b9235d3069fe4d518c6bcfde8c6ae146343410e93ff481d182aecd860e9ea98d0044ef87",
+   "mailbox_id": "520eef07028bab0aba7e811e6d7bba79",
+   "state": {
+    "workspace": "3e7afa7ff8e262a2b4d26f4442d0b890",
+    "key_version": 1,
+    "devices": {
+     "8f7a92c06ffaacf8077bf2c7e764fdbd": {
+      "pub": "04f8723041e769dc9b8ed9aedf924f05b6962c3e77f0c945c7cd7848df16a1b6233c9653c06a4d3526201351a838bf496668abd08c97b99a7841b625b69ad7222d",
+      "scope": "operate",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     },
+     "c97c83c6fe2bb707e6a45dba5b4f1367": {
+      "pub": "0494b9b21a496f05c380623ddb32f87bf806d09eace8e465dcaffb530fb20c92e48f2c4cf35b4ce71722d6f07e7020ab7558f73e6b82d97c7a036f5793cbc08f11",
+      "scope": "look",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     }
+    },
+    "rids": {
+     "25272493bd318af3255bf8a9415b8ae8": {
+      "device": "8f7a92c06ffaacf8077bf2c7e764fdbd",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "outcome": {
+       "status": 200
+      },
+      "until": 1790000500000
+     },
+     "7993fd0d06e3e32602aafa8b761afc2c": {
+      "device": null,
+      "damaged": true,
+      "digest": null,
+      "outcome": null,
+      "until": 1790000500000
+     },
+     "d4e02ce1796b534811574c9c4a7616ba": {
+      "device": null,
+      "damaged": true,
+      "digest": null,
+      "outcome": null,
+      "until": 1790000500000
+     }
+    },
+    "offers": {},
+    "pending_pairs": {},
+    "phones": {},
+    "streams": {},
+    "unverified": [],
+    "host_pub": "0465ef41535ff6ebd8e4ff80f258ecd8ec981a033f606f93d3d8b74eab907d45fdf84e206fdc047c1bed1b9fad5b6a71900b39b26f7c5a190ed41d2155c38786b0",
+    "limits": {
+     "per_device": 2,
+     "max_records": 3,
+     "busy_allowance": 1
+    }
+   },
+   "now_ms": 1790000000000,
+   "expect": {
+    "result": "drop"
+   },
+   "record_until": null
+  },
+  {
+   "name": "quota_damaged_files_below_the_total_cap_do_not_block",
+   "envelope": "53485242010100013e7afa7ff8e262a2b4d26f4442d0b890c97c83c6fe2bb707e6a45dba5b4f1367520eef07028bab0aba7e811e6d7bba79000000000000000000000000000000000000000000000001000001a0c4506c0065ab862cf07b0242bb9aac7223a5ca22692fa2ff8e5a88a8201637d5e2db996cf425f3373b5dfc4138d545f3721cc95d3b4e0b81e160b7080f07587be4e8682d9623b573fc9d4de8e35ae1f2d1e62eebd98ad0fe36f0453a3bc2e6e0ff0ef9e4504b738a013c81b9235d3069fe4d518c6bcfde8c6ae146343410e93ff481d182aecd860e9ea98d0044ef87",
+   "mailbox_id": "520eef07028bab0aba7e811e6d7bba79",
+   "state": {
+    "workspace": "3e7afa7ff8e262a2b4d26f4442d0b890",
+    "key_version": 1,
+    "devices": {
+     "8f7a92c06ffaacf8077bf2c7e764fdbd": {
+      "pub": "04f8723041e769dc9b8ed9aedf924f05b6962c3e77f0c945c7cd7848df16a1b6233c9653c06a4d3526201351a838bf496668abd08c97b99a7841b625b69ad7222d",
+      "scope": "operate",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     },
+     "c97c83c6fe2bb707e6a45dba5b4f1367": {
+      "pub": "0494b9b21a496f05c380623ddb32f87bf806d09eace8e465dcaffb530fb20c92e48f2c4cf35b4ce71722d6f07e7020ab7558f73e6b82d97c7a036f5793cbc08f11",
+      "scope": "look",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     }
+    },
+    "rids": {
+     "ab826c1390c9cacf46130fcc31ad4512": {
+      "device": "8f7a92c06ffaacf8077bf2c7e764fdbd",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "outcome": {
+       "status": 200
+      },
+      "until": 1790000500000
+     },
+     "f9dc1dd21a40bdd37f0dd640ffedb89d": {
+      "device": null,
+      "damaged": true,
+      "digest": null,
+      "outcome": null,
+      "until": 1790000500000
+     }
+    },
+    "offers": {},
+    "pending_pairs": {},
+    "phones": {},
+    "streams": {},
+    "unverified": [],
+    "host_pub": "0465ef41535ff6ebd8e4ff80f258ecd8ec981a033f606f93d3d8b74eab907d45fdf84e206fdc047c1bed1b9fad5b6a71900b39b26f7c5a190ed41d2155c38786b0",
+    "limits": {
+     "per_device": 2,
+     "max_records": 3,
+     "busy_allowance": 1
+    }
+   },
+   "now_ms": 1790000000000,
+   "expect": {
+    "result": "accept",
+    "scope": "look",
+    "meta": {
+     "method": "GET",
+     "op": "http",
+     "path": "/"
+    },
+    "data": ""
+   },
+   "record_until": 1790000900000
+  },
+  {
+   "name": "quota_damaged_files_are_no_device_s_quota",
+   "envelope": "53485242010100013e7afa7ff8e262a2b4d26f4442d0b8908f7a92c06ffaacf8077bf2c7e764fdbd434c189f5a1de63b379237f153cf4ef2000000000000000000000000000000000000000000000003000001a0c4506c006f4b5faf0a33deed191939efe0207b842a3e70464a11ca4ad41eaed7d504fff3058b389557cb0e3920c4fce1bae0419d14770f0bcf276634692dc37a433921c4d4d04ae0b9a1495d99870be0bccaf0d39d5ef1a764fd81bd20d0346e87682df6ceb77b9473cc3ee13302b3163306fa0316bb66c43f8e27151ac27ee5eb5e367d988a8c17c9dd279b5b0528",
+   "mailbox_id": "434c189f5a1de63b379237f153cf4ef2",
+   "state": {
+    "workspace": "3e7afa7ff8e262a2b4d26f4442d0b890",
+    "key_version": 1,
+    "devices": {
+     "8f7a92c06ffaacf8077bf2c7e764fdbd": {
+      "pub": "04f8723041e769dc9b8ed9aedf924f05b6962c3e77f0c945c7cd7848df16a1b6233c9653c06a4d3526201351a838bf496668abd08c97b99a7841b625b69ad7222d",
+      "scope": "operate",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     },
+     "c97c83c6fe2bb707e6a45dba5b4f1367": {
+      "pub": "0494b9b21a496f05c380623ddb32f87bf806d09eace8e465dcaffb530fb20c92e48f2c4cf35b4ce71722d6f07e7020ab7558f73e6b82d97c7a036f5793cbc08f11",
+      "scope": "look",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     }
+    },
+    "rids": {
+     "03efbcaab2e5d10cdcf17b7cb95f12a8": {
+      "device": "8f7a92c06ffaacf8077bf2c7e764fdbd",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "outcome": {
+       "status": 200
+      },
+      "until": 1790000500000
+     },
+     "757949774fa32e459e7e6249a415c8f6": {
+      "device": null,
+      "damaged": true,
+      "digest": null,
+      "outcome": null,
+      "until": 1790000500000
+     },
+     "9aaa085a27d8d9e0180cafd64e408202": {
+      "device": null,
+      "damaged": true,
+      "digest": null,
+      "outcome": null,
+      "until": 1790000500000
+     },
+     "2dfecf6fc5f527044a9ad44595827523": {
+      "device": null,
+      "damaged": true,
+      "digest": null,
+      "outcome": null,
+      "until": 1790000500000
+     }
+    },
+    "offers": {},
+    "pending_pairs": {},
+    "phones": {},
+    "streams": {},
+    "unverified": [],
+    "host_pub": "0465ef41535ff6ebd8e4ff80f258ecd8ec981a033f606f93d3d8b74eab907d45fdf84e206fdc047c1bed1b9fad5b6a71900b39b26f7c5a190ed41d2155c38786b0",
+    "limits": {
+     "per_device": 2,
+     "max_records": 16,
+     "busy_allowance": 1
+    }
+   },
+   "now_ms": 1790000000000,
+   "expect": {
+    "result": "accept",
+    "scope": "operate",
+    "meta": {
+     "method": "GET",
+     "op": "http",
+     "path": "/"
+    },
+    "data": ""
+   },
+   "record_until": 1790000900000
+  },
+  {
+   "name": "stream_request_refused_busy_carries_stream",
+   "envelope": "53485242010102013e7afa7ff8e262a2b4d26f4442d0b8908f7a92c06ffaacf8077bf2c7e764fdbd434c189f5a1de63b379237f153cf4ef2000000000000000000000000000000000000000000000003000001a0c4506c006f4b5faf0a33deed191939efe0207b842a3e70574a11ca4ad41eaed7d504fff3058b389557cb0e3920c4fce1bae0419d14770f0bcf276634697bdbeca4235c94f556c5670c7025d08f7b357f55c16edcb5ff7ffb70f1cca2c6a30b68e2b0d0369e3db79eee1ec0ea7c612817a09e30ea2d310da2afebdc8f77d94f2617c43de3c61e19081a724abe3674df95114555bf7c56ccc3596557430e55",
+   "mailbox_id": "434c189f5a1de63b379237f153cf4ef2",
+   "state": {
+    "workspace": "3e7afa7ff8e262a2b4d26f4442d0b890",
+    "key_version": 1,
+    "devices": {
+     "8f7a92c06ffaacf8077bf2c7e764fdbd": {
+      "pub": "04f8723041e769dc9b8ed9aedf924f05b6962c3e77f0c945c7cd7848df16a1b6233c9653c06a4d3526201351a838bf496668abd08c97b99a7841b625b69ad7222d",
+      "scope": "operate",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     },
+     "c97c83c6fe2bb707e6a45dba5b4f1367": {
+      "pub": "0494b9b21a496f05c380623ddb32f87bf806d09eace8e465dcaffb530fb20c92e48f2c4cf35b4ce71722d6f07e7020ab7558f73e6b82d97c7a036f5793cbc08f11",
+      "scope": "look",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     }
+    },
+    "rids": {
+     "e0b8463f43c231004b2a134627e6447a": {
+      "device": "8f7a92c06ffaacf8077bf2c7e764fdbd",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "outcome": {
+       "status": 200
+      },
+      "until": 1790000500000
+     },
+     "0187033f96f973a49fd7a5ec7a6271f0": {
+      "device": "8f7a92c06ffaacf8077bf2c7e764fdbd",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "outcome": {
+       "status": 200
+      },
+      "until": 1790000500000
+     }
+    },
+    "offers": {},
+    "pending_pairs": {},
+    "phones": {},
+    "streams": {},
+    "unverified": [],
+    "host_pub": "0465ef41535ff6ebd8e4ff80f258ecd8ec981a033f606f93d3d8b74eab907d45fdf84e206fdc047c1bed1b9fad5b6a71900b39b26f7c5a190ed41d2155c38786b0",
+    "limits": {
+     "per_device": 2,
+     "max_records": 16,
+     "busy_allowance": 1
+    }
+   },
+   "now_ms": 1790000000000,
+   "expect": {
+    "result": "refuse",
+    "code": "busy",
+    "stream": true
+   },
+   "record_until": 1790000900000
+  },
+  {
+   "name": "stream_request_refusal_replayed_still_carries_stream",
+   "state": {
+    "workspace": "3e7afa7ff8e262a2b4d26f4442d0b890",
+    "key_version": 1,
+    "devices": {
+     "8f7a92c06ffaacf8077bf2c7e764fdbd": {
+      "pub": "04f8723041e769dc9b8ed9aedf924f05b6962c3e77f0c945c7cd7848df16a1b6233c9653c06a4d3526201351a838bf496668abd08c97b99a7841b625b69ad7222d",
+      "scope": "operate",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     },
+     "c97c83c6fe2bb707e6a45dba5b4f1367": {
+      "pub": "0494b9b21a496f05c380623ddb32f87bf806d09eace8e465dcaffb530fb20c92e48f2c4cf35b4ce71722d6f07e7020ab7558f73e6b82d97c7a036f5793cbc08f11",
+      "scope": "look",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     }
+    },
+    "rids": {},
+    "offers": {},
+    "pending_pairs": {},
+    "phones": {},
+    "streams": {},
+    "unverified": [],
+    "host_pub": "0465ef41535ff6ebd8e4ff80f258ecd8ec981a033f606f93d3d8b74eab907d45fdf84e206fdc047c1bed1b9fad5b6a71900b39b26f7c5a190ed41d2155c38786b0"
+   },
+   "steps": [
+    {
+     "envelope": "53485242010102013e7afa7ff8e262a2b4d26f4442d0b8908f7a92c06ffaacf8077bf2c7e764fdbde80f5862c94bf6cc5259cb8a4fcdb2fb000000000000000000000000000000000000000000000002000001a0c44bd81f10042675bdffcbfb9d61a7ead822a5a3a4f50c2e974ae78d78fe230a4d1fb739e3ee31db86a4c44af79e0f30acc51854d47eaaaf9c436553fc72e464e818f34981354e66257185418e02676efb807d9526836044779d0d66947f695fc914328116e0cd35f5f3ce80c5f80a411afd2cd378e7deac71da492dcf4275fc2d172b56347172d2d82bf68a605932895d78a34d1eac925c74df213ad9d1",
+     "mailbox_id": "e80f5862c94bf6cc5259cb8a4fcdb2fb",
+     "now_ms": 1790000000000,
+     "expect": {
+      "result": "refuse",
+      "code": "stale_timestamp",
+      "host_ms": 1790000000000,
+      "stream": true
+     },
+     "record_until": 1790000900000
+    },
+    {
+     "envelope": "53485242010102013e7afa7ff8e262a2b4d26f4442d0b8908f7a92c06ffaacf8077bf2c7e764fdbde80f5862c94bf6cc5259cb8a4fcdb2fb000000000000000000000000000000000000000000000002000001a0c44bd81f10042675bdffcbfb9d61a7ead822a5a3a4f50c2e974ae78d78fe230a4d1fb739e3ee31db86a4c44af79e0f30acc51854d47eaaaf9c436553fc72e464e818f34981354e66257185418e02676efb807d9526836044779d0d66947f695fc914328116e0cd35f5f3ce80c5f80a411afd2cd378e7deac71da492dcf4275fc2d172b56347172d2d82bf68a605932895d78a34d1eac925c74df213ad9d1",
+     "mailbox_id": "e80f5862c94bf6cc5259cb8a4fcdb2fb",
+     "now_ms": 1790000005000,
+     "expect": {
+      "result": "refuse",
+      "code": "stale_timestamp",
+      "host_ms": 1790000005000,
+      "stream": true
+     },
+     "record_until": 1790000900000
+    }
+   ]
+  },
+  {
+   "name": "stream_request_refused_malformed_carries_stream",
+   "envelope": "53485242010102013e7afa7ff8e262a2b4d26f4442d0b8908f7a92c06ffaacf8077bf2c7e764fdbddfa7b640b146a65fddb2579f2377da6b000000000000000000000000000000000000000000000005000001a0c4506c009cb9855dcf0e176edd984e78204cce5c9f4dbf36322999d627ee613cdc046bdafdf6da51c4ca13bfc01b11ec8ce7b1ba20b9ef154a6ae2483e2e4df0138a5f53b61807e098b887805f95902367176070ca8d0aeb4c490c2b2624a56f97a152c2b793769ba20b3a78de0714879ff49d737bcff690e5f1e77d0128c8f2e9fa30",
+   "mailbox_id": "dfa7b640b146a65fddb2579f2377da6b",
+   "state": {
+    "workspace": "3e7afa7ff8e262a2b4d26f4442d0b890",
+    "key_version": 1,
+    "devices": {
+     "8f7a92c06ffaacf8077bf2c7e764fdbd": {
+      "pub": "04f8723041e769dc9b8ed9aedf924f05b6962c3e77f0c945c7cd7848df16a1b6233c9653c06a4d3526201351a838bf496668abd08c97b99a7841b625b69ad7222d",
+      "scope": "operate",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     },
+     "c97c83c6fe2bb707e6a45dba5b4f1367": {
+      "pub": "0494b9b21a496f05c380623ddb32f87bf806d09eace8e465dcaffb530fb20c92e48f2c4cf35b4ce71722d6f07e7020ab7558f73e6b82d97c7a036f5793cbc08f11",
+      "scope": "look",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     }
+    },
+    "rids": {},
+    "offers": {},
+    "pending_pairs": {},
+    "phones": {},
+    "streams": {},
+    "unverified": [],
+    "host_pub": "0465ef41535ff6ebd8e4ff80f258ecd8ec981a033f606f93d3d8b74eab907d45fdf84e206fdc047c1bed1b9fad5b6a71900b39b26f7c5a190ed41d2155c38786b0"
+   },
+   "now_ms": 1790000000000,
+   "expect": {
+    "result": "refuse",
+    "code": "malformed",
+    "stream": true
+   },
+   "record_until": 1790000900000
+  },
+  {
+   "name": "plain_request_refused_busy_carries_no_stream",
+   "envelope": "53485242010100013e7afa7ff8e262a2b4d26f4442d0b8908f7a92c06ffaacf8077bf2c7e764fdbd434c189f5a1de63b379237f153cf4ef2000000000000000000000000000000000000000000000003000001a0c4506c006f4b5faf0a33deed191939efe0207b842a3e70574a11ca4ad41eaed7d504fff3058b389557cb0e3920c4fce1bae0419d14770f0bcf276634697bdbeca4235c94f556c5670c7025d08f7b65efc9f01fd118d33326150a4d6bdf0681af7f40768306aceee83fe104db09312c44ad66f12fda941c0df5e6948f36fdef696fddf935a022b21bad9f254153fcc72f70b5304a47205e27e541d80496c9",
+   "mailbox_id": "434c189f5a1de63b379237f153cf4ef2",
+   "state": {
+    "workspace": "3e7afa7ff8e262a2b4d26f4442d0b890",
+    "key_version": 1,
+    "devices": {
+     "8f7a92c06ffaacf8077bf2c7e764fdbd": {
+      "pub": "04f8723041e769dc9b8ed9aedf924f05b6962c3e77f0c945c7cd7848df16a1b6233c9653c06a4d3526201351a838bf496668abd08c97b99a7841b625b69ad7222d",
+      "scope": "operate",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     },
+     "c97c83c6fe2bb707e6a45dba5b4f1367": {
+      "pub": "0494b9b21a496f05c380623ddb32f87bf806d09eace8e465dcaffb530fb20c92e48f2c4cf35b4ce71722d6f07e7020ab7558f73e6b82d97c7a036f5793cbc08f11",
+      "scope": "look",
+      "revoked": false,
+      "high": 0,
+      "bitmap": 0
+     }
+    },
+    "rids": {
+     "578aa6908ac25ea7f71ec314a3d54524": {
+      "device": "8f7a92c06ffaacf8077bf2c7e764fdbd",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "outcome": {
+       "status": 200
+      },
+      "until": 1790000500000
+     },
+     "dea170e932d34e163f071972e6a19b58": {
+      "device": "8f7a92c06ffaacf8077bf2c7e764fdbd",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "outcome": {
+       "status": 200
+      },
+      "until": 1790000500000
+     }
+    },
+    "offers": {},
+    "pending_pairs": {},
+    "phones": {},
+    "streams": {},
+    "unverified": [],
+    "host_pub": "0465ef41535ff6ebd8e4ff80f258ecd8ec981a033f606f93d3d8b74eab907d45fdf84e206fdc047c1bed1b9fad5b6a71900b39b26f7c5a190ed41d2155c38786b0",
+    "limits": {
+     "per_device": 2,
+     "max_records": 16,
+     "busy_allowance": 1
+    }
+   },
+   "now_ms": 1790000000000,
+   "expect": {
+    "result": "refuse",
+    "code": "busy"
+   },
+   "record_until": 1790000900000
+  },
+  {
    "name": "streams_belong_to_the_device_that_opened_them",
    "state": {
     "workspace": "3e7afa7ff8e262a2b4d26f4442d0b890",
@@ -4080,6 +4505,84 @@
      "refusal": "stale_sequence"
     },
     "data": "",
+    "offset_ms": null,
+    "clock_wrong": null,
+    "pin_failure": null
+   }
+  },
+  {
+   "name": "stream_request_busy_refusal_with_stream",
+   "envelope": "53485242010207013e7afa7ff8e262a2b4d26f4442d0b8908f7a92c06ffaacf8077bf2c7e764fdbda7d6e8710d22bfdfecc9c091bf3966a3000000000000000000000000000000000000000000000000000001a0c45073d0415a90d9720e319f381b380ccc9732e173564ff033e57784141728995bfaa757461eb07e51f6b69ddbdaf27bfe5f4b8806dbd543181ebca6f4a50402f05dfb69e0cd7c0d44b6f7ec9dca1eed2ce3d464a7b3c4ea10eb9adda4a65ee003f42af47a493e65e9103e84577129320c2d47d054362118591c",
+   "mailbox": {
+    "id": "a7d6e8710d22bfdfecc9c091bf3966a3",
+    "idx": 0,
+    "last": true,
+    "stream": true
+   },
+   "pending": {
+    "a7d6e8710d22bfdfecc9c091bf3966a3": {
+     "next": 0,
+     "stream": true
+    }
+   },
+   "offset_ms": 0,
+   "now_ms": 1790000002500,
+   "expect": {
+    "result": "accept",
+    "last": true,
+    "refusal": true,
+    "meta": {
+     "refusal": "busy"
+    },
+    "data": "",
+    "offset_ms": null,
+    "clock_wrong": null,
+    "pin_failure": null
+   }
+  },
+  {
+   "name": "stream_request_busy_refusal_without_stream",
+   "envelope": "53485242010205013e7afa7ff8e262a2b4d26f4442d0b8908f7a92c06ffaacf8077bf2c7e764fdbda7d6e8710d22bfdfecc9c091bf3966a3000000000000000000000000000000000000000000000000000001a0c45073d0415a90d9720e319f381b380ccc9732e173564ff033e57784141728995bfaa757461eb07e51f6714690e09c8a4b6b87591ff37280838e95a89e38a08ecb3a099163ea868170c0cb3ccb4c42e7f5a0222bdbf2c58b3cd89047a4f199820a9552e1debcc01b1ce33e5367a8b04b7d5e08e6227f4df2c808",
+   "mailbox": {
+    "id": "a7d6e8710d22bfdfecc9c091bf3966a3",
+    "idx": 0,
+    "last": true,
+    "stream": false
+   },
+   "pending": {
+    "a7d6e8710d22bfdfecc9c091bf3966a3": {
+     "next": 0,
+     "stream": true
+    }
+   },
+   "offset_ms": 0,
+   "now_ms": 1790000002500,
+   "expect": {
+    "result": "drop",
+    "offset_ms": null,
+    "clock_wrong": null,
+    "pin_failure": null
+   }
+  },
+  {
+   "name": "plain_request_refusal_with_stream",
+   "envelope": "53485242010207013e7afa7ff8e262a2b4d26f4442d0b8908f7a92c06ffaacf8077bf2c7e764fdbda7d6e8710d22bfdfecc9c091bf3966a3000000000000000000000000000000000000000000000000000001a0c45073d0415a90d9720e319f381b380ccc9732e173564ff033e57784141728995bfaa757461eb07e51f6b69ddbdaf27bfe5f4b8806dbd543181ebca6f4a50402f05dfb69e0cd7c0d44b6f7ec9dca1eed2ce3d464a7b3c4ea10eb9adda4a65ee003f42af47a493e65e9103e84577129320c2d47d054362118591c",
+   "mailbox": {
+    "id": "a7d6e8710d22bfdfecc9c091bf3966a3",
+    "idx": 0,
+    "last": true,
+    "stream": true
+   },
+   "pending": {
+    "a7d6e8710d22bfdfecc9c091bf3966a3": {
+     "next": 0,
+     "stream": false
+    }
+   },
+   "offset_ms": 0,
+   "now_ms": 1790000002500,
+   "expect": {
+    "result": "drop",
     "offset_ms": null,
     "clock_wrong": null,
     "pin_failure": null

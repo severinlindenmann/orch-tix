@@ -310,6 +310,12 @@ def _limits(state) -> dict:
             **state.get("limits", {})}
 
 
+def _total(state, now_ms: int) -> int:
+    """Unexpired records in the store, damaged (unreadable or failed-tag) files included: they hold a slot of
+    MAX_RECORDS but belong to no device (§5.3)."""
+    return sum(1 for rec in state["rids"].values() if now_ms < rec["until"])
+
+
 def _count_for(state, device: str, now_ms: int) -> int:
     return sum(1 for rec in state["rids"].values() if rec["device"] == device and now_ms < rec["until"])
 
@@ -317,7 +323,7 @@ def _count_for(state, device: str, now_ms: int) -> int:
 def _record(state, h: Header, env: bytes, now_ms: int, outcome) -> None:
     """Persisted (on a real host) before the refusal is sent or the request runs."""
     lim = _limits(state)
-    if sum(1 for rec in state["rids"].values() if now_ms < rec["until"]) >= lim["max_records"]:
+    if _total(state, now_ms) >= lim["max_records"]:
         raise StoreFull()
     if _count_for(state, h.device.hex(), now_ms) >= lim["per_device"] + lim["busy_allowance"]:
         raise DeviceFull()
@@ -346,6 +352,14 @@ def seq_accept(dev: dict, seq: int) -> bool:
 
 
 def host_check(env: bytes, state: dict, now_ms: int, mailbox_id: str | None = None) -> dict:
+    """_host_check, plus §4/§5.3: a refusal answering a STREAM request carries STREAM in its chunk header."""
+    r = _host_check(env, state, now_ms, mailbox_id)
+    if r["result"] == "refuse" and Header.decode(split(env)[0]).flags & F_STREAM:
+        r["stream"] = True
+    return r
+
+
+def _host_check(env: bytes, state: dict, now_ms: int, mailbox_id: str | None = None) -> dict:
     """What the host does with one request envelope. `state` (mutated) is the workspace's
     {"workspace", "k_ws", "key_version", "devices": {id hex: {pub, scope, revoked, high, bitmap}},
      "rids": {rid hex: {device, digest, outcome, until}}, "offers": {pairing id hex: {secret, scope, expires_ms}},
@@ -732,7 +746,7 @@ def verify_assertion(cred: dict, pending: dict, sender_device: str, a: dict, now
 
 
 # Every key of a host_check result that a vector's `expect` pins: an expect lists ALL of them the result has.
-HOST_EXPECT_KEYS = ("result", "code", "scope", "meta", "data", "outcome", "high", "fingerprint", "answer", "label", "status", "host_pub", "phone_link", "host_ms")
+HOST_EXPECT_KEYS = ("result", "code", "scope", "meta", "data", "outcome", "high", "fingerprint", "answer", "label", "status", "host_pub", "phone_link", "host_ms", "stream")
 
 # --- the vector file ------------------------------------------------------------------------------
 
@@ -1009,6 +1023,35 @@ def build() -> dict:
     case("quota_expired_records_do_not_count", req(seq=3), None, now,
          both(q, held(dev_a, 2, now, "e")))
 
+    # damaged files (unreadable or failed-tag) hold a slot of the total cap and belong to no device (§5.3)
+    def damaged(n, until, tag):
+        def f(s):
+            for i in range(n):
+                s["rids"][fake(f"damaged-{tag}-{i}")[:16].hex()] = {
+                    "device": None, "damaged": True, "digest": None, "outcome": None, "until": until}
+        return f
+
+    tight = limits(per_device=2, max_records=3, busy_allowance=1)
+    case("quota_damaged_files_count_toward_the_total_cap", req(signer="device_b", device=dev_b, seq=1), None, now,
+         both(tight, held(dev_a, 1, now + 500_000, "dm"), damaged(2, now + 500_000, "a")))
+    case("quota_damaged_files_below_the_total_cap_do_not_block", req(signer="device_b", device=dev_b, seq=1), None, now,
+         both(tight, held(dev_a, 1, now + 500_000, "dn"), damaged(1, now + 500_000, "b")))
+    case("quota_damaged_files_are_no_device_s_quota", req(seq=3), None, now,
+         both(limits(per_device=2, max_records=16, busy_allowance=1), held(dev_a, 1, now + 500_000, "dq"),
+              damaged(3, now + 500_000, "c")))
+
+    # a refusal answering a STREAM request carries STREAM (§4, §5.3)
+    sq = limits(per_device=2, max_records=16, busy_allowance=1)
+    srm = {"op": "http", "method": "GET", "path": "/terminal/stream"}
+    case("stream_request_refused_busy_carries_stream", req(meta=srm, flags=F_STREAM, seq=3), None, now,
+         both(sq, held(dev_a, 2, now + 500_000, "sb")))
+    stale_stream = req(meta=srm, flags=F_STREAM, seq=2, ts=now - WINDOW_MS - 1)
+    chain("stream_request_refusal_replayed_still_carries_stream", [(stale_stream, now), (stale_stream, now + 5000)])
+    case("stream_request_refused_malformed_carries_stream",
+         req(raw_pt=raw_meta('{"op":"http","op":"cancel"}'), flags=F_STREAM, seq=5), None, now)
+    case("plain_request_refused_busy_carries_no_stream", req(meta=srm, seq=3), None, now,
+         both(sq, held(dev_a, 2, now + 500_000, "pl")))
+
     # streams belong to the device that opened them (§4)
     term = fake("terminal-stream")[:16]
 
@@ -1122,6 +1165,10 @@ def build() -> dict:
     dcase("response_out_of_order", resp(seq=1, flags=0))
     dcase("response_mailbox_says_not_last", ok, mailbox={"id": rid.hex(), "idx": 0, "last": False, "stream": False})
     dcase("refusal_chunk", resp(flags=F_LAST | F_REFUSAL, meta={"refusal": "stale_sequence", "high": 9}))
+    sr = lambda **kw: resp(meta={"refusal": "busy"}, **kw)    # noqa: E731
+    dcase("stream_request_busy_refusal_with_stream", sr(flags=F_LAST | F_REFUSAL | F_STREAM), stream_pending=True)
+    dcase("stream_request_busy_refusal_without_stream", sr(flags=F_LAST | F_REFUSAL), stream_pending=True)
+    dcase("plain_request_refusal_with_stream", sr(flags=F_LAST | F_REFUSAL | F_STREAM))
     dcase("refusal_without_last", resp(flags=F_REFUSAL, meta={"refusal": "x"}))
     skew = now + 2000 + 400_000                       # the device's clock runs 400 s fast
     stale = resp(flags=F_LAST | F_REFUSAL, meta={"refusal": "stale_timestamp", "host_ms": now + 2000})
