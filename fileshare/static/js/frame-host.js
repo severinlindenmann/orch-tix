@@ -1,6 +1,6 @@
 // fileshare/static/js/frame-host.js — the TIX app's side of the dashboard frame (docs/bridge-frame.md).
 // Builds the sandboxed iframe (/sandbox/dash, sandbox="allow-scripts", opaque origin), talks to it and hands every
-// request to the abstract transport (bridge-transport.js). Loaded by nothing yet: the unlock and wiring ticket imports it.
+// request to the abstract transport (bridge-transport.js). Loaded by js/remote.js (the /remote page), with the transport of js/remote-transport.js.
 //
 // Who is talking. A sandboxed frame's origin is the string "null" for every document it ever holds, so the origin
 // proves nothing, and the iframe's WindowProxy stays the same when a document replaces another. So identity is a

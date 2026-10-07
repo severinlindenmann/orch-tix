@@ -62,6 +62,7 @@ test("pending answers and pair refusals: every vector, through openPairAnswer", 
       refusal: r.refusal ? r.meta.refusal : null, offset_ms: r.offsetMs ?? null, clock_wrong: r.clockWrong ?? null };
     assert.deepEqual(got, c.expect, c.name);
     assert.equal(s.hostKey, null, `${c.name}: the pin-checked key is not kept on the session`);
+    assert.equal(s.pinFailures, 0, `${c.name}: an answer that fails the pin or the signature is no evidence of a changed host key`);
     n++;
   }
   assert.equal(n, VEC.pending_answers.length);

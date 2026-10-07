@@ -5,9 +5,18 @@ frame host do and, as important, what they are not. The key scheme and the envel
 [bridge-protocol.md](bridge-protocol.md); nothing here imports `bridge-crypto.js` or touches the mailbox. The frame
 host talks to an abstract transport (below) that a later ticket implements with the real crypto and mailbox.
 
-Status: built against the fake transport. **Not wired into any page yet**: the unlock sheet and the wiring step import
-`frame-host.js`. Not tested against the real orch dashboard (it lives in another repository); the test pages in
-`tests/browser/test_dash_frame.py` have its shape (R0 findings, orch-core#90 and #127).
+Status: wired (R10 wiring, #25). `/remote` (`static/remote.html`, `js/remote.js`) lists the workspaces with their presence
+and opens a paired, online one in this frame; the transport is `js/remote-transport.js` (a `DeviceSession` from
+`bridge-session.js`, the mailbox in `js/remote-mailbox.js`). `/remote/pair#v1...` (`js/remote-pair-ui.js`,
+`js/remote-pair.js`) is the pairing ceremony of bridge-protocol.md §8.1: the secret is removed from the address first,
+every answer to the `pair` request is opened tag, pin, signature, then §7, and the pin is stored only after a verified
+`pending` answer whose fingerprint is the one this browser computed itself. Sign-out deletes the `fileshare-bridge`
+database (`js/bridge-wipe.js`). The reply's `page` flag is read from the host's signed reply meta (`page: true`), the
+one field this document asked the host to add. Not built: the unlock sheet and the WebAuthn ceremonies (R11), streams
+end to end against a real host, the viewer and download callbacks (they say "later"), a link from the status page to
+`/remote`. Not tested against the real orch dashboard (it lives in another repository); the test pages in
+`tests/browser/test_dash_frame.py` have its shape (R0 findings, orch-core#90 and #127), and `tests/browser/test_remote.py`
+drives the whole path against `tests/support/fake_bridge_host.py`, a host built on the Python reference implementation.
 
 ## What is where
 
