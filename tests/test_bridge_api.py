@@ -511,6 +511,24 @@ def test_a_full_mailbox_pushes_back_on_the_host(host, session_client, monkeypatc
         assert r.status_code == 429 and error(r) == "mailbox_full"
 
 
+def test_stream_frames_are_capped_by_count_and_across_mailboxes(app, host, session_client, monkeypatch):
+    s = post_req(session_client, stream=True).sent["id"]
+    host_poll(host)
+    monkeypatch.setattr(br, "BOX_FRAMES", 2)
+    assert host_resp(host, s, last=False, body=sealed(5)).status_code == 204
+    assert host_resp(host, s, last=False, body=sealed(5)).status_code == 204
+    r = host_resp(host, s, last=False, body=sealed(5))
+    assert r.status_code == 429 and error(r) == "mailbox_full"
+    monkeypatch.setattr(br, "BOX_FRAMES", 1024)
+    other = br.Box()
+    other.frame_bytes = br.ALL_FRAME_BYTES - 10                # another mailbox holds nearly the global cap
+    other.lease = ("dev_x", "host_x", br.now_ts())             # a live lease keeps prune() from dropping it
+    app.state.bridge.boxes["elsewhere"] = other
+    assert host_resp(host, s, last=False, body=sealed(5)).status_code == 429
+    other.frame_bytes = 0
+    assert host_resp(host, s, last=False, body=sealed(5)).status_code == 204
+
+
 def test_too_many_queued_requests_for_a_slow_host(host, session_client, monkeypatch):
     monkeypatch.setattr(br, "BOX_QUEUED_REQUESTS", 2)
     assert post_req(session_client).status_code == 201 and post_req(session_client).status_code == 201
@@ -636,18 +654,22 @@ def test_a_poll_of_a_displaced_owner_neither_takes_the_lease_nor_eats_the_queue(
 
 
 def test_a_poll_of_a_device_revoked_mid_poll_neither_takes_the_lease_nor_eats_the_queue(app, settings, host, device, other_device):
+    at_revoke = []
+
     def revoke():
         _sql(settings, "UPDATE devices SET revoked_at = '2026-01-01T00:00:00Z' WHERE id = ?", device.id)
+        at_revoke.append(app.state.bridge.box(SPACE).lease)
 
     first, lease = _displaced_poll_case(app, settings, device, other_device, revoke)
     assert first.status_code == 401 and first.json()["error"] == "revoked"
     assert rows(settings) == 1
     assert lease == app.state.bridge.box(SPACE).lease and lease[2] <= br.now_ts()
+    assert lease == at_revoke[0]                               # not refreshed, not taken over, after the revocation
 
 
-def test_a_poll_cancelled_after_taking_requests_frees_its_slot(app, host, device, other_device, monkeypatch):
-    """At most once: what a cancelled poll had taken is gone (the host's idempotency key covers a resend),
-    but the slot it held is released."""
+def test_a_cancelled_poll_releases_its_slot(app, host, device, other_device, monkeypatch):
+    """Regression guard for slot release only (not for the lease fix): what a cancelled poll had taken is gone
+    (the host's idempotency key covers a resend), but the slot it held is released."""
     real = br.take_requests
 
     def slow(conn, space, now):

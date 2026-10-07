@@ -189,6 +189,10 @@ async def poll_requests(space: str, request: Request, holder: str = "", wait: st
     principal = await _host(request, space)
     device_id, bridge = principal.device["id"], _bridge(request)
     with bridge.poll_slot("h:" + device_id, br.HOST_POLLS, space):
+        # Accepted gap: _host() below checks owner and approval, then take_requests() dequeues. If ownership moves or
+        # the device is revoked in between, this one poll can still take up to HOST_REQUESTS_PER_POLL (16) sealed
+        # requests and hand them to the displaced device; the new owner never sees them. They are lost, not
+        # disclosed: the bodies stay sealed and the client's request simply expires.
         first = [take_over == "1"]
 
         async def step():
