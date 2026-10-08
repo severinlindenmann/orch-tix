@@ -177,6 +177,7 @@ window.__mk = (limits, real) => {
     isActive: real ? undefined : () => window.__active !== false,   // the test driver's own scripts switch real user activation on
     onPort: (p) => {      // the host's end of the channel: tests post to the frame through it, and as the frame into the host
       window.__port = p; window.__portCount = (window.__portCount || 0) + 1;
+      window.__onPortHook?.(p);
       p.addEventListener('message', (e) => { const d = e.data || {}; ev.msgs.push({ t: d.t, id: d.id, gen: d.gen, path: d.path }); });
     },
     notice: (n) => ev.notice.push(n),
@@ -1118,3 +1119,145 @@ def test_the_real_user_activation_api_is_what_gates_open(dash, page, browser_nam
     dash.frame().locator("#h").click()                                # a real click inside the frame: the parent is activated
     cdp.send("Runtime.evaluate", {"expression": expr, "userGesture": False})
     page.wait_for_function("() => window.__ev.viewer.length === 1")
+
+
+# ---- a page that was left is destroyed (orch-core#328) ------------------------------------------------------------------
+# A document write keeps the window, so a replaced page's timers, retries and streams used to go on running as the new
+# page. Every page after the first now lives in a new iframe; these pages try to outlive theirs.
+
+STALE_A_JS = """(() => {
+  const nativeSetInterval = window.setInterval.bind(window), nativeFetch = window.fetch;   // references that outlive the shim's own hooks
+  const hit = (t) => { nativeFetch('/api/stale-a?t=' + t).catch(() => {}); };
+  nativeSetInterval(() => hit('interval'), 100);
+  (async () => { for (;;) { await new Promise((r) => setTimeout(r, 100)); hit('promise'); } })();      // a Promise loop that holds itself alive
+  (async function batcher() { for (;;) { try { const r = await fetch('/api/stale-keys?n=7'); if (r.ok) return; } catch (e) {} await new Promise((r) => setTimeout(r, 100)); } })();   // retries a post "that did not arrive"
+  const ch = new MessageChannel(); let last = 0;                                     // no timer at all: a message loop
+  ch.port1.onmessage = () => { const n = Date.now(); if (n - last > 100) { last = n; hit('channel'); } ch.port2.postMessage(0); };
+  ch.port2.postMessage(0);
+  (function frameLoop() { if (Date.now() % 100 < 16) hit('raf'); requestAnimationFrame(frameLoop); })();
+  new EventSource('/events');
+  window.__aAlive = true;
+})();"""
+STALE_B_JS = """(() => { window.__b = (window.__b || 0) + 1; window.__bHash = window.orchHost.hash();
+  setInterval(() => fetch('/api/stale-b').catch(() => {}), 100); })();"""
+
+
+def _stale_pages(page, extra_scopes=()):
+    def pg(title, js, links):
+        return (f'<!doctype html><title>{title}</title><h1 id="h">{title}</h1><script src="/static/stale-{title.lower()}.js?v={v(js)}"></script>'
+                + "".join(f'<a id="{i}" href="{h}">{i}</a> ' for i, h in links))
+    js = {"/static/stale-a.js": STALE_A_JS, "/static/stale-b.js": STALE_B_JS, "/static/stale-c.js": "window.__c = 1;"}
+    html = {"content-type": "text/html; charset=utf-8"}
+    _add_routes(page, {
+        "/stale-a": {"body": pg("A", STALE_A_JS, [("to-b", "/stale-b#frag")]), "headers": html, "page": True},
+        "/stale-b": {"body": pg("B", STALE_B_JS, [("to-c", "/stale-c"), ("to-a", "/stale-a")]), "headers": html, "page": True},
+        "/stale-c": {"body": pg("C", js["/static/stale-c.js"], [("to-a", "/stale-a"), ("to-b", "/stale-b")]), "headers": html, "page": True},
+        **{p: {"body": b, "headers": {"content-type": "text/javascript"}} for p, b in js.items()},
+    }, ["/stale-a", "/stale-b", "/stale-c", *extra_scopes])
+
+
+def _stale_count(dash, needle):
+    return len([c for c in dash.calls() if needle in c["path"]])
+
+
+def test_a_page_that_was_left_stops_everything_it_started_and_the_new_page_works(dash, page):
+    _stale_pages(page)
+    dash.open()
+    page.evaluate("window.__host.go('/stale-a')")
+    dash.wait_title("A")
+    dash.frame().wait_for_function("() => window.__aAlive === true")
+    page.wait_for_function("() => window.__fake.calls.filter((c) => c.path.startsWith('/api/stale-a')).length >= 8")     # it is busy
+    page.wait_for_function("() => window.__fake.streams.length === 2")           # Home's (already closed by the swap to A) and A's
+    assert page.evaluate("window.__fake.streams[0].closed && !window.__fake.streams[1].closed")
+    assert page.evaluate("window.__portCount") == 2                          # Home was written into the first frame, A is the first page shown in a new one
+    page.evaluate("document.querySelector('iframe.frame-dash').focus(); window.__oldPort = window.__port; window.__oldFrame = document.querySelector('iframe.frame-dash')")
+    pongs = len([m for m in dash.ev("msgs") if m["t"] == "pong"])
+    dash.frame().locator("#to-b").click()
+    dash.wait_title("B")
+    assert page.evaluate("window.__oldFrame.isConnected") is False and page.evaluate("window.__portCount") == 3
+    assert page.evaluate("document.activeElement === document.querySelector('iframe.frame-dash')")      # keyboard focus follows the person
+    stale = _stale_count(dash, "stale-a") + _stale_count(dash, "stale-keys")
+    assert page.evaluate("window.__fake.streams.length === 2 && window.__fake.streams[1].closed")        # its stream was cancelled, once
+    page.wait_for_timeout(1800)                                               # eighteen periods of every loop the old page had
+    assert _stale_count(dash, "stale-a") + _stale_count(dash, "stale-keys") == stale, [c["path"] for c in dash.calls()][-12:]
+    assert page.evaluate("window.__fake.streams.length") == 2                # and nothing reopened it
+    f = dash.frame()
+    assert f.evaluate("window.__b") == 1 and f.evaluate("window.__bHash") == "#frag" and f.evaluate("window.__aAlive") is None   # the new page: its own script, its fragment, nothing of the old page
+    assert _stale_count(dash, "stale-b") >= 5
+    # the heartbeat of the new channel runs and nothing was rebuilt for it
+    page.wait_for_function("(n) => window.__ev.msgs.filter((m) => m.t === 'pong').length >= n", arg=pongs + 3, timeout=8000)
+    assert not [m for m in dash.ev("log") if m.startswith("frame rebuilt")]
+    # a late message on the old channel is a stranger's: nothing is asked, nothing is fetched
+    before, hist = len(dash.calls()), len(dash.ev("history"))
+    page.evaluate("""() => { for (const d of [{t: 'req', id: 900, gen: 1, intent: 'fetch', method: 'GET', path: '/api/forged', headers: {}},
+        {t: 'copy', id: 901, text: 'evil'}, {t: 'rendered', path: '/stale-c', push: true}, {t: 'hist', op: 'push', path: '/stale-c'}])
+        window.__oldPort.dispatchEvent(new MessageEvent('message', {data: d})); }""")
+    page.wait_for_timeout(300)
+    assert not [c for c in dash.calls()[before:] if "forged" in c["path"]] and not page.query_selector(".frame-prompt")
+    assert len(dash.ev("history")) == hist and page.evaluate("window.__host.current") == "/stale-b"
+
+
+def test_a_page_cannot_survive_by_holding_its_own_references(dash, page):
+    """timers kept through a reference taken from the window, a promise loop, a message loop, an animation loop: the
+    frame goes, so does everything in it (a shim that only cancelled what it could see would miss the last two)"""
+    _stale_pages(page)
+    dash.open()
+    page.evaluate("window.__host.go('/stale-a')")
+    dash.wait_title("A")
+    for kind in ("interval", "promise", "channel", "raf"):
+        page.wait_for_function("(k) => window.__fake.calls.filter((c) => c.path === '/api/stale-a?t=' + k).length >= 2", arg=kind)
+    dash.frame().locator("#to-b").click()
+    dash.wait_title("B")
+    seen = {k: _stale_count(dash, f"t={k}") for k in ("interval", "promise", "channel", "raf")}
+    page.wait_for_timeout(1500)
+    assert {k: _stale_count(dash, f"t={k}") for k in seen} == seen
+
+
+def test_history_and_the_fragment_survive_a_new_frame_per_page(dash, page):
+    _stale_pages(page)
+    dash.open()
+    page.evaluate("window.__host.go('/stale-a')")
+    dash.wait_title("A")
+    for link, title in (("to-b", "B"), ("to-c", "C")):
+        dash.frame().locator(f"#{link}").click()
+        dash.wait_title(title)
+    pushes = [h for h in dash.ev("history") if h["op"] == "push"]
+    assert [h["path"] for h in pushes] == ["/stale-b", "/stale-c"]
+    dash.port_event(t="hist", op="back")
+    dash.port_event(t="hist", op="back")                                       # two entries were pushed by two different frames
+    assert [h["op"] for h in dash.ev("history") if h["op"] == "back"] == ["back", "back"]
+
+
+def test_a_page_that_navigates_in_a_loop_is_refused_after_the_swap_cap(dash, page):
+    _stale_pages(page)
+    dash.open({"swaps": 2})
+    page.evaluate("window.__host.go('/stale-a')")
+    dash.wait_title("A")
+    dash.frame().locator("#to-b").click()
+    dash.wait_title("B")
+    dash.frame().locator("#to-a").click()                                      # the third page in a minute
+    page.wait_for_timeout(600)
+    assert dash.title() == "B" and page.evaluate("document.querySelectorAll('iframe.frame-dash').length") == 1      # refused: the page stays
+
+
+def test_the_first_page_is_written_in_place_and_assets_are_fetched_once_across_frames(dash, page):
+    _stale_pages(page)
+    dash.open()
+    assert page.evaluate("window.__portCount") == 1                            # no second frame for the first page
+    for sel, title in (("#board", "Board"), ("#home", "Home"), ("#board", "Board")):
+        dash.click(sel)
+        dash.wait_title(title)
+    assert page.evaluate("window.__portCount") == 4
+    assert len([c for c in dash.calls() if c["path"] == "/static/app.css?v=1"]) == 1
+
+
+def test_the_app_starting_a_page_while_another_is_being_shown_wins(dash, page):
+    _stale_pages(page)
+    dash.open()
+    page.evaluate("window.__host.go('/stale-a')")
+    dash.wait_title("A")
+    page.evaluate("void (window.__onPortHook = () => { window.__onPortHook = null; window.__host.go('/stale-c'); })")      # the app navigates as the new frame says hello
+    dash.frame().locator("#to-b").click()
+    dash.wait_title("C")
+    page.wait_for_timeout(800)
+    assert dash.title() == "C" and page.evaluate("window.__host.current") == "/stale-c"
