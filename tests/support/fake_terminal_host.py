@@ -38,11 +38,22 @@ class TerminalHost(FakeHost):
     def rule_for(self, req, meta, data):
         path = meta.get("path", "").split("?")[0]
         if meta.get("method") == "POST" and any(r.fullmatch(path) for r in LEASE_ROUTES):
-            s = self.streams.get(req.stream.hex()) if req.stream != ref.ZERO_ID else None
-            if s is None or s["device"] != req.device.hex():
+            # host_check.py _authorize: lease_class needs a header stream this device opened (any route's stream, as the host
+            # keeps them: state["streams"]); a header naming one it did not open was already refused forbidden_scope at step 8
+            if req.stream == ref.ZERO_ID or self.state["streams"].get(req.stream.hex()) != req.device.hex():
                 return {"refuse": "assertion_failed", "path": path}
             return dict(LEASE_RULE)
         return super().rule_for(req, meta, data)
+
+    def _assert(self, req, meta):
+        """host_check.py _assert: R1 runs only if its stream is still open and the device's (else forbidden_scope, and no
+        lease is opened); the parked request is gone either way."""
+        parked = self.parked.get(meta.get("for"))
+        if parked is not None and parked[0].stream != ref.ZERO_ID and self.state["streams"].get(parked[0].stream.hex()) != req.device.hex():
+            self.parked.pop(meta["for"], None)
+            self.audit.append({"ok": False, "why": "forbidden_scope", "rid": meta.get("for"), "purpose": "lease"})
+            return self._send(req, {"refusal": "forbidden_scope"}, flags=ref.F_LAST | ref.F_REFUSAL)
+        return super()._assert(req, meta)
 
     def _ask_assertion(self, req, meta, data, rule):
         if rule.get("refuse"):
@@ -91,6 +102,7 @@ class TerminalHost(FakeHost):
         if meta.get("op") == "cancel":
             self.seen.append(meta)
             self.streams.pop(answer.stream.hex(), None)
+            self.state["streams"].pop(answer.stream.hex(), None)
             return self._send(answer, {"status": 200, "headers": {}})
         if answer.flags & ref.F_STREAM and path.startswith("/terminals/"):
             self.seen.append(meta)

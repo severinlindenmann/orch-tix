@@ -281,3 +281,69 @@ test("the scope table lets the frame open the terminal streams, and no other pat
   for (const p of ["/terminals/a/b/stream", "/terminals", "/t/DEMO-1/agent/start"]) assert.equal(sc.allows("GET", p, { stream: true }), false, p);
   assert.equal(sc.allows("POST", "/terminals/work/keys"), true);
 });
+
+const SIZE = () => ({ ...KEYS(), path: "/terminals/work/size", body: te.encode('{"cols":80,"rows":24}') });
+
+test("sizing the view while only watching sends nothing, opens no sheet and shows no banner: the page gets a 409 it ignores", async () => {
+  const s = setup([open]);
+  const w = await s.watch();
+  const ev = await collect(s.transport.request(SIZE()));
+  assert.equal(ev[0].status, 409);
+  assert.equal(s.sent.length, 1);                                  // only the stream
+  assert.deepEqual(s.log.asks, []);
+  assert.deepEqual(s.log.said, []);
+  await w.close();
+});
+
+test("with an open lease a size post is sent, naming the terminal's stream", async () => {
+  const s = setup([open, lease(), done(), done()]);
+  const w = await s.watch();
+  await collect(s.transport.request(KEYS()));
+  await collect(s.transport.request(SIZE()));
+  assert.equal(s.sent.at(-1).meta.path, "/terminals/work/size");
+  assert.equal(s.sent.at(-1).stream, w.rid);
+  await w.close();
+});
+
+test("a size post after the lease ended on this device is quiet again", async () => {
+  const s = setup([open, lease(), done()]);
+  const w = await s.watch();
+  await collect(s.transport.request(KEYS()));
+  s.clock.t += 16 * 60_000;
+  await tick(1);
+  s.glue.stop();
+  const n = s.sent.length;
+  const ev = await collect(s.transport.request(SIZE()));
+  assert.equal(ev[0].status, 409);
+  assert.equal(s.sent.length, n);
+  await w.close();
+});
+
+test("the transport's abort signal reaches the sheet, for a lease and for any other assertion", async () => {
+  const seen = [];
+  const g = L.leaseGlue({ ask: async (sess, rf, opts) => { seen.push(opts); return { ok: false, reason: "cancelled" }; } });
+  const opts = { signal: new AbortController().signal };
+  await g.unlock({}, { code: "lease_required" }, opts);
+  await g.unlock({}, { code: "assertion_required" }, opts);
+  assert.deepEqual(seen, [opts, opts]);
+  g.stop();
+});
+
+test("one sheet per request: a second lease_required after the confirmation is said, not asked again", async () => {
+  const s = setup([open, lease(), lease()]);
+  const w = await s.watch();
+  await assert.rejects(collect(s.transport.request(KEYS())), (e) => e.code === "lease_required");
+  assert.equal(s.log.asks.length, 1);
+  await w.close();
+});
+
+test("the stream closed while the sheet was open: forbidden_scope is said, nothing is left pending, no note is set", async () => {
+  const s = setup([open, lease(), refuse("forbidden_scope"), open, done()]);
+  const w = await s.watch();
+  await assert.rejects(collect(s.transport.request(KEYS())), (e) => e.code === "forbidden_scope" && /not allowed/.test(e.message));
+  await w.close();
+  const w2 = await s.watch();
+  await collect(s.transport.request(KEYS()));                       // answered with no confirmation behind it
+  assert.deepEqual(s.log.leases, [null]);
+  await w2.close();
+});

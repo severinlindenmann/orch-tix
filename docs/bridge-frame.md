@@ -237,8 +237,9 @@ stream **this device opened**. The routes are POST `/terminals/new`, `/terminals
 sits between the frame host and the transport.
 
 - **`orchHost.remote`** is `true`, set by the shim (`frame-shim.js`), which only ever runs in the frame of a workspace
-  opened through the relay. It is a frozen property of a frozen object: the page cannot change it, and a page that says it
-  is remote itself only gets batching, nothing else. The dashboard batches its key posts when it is true: one post a
+  opened through the relay. It is a property of `window.orchHost`, which a page can replace (the real dashboard's own
+  script does, and the shim's object is only frozen until then). That has no security effect: the flag only switches the
+  dashboard's batching on or off; nothing is granted by it. The dashboard batches its key posts when it is true: one post a
   second, `{seq, page, n}`, one in flight, the same body and the same `n` for a post that did not arrive.
 - **The stream.** The shim's `EventSource` is a bridged stream request. The transport puts its request id on the `head`
   event (`rid`); `remote-lease.js` keeps the ids of the streams that are open (until the stream ends or is closed) and
@@ -264,14 +265,19 @@ sits between the frame host and the transport.
   set when a post that followed a confirmation was answered, cleared at the next `lease_required`, on a revoke, when the
   workspace is closed and when the time passes. It adds no protocol field; the computer's clock decides, this is an
   indication, not a promise.
-- **Revoked, stopped, scope changed, not paired**: after one of these (also when it ends the stream) nothing more is sent
-  to that computer from this page; the fixed text for the code stays.
-- **What the phone guarantees, and what it does not.** It names only a stream this device opened and that is open, and for
-  a terminal's routes only that terminal's stream. It never types without the person's confirmation and never resends a
-  confirmed request. The page never names a stream: the frame host forwards only method, path, headers and body, and
-  `remote-lease.js` picks the stream. It does not make the computer bind the lease to one terminal: the computer accepts
-  any stream the device opened (orch-core issue 239), so for `new` and Start agent the phone names any open stream, and
-  the computer's own check is the only one there. The snapshot fallback does not give typing.
+- **Sizing while watching.** The dashboard posts `/terminals/<name>/size` also when it only watches. With no open lease
+  that is answered here with a 409 `lease_required` that the page ignores: no request, no sheet, no banner. Only key posts,
+  `new`, `end` and Start agent (an action of the person) open the sheet.
+- **Revoked, stopped, scope changed, not paired**: after one of these the lease routes are blocked here (`dead`), with the
+  fixed text for the code; a stream that ends with one is handled by the stream work (#96). Every other request is still
+  sent, and the computer refuses it.
+- **What the phone guarantees, and what it does not.** `remote-lease.js` names only a stream this device opened and that is
+  open, and for a terminal's routes only that terminal's stream; it never types without the person's confirmation and never
+  resends a confirmed request. **This does not hold against a hostile page.** The page can open a stream for any terminal
+  itself (a hidden `EventSource`), so the binding of the lease to a terminal is not a protection: effectively the lease is
+  per device for 15 minutes, and any terminal route the page can reach is typeable meanwhile. The computer does not bind it
+  either (orch-core issue 239). The sheet text "Type for 15 minutes" does not say what is unlocked; a change in orch-core
+  makes Start agent ask for its own fresh assertion. The snapshot fallback does not give typing.
 
 ## Limits you should know
 

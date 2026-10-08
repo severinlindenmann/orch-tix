@@ -217,8 +217,9 @@ memory only and are not written to the database (`add_frame`). Pending rows are 
 **In one list.** TIX learns: opaque ids (workspace, device, request), whether a workspace is online and when it
 was last seen, three counts (sessions, in progress, needs you), the size and timing of every envelope, and which
 device asked. TIX does not learn: a path, a page, a ticket's text, a terminal's output or a keystroke, a file
-name, a label, a key, or what an unlock sheet asked you to confirm (the sheet's text and your answer travel
-sealed; the platform authenticator never talks to TIX at all, and the passphrase is never part of any of it).
+name, a label, a key, or the text an unlock sheet asked you to confirm (it travels sealed). The TIX page, not
+the server, runs the WebAuthn ceremony as the relying party (the TIX host name is the RP id): the page sees the
+browser's prompt and its result, and the server only carries sealed envelopes. The passphrase is part of none of it.
 
 ### Scenarios
 
@@ -298,19 +299,31 @@ their bytes, is exposed); revoking the device on the host remains the control fo
 - **The frame cannot spoof, move or click it.** The sheet lives in the TIX page outside the sandboxed frame,
   which has no WebAuthn and no access to that DOM. The host's text is drawn as text (an isolated bidi context,
   invisible characters shown, never HTML). The Confirm button is disabled for half a second, counts only a real
-  (trusted) click, and works once; one sheet is open at a time and a second request waits behind it.
-- **What an assertion proves, and what it does not.** That a person performed user verification on that
-  device for a challenge that covers the request, the scope and the text shown (§9.6). If the TIX site itself
-  were modified it could show one text and ask for another; the host would then refuse, because the challenge
-  covers what the browser was given to show, but a modified site that shows the real text and forwards the
-  confirmation is indistinguishable from you.
+  (trusted) click, and works once. One sheet is open at a time: a second request on the same device is refused
+  with "busy" there, while the host keeps that request parked with a live challenge until it expires (120 s).
+  An abort (the frame rebuilt, another workspace opened) closes the sheet.
+- **A long text cannot hide its tail.** The host cleans the text but sets no length limit, so the device does:
+  runs of empty lines collapse into one visible marker, the sheet states the number of lines and characters, the
+  last 80 characters are shown in a fixed line of their own, a "more below" notice appears when the box scrolls,
+  and a text that is still over 40 lines or 2000 characters is refused ("too long to check on this phone") without
+  opening a sheet. Capping the text in the host and the specification is tracked separately.
+- **What the binding guards, and what it does not.** The challenge commits to the request, the scope and the
+  exact text the host supplied. So a compromised TIX server or mailbox, or the dashboard frame, cannot change what
+  an *honest* TIX page shows: any other text gives a different challenge and the host refuses the assertion. The
+  host's audit log then holds what the honest page displayed. Against a compromised TIX *site* (modified
+  JavaScript) or a compromised host it guards nothing: the page computes the challenge over the host's real text
+  and may display anything else, and the host accepts it. All an assertion then proves is that the person
+  performed a user verification on that device at about that time (§9.6).
 
 **If the TIX site is compromised.** It can act as a paired device, at that device's scope, in any browser that
 loads it while it is loaded (§1; the owner accepted this). What limits it: the device signing key is
 non-extractable, so it cannot be used elsewhere or after revocation; the scope is decided by the host per
 request; Type and Factory actions need a fresh assertion that the compromised page cannot produce without the
-person's own verification on the device (it cannot read or sign with the authenticator's key); each such action
-is rate limited and listed with its subject on the computer, so a forged one shows up afterwards. It cannot
+person's own verification on the device (it cannot read or sign with the authenticator's key), though it can
+trigger that prompt at a moment of its choosing and show different text; fresh assertions are rate limited (6 per
+10 minutes per device) and every assertion-backed action is listed with its subject on the computer, so a
+misleading one shows up afterwards. A typing lease is not rate limited: once granted it covers 15 minutes of input
+to a terminal that device opened. The site cannot
 make the host skip an assertion, read the passphrase (not held anywhere), or use the credential from another
 origin (the RP id and origin are the TIX site's own). If it was compromised while a device was being paired, the
 wider case above applies.

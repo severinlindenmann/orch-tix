@@ -55,6 +55,7 @@ export function boundedShape(m, limits = LIMITS) {
 // opts: mount (element), transport, scopes (table, see frame-scope.js), start (path),
 //   viewer({path, status, headers, body}), download({path, status, headers, body}), external(url),
 //   history({op: "push" | "replace" | "back" | "forward" | "go", path?, n?}), theme(value), copy(text) -> Promise,
+//   blocked() (true while the unlock sheet is open: the frame's questions wait),
 //   notice({kind, text}) (default: a line of text above the frame), log(text), limits (overrides LIMITS),
 //   tap(msg) (sees every message sent to the frame), onPort(port) (the host's end of the channel) and isActive() (replaces
 //   navigator.userActivation.isActive, which a test driver's own scripts keep switching on): tests and debugging.
@@ -130,7 +131,7 @@ export function createFrameHost(opts) {
   // spec: {title, text, label, run: async () => void, onClose(ok)?}; false when another question is up or one came too soon
   function ask(spec) {
     const now = Date.now();
-    if (prompt || now - lastPrompt < limits.promptGapMs || !frame) return false;
+    if (prompt || now - lastPrompt < limits.promptGapMs || !frame || opts.blocked?.()) return false;    // blocked(): the unlock sheet is open, nothing stacks on it
     lastPrompt = now;
     const act = el("button", { type: "button", class: "btn", disabled: true, onclick: async (e) => {
       if (!e.isTrusted || Date.now() - prompt.shownAt < limits.promptDelayMs) return;

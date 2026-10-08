@@ -84,6 +84,10 @@ TERMINAL_JS = """(() => {
   const es = new EventSource("/terminals/work/stream");
   es.addEventListener("screen", (e) => { $("screen").textContent = JSON.parse(e.data); });
   window.closeStream = () => es.close();
+  window.__size = [];        // the page sizes its view also while only watching (the real page does on every resize)
+  window.sizeIt = () => fetch("/terminals/work/size", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ cols: 80, rows: 24 }) })
+    .then((r) => { window.__size.push(r.status); return r.status; }, () => { window.__size.push(0); return 0; });
+  window.sizeIt();
 """ + BATCHER + """
   const page = "pg" + Math.random().toString(36).slice(2, 10);
   const post = (body) => fetch("/terminals/work/keys", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -118,8 +122,8 @@ def until(cond, seconds=30, what="condition"):
 def make_host(live_server, sim, base):
     hosts = []
 
-    def make():
-        space, headers = make_desktop(live_server, sim, label="Acme Energy")
+    def make(label="Acme Energy"):
+        space, headers = make_desktop(live_server, sim, label=label)
         host = TerminalHost(live_server.url, space, headers, sim.mk, PAGES).start()
         host.origin = base
         hosts.append(host)
@@ -226,9 +230,13 @@ def test_cancelling_the_sheet_keeps_the_keys_says_so_and_does_not_nag(term):
     page.wait_for_timeout(2500)                                # the page resends every second: nothing goes out and no sheet opens
     assert sheet(page).count() == 0 and len(host.refused) == sent and host.typed == []
     expect(page.locator("#remote-notice")).to_contain_text("Your keys are kept")
-    assert frame_of(page).evaluate("window.waiting()") is True and frame_of(page).evaluate("window.__failed") >= 2
-    page.evaluate("() => { const n = Date.now; Date.now = () => n() + 31000; }")      # the cool-down is over
-    expect(sheet(page)).to_be_visible(timeout=30000)
+    assert frame_of(page).evaluate("window.waiting()") is True and frame_of(page).evaluate("window.__failed") >= 1
+    # the glue reads Date.now at every use, so this moves its clock (no real waits): 20 s in, still cooling; 32 s in, over
+    page.evaluate("() => { const n = Date.now; window.__skew = 20000; Date.now = () => n() + window.__skew; }")
+    page.wait_for_timeout(1800)
+    assert sheet(page).count() == 0 and len(host.refused) == sent
+    page.evaluate("() => { window.__skew = 32000; }")
+    expect(sheet(page)).to_be_visible(timeout=3000)
     confirm(page)
     until(lambda: host.typed == ["keep"], what="the kept keys, once")
     bodies = [p["body"] for p in host.posts if p["status"] == 204]
@@ -258,3 +266,45 @@ def test_without_an_open_stream_typing_is_refused_in_words_and_nothing_is_sent(t
     typed_in_frame(page, "z")
     expect(page.locator("#remote-notice")).to_contain_text("Typing needs the live screen", timeout=30000)
     assert host.typed == [] and host.audit == [] and sheet(page).count() == 0
+
+
+def test_only_watching_asks_for_nothing_and_shows_nothing(term):
+    page, host, dev = term
+    f = frame_of(page)
+    until(lambda: f.evaluate("window.__size.length") >= 1, what="the page sized its view")
+    f.evaluate("window.sizeIt()")
+    until(lambda: f.evaluate("window.__size.length") >= 2)
+    page.wait_for_timeout(1500)
+    assert f.evaluate("window.__size") == [409, 409]          # the refusal the page ignores
+    assert sheet(page).count() == 0 and host.audit == [] and host.refused == [] and host.posts == []
+    expect(page.locator("#remote-notice")).to_be_hidden()
+
+
+def test_the_stream_closing_while_the_sheet_is_open_is_a_readable_refusal_and_types_nothing(term):
+    page, host, dev = term
+    typed_in_frame(page, "q")
+    expect(sheet(page)).to_be_visible(timeout=30000)
+    host.end_streams()                                        # the live view goes away while the person decides
+    confirm(page)
+    expect(page.locator("#remote-notice")).to_contain_text("not allowed to do that", timeout=30000)
+    assert host.typed == [] and host.posts == []              # the post number was never taken
+    assert host.audit[-1]["why"] == "forbidden_scope"
+    expect(note(page)).to_be_hidden()
+    assert host.leases.get(dev, 0) == 0                       # and no lease was opened
+
+
+def test_switching_workspace_clears_the_typing_unlocked_note(signed_in, base, make_host, authenticator):
+    a = make_host("Acme Energy")
+    b = make_host("Second")
+    pair(signed_in, base, a, scope="type")
+    pair(signed_in, base, b, scope="type")
+    open_dash(signed_in, base, a)
+    frame_of(signed_in).locator("#go").click()
+    wait_h1(signed_in, "Terminal work")
+    until(lambda: a.streams)
+    typed_in_frame(signed_in, "x")
+    expect(sheet(signed_in)).to_be_visible(timeout=30000)
+    confirm(signed_in)
+    expect(note(signed_in)).to_contain_text("Typing unlocked until", timeout=30000)
+    signed_in.get_by_role("button", name="Open Second").click()
+    expect(note(signed_in)).to_be_hidden(timeout=30000)

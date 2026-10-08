@@ -82,11 +82,12 @@ export function bridgeTransport({ session, mailbox, onRefusal = () => {}, unlock
             const code = String(r.meta.refusal);
             if (unlock && !asked && NEEDS_UNLOCK.has(code)) {
               asked = true;
-              const u = await unlock(session, { code, meta: r.meta, rid: sent.id });
+              const u = await unlock(session, { code, meta: r.meta, rid: sent.id }, { signal });
               if (signal?.aborted) return;
-              if (u.ok) { args.meta = u.meta; delete args.stream; resend = true; break; }   // the assert request names no stream
-              onRefusal(code, unlockText(u.reason));
-              throw Object.assign(new RefusalError(code), { message: unlockText(u.reason) });
+              if (u.ok) { args.meta = u.meta; delete args.stream; resend = true; break; }
+              const text = u.text || unlockText(u.reason);
+              onRefusal(code, text);
+              throw Object.assign(new RefusalError(code), { message: text });
             }
             onRefusal(code, r.message || refusalText(code));
             throw new RefusalError(code);

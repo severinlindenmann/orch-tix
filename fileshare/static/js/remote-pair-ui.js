@@ -38,7 +38,7 @@ async function start() {
   fpHelp.after(note);
   // The platform credential (Face ID, Touch ID, Windows Hello, device PIN) is made on the person's own click.
   const gate = () => new Promise((resolve, reject) => {
-    const t = setTimeout(() => { b.remove(); reject(new Error("not clicked in time")); }, 100_000);      // the host's challenge lives 120 s
+    const t = setTimeout(() => { b.remove(); reject(Object.assign(new Error("not clicked in time"), { name: "TimeoutError" })); }, 100_000);
     const b = el("button", { class: "btn btn-accent", type: "button", id: "pair-cred", onclick: (e) => { if (!e.isTrusted) return; clearTimeout(t); b.remove(); resolve(); } },
       "Register this browser with Face ID or device unlock");
     note.textContent = "This lets you confirm risky actions on this browser. It is not your passphrase and is not stored by TIX.";

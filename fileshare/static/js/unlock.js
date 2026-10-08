@@ -20,6 +20,8 @@ export const UNLOCK_TEXT = Object.freeze({
   failed: "The confirmation did not work, so nothing was done.",
   busy: "Another confirmation is open. Finish or cancel it first.",
   no_credential: "This browser has no Face ID or device unlock registered for that computer, so it cannot do that. Pair it again on a device that has one.",
+  too_long: "The computer sent a request that is too long to check on this phone.",
+  timeout: "Registering took too long, so this browser has no device unlock. It can pair at Look, Decide and Operate but cannot get Type. Pair again to retry.",
   bad_request: "The computer asked for a confirmation this app cannot read, so nothing was done.",
   no_platform: "This browser has no Face ID, Touch ID, Windows Hello or device PIN it can use. It can pair at Look, Decide and Operate but cannot get Type.",
   refused: "The computer did not take the unlock. This browser can pair at Look, Decide and Operate but cannot get Type.",
@@ -29,11 +31,30 @@ export const unlockText = (reason) => UNLOCK_TEXT[reason] || UNLOCK_TEXT.failed;
 const no = (reason) => ({ ok: false, reason });
 const fail = (reason) => Object.assign(new Error(reason), { reason });
 let busy = false;     // at most one sheet at a time
+export const sheetOpen = () => busy;
+
+// The host's text may hold line feeds and no cap (the host cleans, it does not limit), so a long run of empty lines
+// could push the dangerous tail out of the visible box. The device therefore collapses runs of empty lines into ONE
+// visible marker, states the size, always shows the END of the text apart, and refuses what is still too long.
+export const MAX_CHARS = 2000, MAX_LINES = 40, TAIL_CHARS = 80, BLANKS = "[\u2026 blank lines \u2026]";
+export function inspectText(text) {
+  const out = [];
+  let blank = 0;
+  const flush = () => { if (blank > 1) out.push(BLANKS); else if (blank === 1) out.push(""); blank = 0; };
+  for (const l of String(text).split("\n")) {
+    if (l.trim() === "") { blank++; continue; }
+    flush();
+    out.push(l);
+  }
+  flush();
+  const t = out.join("\n"), chars = Array.from(t);
+  return { text: t, lines: out.length, chars: chars.length, tail: chars.slice(-TAIL_CHARS).join(""), ok: out.length <= MAX_LINES && chars.length <= MAX_CHARS };
+}
 
 // ---- the sheet ----------------------------------------------------------------------------------------------------
 // spec {title, text, facts: [string], delayMs, onConfirm(), onCancel()}. onConfirm runs INSIDE the click, so the browser
 // sees a user gesture; it runs for a trusted click only, not before delayMs, once. Dismissing is always allowed.
-export function drawSheet({ title, text, facts, delayMs, onConfirm, onCancel }, doc = document) {
+export function drawSheet({ title, text, tail = "", facts, delayMs, onConfirm, onCancel }, doc = document) {
   const shownAt = Date.now();
   let used = false;
   const go = el("button", { type: "button", class: "btn btn-accent", id: "unlock-go", disabled: true, onclick: (e) => {
@@ -44,10 +65,15 @@ export function drawSheet({ title, text, facts, delayMs, onConfirm, onCancel }, 
   } }, "Confirm");
   const body = el("pre", { id: "unlock-text", dir: "auto" }, shown(text));
   body.style.unicodeBidi = "isolate";
+  const more = el("p", { class: "hint", id: "unlock-more", hidden: true }, "More text below. Scroll the box above.");
+  const end = tail ? [el("p", { class: "hint" }, "The text ends with:"), el("pre", { id: "unlock-tail", dir: "auto" }, shown(tail))] : [];
+  end[1]?.style.setProperty("unicode-bidi", "isolate");
   const node = el("div", { class: "frame-prompt", id: "unlock-sheet", role: "dialog", "aria-modal": "true", "aria-label": title },
-    el("p", {}, title), body, facts.map((f) => el("p", { class: "hint" }, f)), go,
+    el("p", {}, title), body, more, end, facts.map((f) => el("p", { class: "hint" }, f)), go,
     el("button", { type: "button", class: "btn", id: "unlock-cancel", onclick: () => onCancel() }, "Cancel"));
+  node.style.zIndex = "100";                          // above any question of the frame
   doc.body.append(node);
+  if (body.scrollHeight > body.clientHeight + 1) more.hidden = false;
   const enable = setTimeout(() => { if (!used) go.disabled = false; }, delayMs);
   return { close() { clearTimeout(enable); node.remove(); } };
 }
@@ -64,27 +90,33 @@ async function prepare(session, { code, meta, rid }, now) {
   try { subject = subjectOf(meta.subject); credentialId = unb64u(session.credentialId); } catch { throw fail("bad_request"); }
   const expiresAt = meta.expires_ms - (session.offsetMs || 0);       // the host's clock on this device's clock
   if (expiresAt <= now()) throw fail("expired");
+  const view = inspectText(subject.shown);
+  if (!view.ok) throw Object.assign(fail("bad_request"), { text: UNLOCK_TEXT.too_long });
   const challenge = await assertionChallenge({ workspace: hexToBytes(session.workspace), deviceId: session.deviceIdBytes, rid: hexToBytes(rid),
     purpose, scope: meta.scope, expiresMs: meta.expires_ms, nonce: hexToBytes(meta.nonce), subject });
-  return { purpose, scope: meta.scope, subject, expiresAt, challenge, options: assertionOptions({ challenge, credentialId }) };
+  return { purpose, scope: meta.scope, subject, view, expiresAt, challenge, options: assertionOptions({ challenge, credentialId }) };
 }
 
 const sameBytes = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
 
 export async function askAssertion(session, refusal, d = {}) {
-  const { win = globalThis, now = Date.now, draw = drawSheet, delayMs = SHEET_DELAY_MS } = d;
+  const { win = globalThis, now = Date.now, draw = drawSheet, delayMs = SHEET_DELAY_MS, signal = null } = d;
   if (busy) return no("busy");
   busy = true;
   try {
     if (!win.navigator?.credentials) return no("failed");
+    if (signal?.aborted) return no("cancelled");
     const p = await prepare(session, refusal, now);
+    if (signal?.aborted) return no("cancelled");
     return await new Promise((resolve) => {
       let done = false, sheet = null, timer = null;
-      const finish = (r) => { if (done) return; done = true; clearTimeout(timer); sheet?.close(); resolve(r); };
-      const facts = [`Needs: ${p.scope}`, `Expires at ${new Date(p.expiresAt).toLocaleTimeString()}`,
+      const onAbort = () => finish(no("cancelled"));
+      const finish = (r) => { if (done) return; done = true; clearTimeout(timer); signal?.removeEventListener("abort", onAbort); sheet?.close(); resolve(r); };
+      signal?.addEventListener("abort", onAbort, { once: true });
+      const facts = [`${p.view.lines} line${p.view.lines === 1 ? "" : "s"}, ${p.view.chars} characters`, `Needs: ${p.scope}`, `Expires at ${new Date(p.expiresAt).toLocaleTimeString()}`,
         ...(p.subject.digest ? [`Check these 8 characters on the computer: ${p.subject.digest.slice(0, 8)}`] : []),
         "Confirm with Face ID, Touch ID, Windows Hello or your device PIN. Never your passphrase."];
-      sheet = draw({ title: p.purpose === "lease" ? "Confirm to type for 15 minutes" : "Confirm this action", text: p.subject.shown, facts, delayMs,
+      sheet = draw({ title: p.purpose === "lease" ? "Confirm to type for 15 minutes" : "Confirm this action", text: p.view.text, tail: p.view.lines > 1 || p.view.chars > TAIL_CHARS ? p.view.tail : "", facts, delayMs,
         onCancel: () => finish(no("cancelled")),
         onConfirm: () => {
           assert(hexToBytes(refusal.rid), p.options, win).then((fields) => {
@@ -97,7 +129,7 @@ export async function askAssertion(session, refusal, d = {}) {
       timer = setTimeout(() => finish(no("expired")), Math.max(0, p.expiresAt - now()));
     });
   } catch (e) {
-    return no(e?.reason || "failed");
+    return e?.text ? { ok: false, reason: e.reason, text: e.text } : no(e?.reason || "failed");
   } finally {
     busy = false;
   }
@@ -110,9 +142,9 @@ export async function askAssertion(session, refusal, d = {}) {
 export async function registerCredential({ session, label, send, gate, win = globalThis }) {
   try {
     if (!await win.PublicKeyCredential?.isUserVerifyingPlatformAuthenticatorAvailable?.()) return no("no_platform");
+    await gate?.();       // the person's click first: the host's 120 s registration clock starts after it, and create() follows at once
     const begin = await send({ op: "credential_begin" });
     if (!begin || !HEX64.test(begin.nonce || "") || !Number.isSafeInteger(begin.expires_ms)) return no("refused");
-    await gate?.();
     const challenge = await registrationChallenge({ workspace: hexToBytes(session.workspace), deviceId: session.deviceIdBytes,
       expiresMs: begin.expires_ms, nonce: hexToBytes(begin.nonce) });
     const fields = await register(registrationOptions({ challenge, deviceId: session.deviceIdBytes, label }), win);
@@ -120,6 +152,6 @@ export async function registerCredential({ session, label, send, gate, win = glo
     if (fin?.registered !== true) return no("refused");
     return { ok: true, credentialId: fields.credential_id, synced: fin.synced === true };
   } catch (e) {
-    return no(e?.name === "NotAllowedError" || e?.name === "AbortError" ? "cancelled" : "failed");
+    return no(e?.name === "TimeoutError" ? "timeout" : e?.name === "NotAllowedError" || e?.name === "AbortError" ? "cancelled" : "failed");
   }
 }

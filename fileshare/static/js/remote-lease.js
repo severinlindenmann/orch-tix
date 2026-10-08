@@ -25,13 +25,13 @@ export const LEASE_TEXT = Object.freeze({
 const route = (req) => {
   if (req.method !== "POST" || req.stream) return null;
   const path = String(req.path).split("?")[0];
-  for (const re of ROUTES) { const m = re.exec(path); if (m) return { name: m[1] || null }; }
+  for (const re of ROUTES) { const m = re.exec(path); if (m) return { name: m[1] || null, size: path.endsWith("/size") }; }
   return null;
 };
 
 // opts: ask (unlock.js askAssertion), say(text) for a problem the person should read, onLease(untilMs | null),
 // now, coolMs, leaseMs (tests). -> {unlock, wrap(transport)}
-export function leaseGlue({ ask, say = () => {}, onLease = () => {}, now = Date.now, coolMs = COOL_MS, leaseMs = LEASE_MS }) {
+export function leaseGlue({ ask, say = () => {}, onLease = () => {}, now = () => Date.now(), coolMs = COOL_MS, leaseMs = LEASE_MS }) {
   const streams = new Map();        // stream rid -> its path
   let coolUntil = 0, dead = null, unlockedAt = 0, until = 0, timer = null;
 
@@ -42,10 +42,10 @@ export function leaseGlue({ ask, say = () => {}, onLease = () => {}, now = Date.
     if (t) timer = setTimeout(() => { until = 0; onLease(null); }, Math.max(0, t - now()));
   };
 
-  async function unlock(session, refusal) {
-    if (refusal.code !== "lease_required") return ask(session, refusal);
+  async function unlock(session, refusal, opts) {       // opts: {signal} from the transport; the sheet closes when it aborts
+    if (refusal.code !== "lease_required") return ask(session, refusal, opts);
     setLease(0);
-    const r = await ask(session, refusal);
+    const r = await ask(session, refusal, opts);
     if (r.ok) { unlockedAt = now(); coolUntil = 0; }
     else if (r.reason !== "busy") coolUntil = now() + coolMs;
     return r;
@@ -71,9 +71,17 @@ export function leaseGlue({ ask, say = () => {}, onLease = () => {}, now = Date.
         throw e;
       } finally { if (mine) streams.delete(mine); }
     }
+    async function* quiet() {
+      yield { type: "head", status: 409, headers: { "content-type": "text/plain" }, page: false };
+      yield { type: "chunk", data: new TextEncoder().encode("lease_required") };
+      yield { type: "end" };
+    }
     const gone = (e) => { if (DEAD.has(e?.code)) { dead = e.message; setLease(0); } };
     async function* typing(req, r) {
       const refuse = (text) => { say(text); throw new Error(text); };
+      // The page also sizes its view while only watching. That never asks for a confirmation and never shows a banner:
+      // with no open lease it is answered here with the refusal the page ignores (409) and nothing is sent.
+      if (r.size && !(until > now())) { yield* quiet(); return; }
       if (dead) refuse(dead);
       if (now() < coolUntil) refuse(LEASE_TEXT.locked);
       const rid = pick(r.name);
