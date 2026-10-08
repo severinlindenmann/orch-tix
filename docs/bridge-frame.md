@@ -279,3 +279,16 @@ frame host's whole answer cap and the download cap. Nothing of the file runs; th
   user-activation API is tested in Chromium only (needs a DevTools session); other tests replace the host's activation
   test, because the driver's own scripts switch real activation on.
 - A 3xx never reaches the frame: the transport follows redirects.
+
+## The AI Factory (R13, #27)
+
+The Factory pages (permission cards, the epic's Pause, Stop and Start, the Ready and Stopped reports, the verdict) are
+the dashboard's own pages, drawn in this frame; their buttons post urlencoded forms through the same transport. When the
+host answers `assertion_required` the unlock sheet shows the host's exact subject text and the very same form body is
+sent once more inside the `assert` request. Deny, Revoke and Pause need no sheet (Decide). The app adds only status: the
+workspace card (status page and `/remote`) names the Factory code from the heartbeat (running, paused, waiting on a
+permission, ready, stopped, done) with children done and budget used, a waiting Factory gets a link that opens the
+workspace in the frame (`/remote?space=...&path=%2F`; `path` is checked by `validPath`, anything else opens `/`), and a
+lost host shows "host lost: nothing new starts and no parked child wakes until it is back" with no claim about sessions
+already running. Tested against the fake host (`tests/browser/test_factory.py`); a real phone and the real dashboard's
+pages are not covered.
