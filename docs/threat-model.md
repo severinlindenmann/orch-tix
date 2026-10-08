@@ -198,7 +198,9 @@ behaviour, and is marked *planned* where it matters.
   Factory state code (`none`, `running`, `paused`, `waiting`, `ready`, `stopped`, `done`) and three
   optional integers (children done, children total, budget percent). The state (online, not answering,
   lost, stopped, never started) is derived from those times on read. The table holds no name. Any signed-in
-  browser or approved device may read it (`GET /api/presence`).
+  browser or approved device may read it (`GET /api/presence`). Presence is the server's report, not the host's:
+  it is plaintext the server can forge (not sealed with K_ws, not signed by the host); every status word is a
+  hint, check it in the dashboard.
 - **Machine and device names are plaintext today.** `devices.name` is stored in the clear and is returned
   as `owner_name` with every space, including by `GET /api/presence`, which is how the status page groups
   workspaces by machine. Workspace labels are different: they are sealed under the master key (`enc_label`).

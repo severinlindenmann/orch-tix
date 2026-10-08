@@ -9,7 +9,7 @@ import { keysOrLogin, signInAgain } from "./mirrors-data.js";
 import { openSpaceLabel } from "./mirror-crypto.js";
 import { mapLimit } from "./format.js";
 import { UNKNOWN_SPACE } from "./mirror-model.js";
-import { SPACE_ID, stateOf } from "./workspaces-model.js";
+import { FACTORY_WAITING_HINT, SPACE_ID, activity, factoryWaiting, stateOf } from "./workspaces-model.js";
 import { createFrameHost } from "./frame-host.js";
 import { DeviceSession } from "./bridge-session.js";
 import { deviceKey, forgetWorkspace, pinnedHostKey, workspaceRecord } from "./bridge-store.js";
@@ -66,6 +66,8 @@ function render(state) {
       el("h3", { class: "wrow-name" }, shown(label)),
       el("div", { class: "wrow-state" }, pill(role, ic, text)),
       why ? el("p", { class: "hint wrow-why" }, why) : null,
+      activity(s).length ? el("p", { class: "wrow-what" }, activity(s).join(" · ")) : null,
+      open && factoryWaiting(s) ? el("button", { class: "link-btn wrow-factory", type: "button", onclick: () => select(state, s.id, "/") }, FACTORY_WAITING_HINT, " Open the Factory") : null,
       el("button", { class: open ? "btn btn-accent wrow-act" : "btn wrow-act", type: "button", disabled: !open,
         "aria-label": `Open ${label}`, onclick: () => select(state, s.id) }, "Open"));
   }));

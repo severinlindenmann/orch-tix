@@ -4,9 +4,9 @@ import json
 from pathlib import Path
 
 STATIC = Path(__file__).resolve().parents[1] / "fileshare" / "static"
-SHELL_BUDGET = 1_030_000           # bytes, uncompressed: the whole offline shell (fonts, scripts, styles, icons); was 1_000_000,
+SHELL_BUDGET = 1_031_050           # bytes, uncompressed: the whole offline shell (fonts, scripts, styles, icons); was 1_000_000,
                                    # raised by 20 kB for the phone UI round (#71: update prompt, offline cards, settings folds, labels),
-                                   # then 10 kB more for the sealed offline ticket cache (#73, ticket-cache.js)
+                                   # then 10 kB more for the sealed offline ticket cache (#73, ticket-cache.js); then 1_050 for the Factory words, the host-lost sentence and the waiting hint on the status page (R13, #27: +1_111 = workspaces-model.js +920 and workspaces.js +191; 1_031_037 measured)
 PHONE_JS_BUDGET = 172_000          # bytes, uncompressed: Needs you, Board and ticket modules (+12 kB: the per-ticket notify row (#74) and the offline ticket cache, #73)
 # The bridge's device module (R10a, docs/bridge-protocol.md) has its own allowance on top of the shell's, so it can
 # neither eat the shell's budget nor grow unnoticed. The owner chose this separate allowance (PR #81, for #78) over
@@ -20,7 +20,7 @@ FRAME_JS_BUDGET = 72_000           # bytes, uncompressed (the scripts)
 # The Remote pages' glue (R10 wiring: the ceremony, the workspace list, the transport over the mailbox) is likewise its
 # own allowance; the tiny sign-out wipe (bridge-wipe.js) is counted here too.
 REMOTE_JS = ["bridge-wipe.js", "remote.js", "remote-mailbox.js", "remote-model.js", "remote-pair.js", "remote-pair-ui.js", "remote-transport.js", "remote-view.js"]
-REMOTE_JS_BUDGET = 44_000          # bytes, uncompressed; main (streams, viewer: 40_000) plus the R11 hooks in remote*.js (credential step at pairing, the unlock call and its once-per-exchange rule, declined-stream memory, the not-remote notice): 43_684 measured
+REMOTE_JS_BUDGET = 44_050          # bytes, uncompressed; main (streams, viewer: 40_000) plus the R11 hooks in remote*.js (credential step at pairing, the unlock call and its once-per-exchange rule, declined-stream memory, the not-remote notice): 43_684 measured; R13 (#27): +332 bytes, all in remote.js; 44_016 measured (the Factory line and waiting hint on the card)
 # The unlock sheet and the platform credential (R11, docs/bridge-protocol.md section 9): its own allowance, outside the shell's.
 UNLOCK_JS = ["unlock.js"]
 UNLOCK_JS_BUDGET = 14_500          # bytes, uncompressed: the sheet, its text checks (padding, markers, limits) and the registration click
