@@ -9,7 +9,8 @@ import { keysOrLogin, signInAgain } from "./mirrors-data.js";
 import { openSpaceLabel } from "./mirror-crypto.js";
 import { mapLimit } from "./format.js";
 import { UNKNOWN_SPACE } from "./mirror-model.js";
-import { SPACE_ID, stateOf } from "./workspaces-model.js";
+import { FACTORY_WAITING_HINT, SPACE_ID, activity, factoryWaiting, stateOf } from "./workspaces-model.js";
+import { validPath } from "./frame-scope.js";
 import { createFrameHost } from "./frame-host.js";
 import { DeviceSession } from "./bridge-session.js";
 import { deviceKey, forgetWorkspace, pinnedHostKey, workspaceRecord } from "./bridge-store.js";
@@ -66,6 +67,8 @@ function render(state) {
       el("h3", { class: "wrow-name" }, shown(label)),
       el("div", { class: "wrow-state" }, pill(role, ic, text)),
       why ? el("p", { class: "hint wrow-why" }, why) : null,
+      activity(s).length ? el("p", { class: "wrow-what" }, activity(s).join(" · ")) : null,
+      open && factoryWaiting(s) ? el("button", { class: "link-btn wrow-factory", type: "button", onclick: () => select(state, s.id, "/") }, FACTORY_WAITING_HINT, " Open the Factory") : null,
       el("button", { class: open ? "btn btn-accent wrow-act" : "btn wrow-act", type: "button", disabled: !open,
         "aria-label": `Open ${label}`, onclick: () => select(state, s.id) }, "Open"));
   }));
@@ -79,7 +82,7 @@ function closeCurrent(state) {
   if (mailbox) setTimeout(() => mailbox.close(), CANCEL_GRACE_MS);   // the cancels still need the mailbox to be answered
 }
 
-async function select(state, id) {
+async function select(state, id, path = "/") {
   closeCurrent(state);
   state.selected = id;
   state.refusal = state.hostNote = null;
@@ -101,7 +104,7 @@ async function select(state, id) {
   } });
   state.mailbox = mailbox;
   const viewer = state.viewer = createViewer($("remote-viewer"));
-  state.host = createFrameHost({ blocked: sheetOpen, mount: $("remote-frame"), transport, scopes: SCOPES, start: "/", title: `Dashboard of ${state.labels.get(id) || "a workspace"}`,
+  state.host = createFrameHost({ blocked: sheetOpen, mount: $("remote-frame"), transport, scopes: SCOPES, start: path, title: `Dashboard of ${state.labels.get(id) || "a workspace"}`,
     viewer: (v) => { if (isNeverPage(v?.path || "")) { state.refusal = NOT_REMOTE; notice(NOT_REMOTE); } else viewer.open(v); },
     download: viewer.download, fileName,
     notice: (n) => { if (n.text) notice(n.text); } });
@@ -137,7 +140,8 @@ async function start() {
   const state = { keys, spaces: [], labels: new Map(), paired: new Map(), selected: null, host: null, mailbox: null, refusal: null };
   await refresh(state);
   const q = new URLSearchParams(location.search).get("space");
-  if (q && SPACE_ID.test(q)) await select(state, q);
+  const p = new URLSearchParams(location.search).get("path");
+  if (q && SPACE_ID.test(q)) await select(state, q, p && validPath(p) ? p : "/");
   setInterval(() => { if (!document.hidden) refresh(state); }, REFRESH_MS);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(state); });
 }

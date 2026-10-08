@@ -1,7 +1,7 @@
 // The status page's pure helpers (Remote R9): words, grouping, and "unknown is never zero".
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { STATE, actionFor, activity, groupByMachine, needsYou, openHref, seenText, stateOf } from "../../fileshare/static/js/workspaces-model.js";
+import { FACTORY_LOST, STATE, actionFor, activity, factoryHref, factoryWaiting, groupByMachine, needsYou, openHref, seenText, stateOf } from "../../fileshare/static/js/workspaces-model.js";
 
 const online = { id: "a".repeat(32), state: "online", sessions: 2, in_progress: 1, needs_you: 3, factory: "running",
   children_done: 4, children_total: 9, budget_pct: 37, last_seen: 1000 };
@@ -20,7 +20,7 @@ test("activity lists real numbers for an answering host", () => {
 test("an absent or zero value is not shown as a number, and a silent host shows nothing", () => {
   assert.deepEqual(activity({ state: "online", sessions: 0, in_progress: 0, factory: "none", children_done: null, children_total: null, budget_pct: null }), []);
   assert.deepEqual(activity({ state: "online", sessions: null, factory: "paused", budget_pct: undefined }), ["Factory paused"]);
-  for (const state of ["lost", "stopped", "never_started"]) assert.deepEqual(activity({ ...online, state }), []);
+  for (const state of ["stopped", "never_started"]) assert.deepEqual(activity({ ...online, state }), []);
 });
 
 test("needs-you prefers the opened snapshot and falls back to an online host, else unknown", () => {
@@ -55,4 +55,29 @@ test("Open while the host answers, Snapshot otherwise; the link carries only the
   assert.equal(actionFor({ state: "lost" }), "Snapshot");
   assert.equal(openHref("a b"), "/workspaces?open=a%20b");
   assert.equal(openHref("a b", true), "/remote?space=a%20b", "an online workspace opens the live dashboard");
+});
+
+test("each Factory code has its own words and only waiting is a permission", () => {
+  const want = { running: "Factory running", paused: "Factory paused", waiting: "Factory waiting on a permission", ready: "Factory ready", stopped: "Factory stopped", done: "Factory done" };
+  for (const [code, text] of Object.entries(want)) {
+    assert.deepEqual(activity({ state: "online", factory: code }), [text]);
+    assert.equal(factoryWaiting({ state: "online", factory: code }), code === "waiting");
+  }
+  assert.deepEqual(activity({ state: "online", factory: "none" }), []);
+  assert.equal(factoryWaiting({ state: "lost", factory: "waiting" }), false);        // an old waiting is not an ask
+  assert.equal(factoryWaiting({ state: "stopped", factory: "waiting" }), false);
+});
+
+test("a lost host says what stops and never anything about sessions", () => {
+  for (const factory of ["running", "paused", "waiting", "ready"]) {
+    const a = activity({ ...online, state: "lost", factory });
+    assert.deepEqual(a, ["Factory: host lost: nothing new starts and no parked child wakes until it is back"]);
+    assert.equal(a[0], FACTORY_LOST);
+    assert.doesNotMatch(a.join(" "), /session|working|progress|budget/i);
+  }
+  for (const factory of ["none", "done", "stopped", undefined]) assert.deepEqual(activity({ ...online, state: "lost", factory }), []);
+});
+
+test("the Factory link opens the workspace in the frame at its home", () => {
+  assert.equal(factoryHref("a".repeat(32)), `/remote?space=${"a".repeat(32)}&path=%2F`);
 });
