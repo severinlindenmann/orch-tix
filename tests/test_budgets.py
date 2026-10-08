@@ -16,7 +16,7 @@ BRIDGE_JS_BUDGET = 30_600          # bytes, uncompressed; +600 for the stored pl
 # The dashboard frame (R10b, docs/bridge-frame.md) follows the same pattern: its own allowance, outside the shell's.
 FRAME_JS = ["bridge-transport.js", "frame-host.js", "frame-render.js", "frame-scope.js", "frame-shim.js"]
 FRAME_CSS = ["frame.css"]          # loaded by frame-host.js itself, so app.css (and the shell budget) stay as they were
-FRAME_JS_BUDGET = 72_000           # bytes, uncompressed (the scripts)
+FRAME_JS_BUDGET = 74_000           # bytes, uncompressed (the scripts); +2_000 for R10 (a page that was left is destroyed, orch-core#328): the page swap, the show message and the host's asset cache across frames (73_400 measured)
 # The Remote pages' glue (R10 wiring: the ceremony, the workspace list, the transport over the mailbox) is likewise its
 # own allowance; the tiny sign-out wipe (bridge-wipe.js) is counted here too.
 REMOTE_JS = ["bridge-wipe.js", "remote.js", "remote-lease.js", "remote-mailbox.js", "remote-model.js", "remote-pair.js", "remote-pair-ui.js", "remote-transport.js", "remote-view.js"]
