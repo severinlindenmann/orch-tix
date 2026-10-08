@@ -272,7 +272,7 @@ export function createFrameHost(opts) {
   };
   // A download is offered to the person (name and size shown); the bytes are handed over on a click in the app.
   function offerDownload(view) {
-    const ok = ask({ title: "The dashboard offers a download:", text: `${nameOf(view)} (${view.body.length} bytes)`, label: "Download",
+    const ok = ask({ title: "The dashboard offers a download:", text: `${(opts.fileName || nameOf)(view)} (${view.body.length} bytes)`, label: "Download",
       run: async () => { cb.download(view); } });
     if (!ok) notice({ kind: "error", text: "Another question is waiting; try the download again." });
   }
@@ -322,7 +322,9 @@ export function createFrameHost(opts) {
         } else if (ev.type === "chunk") send({ t: "sdata", id: req.id, gen: req.gen, chunk: decoder.decode(ev.data, { stream: true }) });
         else if (ev.type === "end") break;
       }
-    } catch { /* the stream ends below */ }
+    } catch (e) {   // the stream ends below; a refusal was already said by the transport, anything else is said once, as text
+      if (!ac.signal.aborted && !e?.code) notice({ kind: "error", text: String(e?.message || "the stream failed").slice(0, 200) });
+    }
     if (!ac.signal.aborted) send({ t: "send", id: req.id, gen: req.gen });
     inflight.delete(req.id);
     streams.delete(req.id);

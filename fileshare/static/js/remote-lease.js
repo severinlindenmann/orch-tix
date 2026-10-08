@@ -12,10 +12,11 @@
 // The sheet itself is awaited by the transport with no timer running; it ends by the challenge's own expiry (unlock.js).
 // The key post that was refused is NOT resent by the page: after a confirmation the computer runs that very request once
 // (§9.4), so `n` is used once. If the sheet is cancelled, the computer never ran it, so the resent post (same `n`) is new to it.
+import { normPath } from "./remote-transport.js";
 export const LEASE_MS = 15 * 60_000;
 export const COOL_MS = 30_000;
 const DEAD = new Set(["revoked", "not_paired", "stopped", "scope_changed"]);   // after these nothing more is sent
-const ROUTES = [/^\/terminals\/new$/, /^\/terminals\/([^/]+)\/(?:keys|size|end)$/, /^\/t\/[^/]+\/agent\/start$/, /^\/quick\/[^/]+\/agent\/start$/];
+const ROUTES = [/^\/terminals\/([^/]+)\/(?:keys|size|end)$/];   // new and Start agent are fresh-assertion routes of the computer: the plain sheet, no stream
 
 export const LEASE_TEXT = Object.freeze({
   no_stream: "Typing needs the live screen. Wait until it shows, then try again.",
@@ -24,7 +25,7 @@ export const LEASE_TEXT = Object.freeze({
 
 const route = (req) => {
   if (req.method !== "POST" || req.stream) return null;
-  const path = String(req.path).split("?")[0];
+  const path = normPath(req.path);
   for (const re of ROUTES) { const m = re.exec(path); if (m) return { name: m[1] || null, size: path.endsWith("/size") }; }
   return null;
 };
@@ -63,7 +64,7 @@ export function leaseGlue({ ask, say = () => {}, onLease = () => {}, now = () =>
       let mine = null;
       try {
         for await (const ev of inner.request(req)) {
-          if (ev.type === "head" && ev.rid) { if (mine) streams.delete(mine); mine = ev.rid; streams.set(mine, String(req.path).split("?")[0]); }
+          if (ev.type === "head" && ev.rid) { if (mine) streams.delete(mine); mine = ev.rid; streams.set(mine, normPath(req.path)); }
           yield ev;
         }
       } catch (e) {

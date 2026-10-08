@@ -19,11 +19,11 @@ FRAME_CSS = ["frame.css"]          # loaded by frame-host.js itself, so app.css 
 FRAME_JS_BUDGET = 72_000           # bytes, uncompressed (the scripts)
 # The Remote pages' glue (R10 wiring: the ceremony, the workspace list, the transport over the mailbox) is likewise its
 # own allowance; the tiny sign-out wipe (bridge-wipe.js) is counted here too.
-REMOTE_JS = ["bridge-wipe.js", "remote.js", "remote-lease.js", "remote-mailbox.js", "remote-model.js", "remote-pair.js", "remote-pair-ui.js", "remote-transport.js"]
-REMOTE_JS_BUDGET = 41_500          # bytes, uncompressed; +6 kB for typing from the phone (R6 phone side: remote-lease.js, the lease note); +2.5 kB for the R11 wiring (credential step at pairing, retry once after the sheet)
+REMOTE_JS = ["bridge-wipe.js", "remote.js", "remote-lease.js", "remote-mailbox.js", "remote-model.js", "remote-pair.js", "remote-pair-ui.js", "remote-transport.js", "remote-view.js"]
+REMOTE_JS_BUDGET = 53_000          # bytes, uncompressed; main (streams, viewer, the R11 hooks: 43_684 measured) plus typing from the phone (R6 phone side: remote-lease.js, the lease note, path memory for declined lease sheets): 52_729 measured
 # The unlock sheet and the platform credential (R11, docs/bridge-protocol.md section 9): its own allowance, outside the shell's.
 UNLOCK_JS = ["unlock.js"]
-UNLOCK_JS_BUDGET = 11_500          # bytes, uncompressed (the text limits and the abort handling of the review round included)
+UNLOCK_JS_BUDGET = 14_500          # bytes, uncompressed: the sheet, its text checks (padding, markers, limits) and the registration click
 
 
 def test_the_offline_shell_stays_within_its_budget():

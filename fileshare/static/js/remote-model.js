@@ -1,5 +1,32 @@
 // fileshare/static/js/remote-model.js: the words and fixed tables of the Remote pages. Pure: node tests it.
 import { MESSAGES } from "./bridge-crypto.js";
+import { previewKind } from "./previewkind.js";
+import { safeDownloadName } from "./format.js";
+
+// What the viewer shows and what a download hands over, from a host answer {path, headers, body} (frame-host.js). Text
+// and structured kinds are capped small (they are parsed); an image or audio file is only played, so it gets the
+// frame host's whole answer cap. HTML and SVG are never shown ("none"): previewKind refuses active formats.
+export const VIEW_MAX = 2 * 1024 * 1024;
+export const MEDIA_MAX = 8 * 1024 * 1024;
+export const DOWNLOAD_MAX = 8 * 1024 * 1024;
+
+export function fileName(view) {
+  const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(String((view.headers || {})["content-disposition"] || ""));
+  let name = view.path.split("?")[0].split("/").pop();
+  if (m) { try { name = decodeURIComponent(m[1]); } catch { name = m[1]; } }
+  return safeDownloadName(name, "file");
+}
+
+// -> {name, kind} (kind as previewKind) to show, or {name, reason: "none" | "large"} to say why not.
+export function viewPlan(view, { markdown = false } = {}) {
+  const name = fileName(view);
+  let kind = previewKind({ name, mime: (view.headers || {})["content-type"] });
+  if (kind.kind === "markdown" && !markdown) kind = { kind: "text" };   // the markdown renderer is the files page's library
+  if (kind.kind === "audio" && !/^audio\/[a-z0-9.+-]{1,30}$/.test(kind.type)) kind = { kind: "none" };   // a sender's type only as a plain token
+  if (kind.kind === "none") return { name, reason: "none" };
+  if (view.body.length > (kind.kind === "image" || kind.kind === "audio" ? MEDIA_MAX : VIEW_MAX)) return { name, reason: "large" };
+  return { name, kind };
+}
 
 // What the host may be asked, as the frame host's advisory scope table (frame-scope.js). The host decides again from
 // its own router, so this is not the access control; it only keeps a hostile frame from asking for anything at all.
@@ -24,6 +51,7 @@ export const REFUSAL_TEXT = Object.freeze({
   already_done: MESSAGES.outcomeUnknown,
   stale_timestamp: MESSAGES.clockWrong,
 });
+export const CHANGED_TEXT = "The computer did not accept the confirmation. The request may have changed while you were confirming; nothing was started.";
 export const refusalText = (code) => REFUSAL_TEXT[code] || "The computer refused the request.";
 export const HOST_SILENT = "The computer did not answer. Is it awake and running the workspace?";
 export const SIGNED_OUT = "You are signed out. Sign in again to open a workspace.";

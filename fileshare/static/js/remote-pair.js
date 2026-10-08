@@ -57,7 +57,7 @@ export async function openPairAnswer(session, env, mailbox, hostPin) {
 // Runs the whole ceremony up to "waiting for the owner". Dependencies are injectable for tests.
 // events: onFingerprint(text) once the host's pending answer is verified, onState(text) for progress.
 // Resolves {approved: true, scope} | {approved: false, why} .
-export async function runPairing({ link, label, signal, now = Date.now, onFingerprint, onState, gate, onCredential,
+export async function runPairing({ link, label, signal, now = Date.now, onFingerprint, onState, click, onCredential,
   deps = {} }) {
   const { openKey = openWorkspaceKey, device = deviceKey, pin = pinHost, record = workspaceRecord, forget = forgetWorkspace,
     mailbox = createMailbox(link.workspace), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), pollMs = STATUS_EVERY_MS,
@@ -111,9 +111,9 @@ export async function runPairing({ link, label, signal, now = Date.now, onFinger
     session.hostKey = await importPublicKey(pending.hostPub);
     onFingerprint?.(myFingerprint);
     // §9.2: the platform credential is made now, before the owner approves, so the owner sees whether there is one.
-    // gate() is the person's click (the ceremony follows a gesture). No credential: still paired, but no Type.
+    // click() runs the ceremony inside the person's click (Safari needs a gesture). No credential: still paired, but no Type.
     const send = async (m) => { const a = await ask({ meta: m }, (c) => session.receive(c.env, c.mailbox), 15_000); return a.silent || a.refusal ? null : a.meta; };
-    const cred = await (deps.register || registerCredential)({ session, label, send, gate });
+    const cred = await (deps.register || registerCredential)({ session, label, send, click, signal });
     onCredential?.(cred.ok ? "" : unlockText(cred.reason === "no_platform" || cred.reason === "timeout" ? cred.reason : "refused"));
     onState?.("Waiting for you to approve this browser on the computer.");
 

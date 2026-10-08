@@ -298,15 +298,26 @@ their bytes, is exposed); revoking the device on the host remains the control fo
   that it cannot get Type.
 - **The frame cannot spoof, move or click it.** The sheet lives in the TIX page outside the sandboxed frame,
   which has no WebAuthn and no access to that DOM. The host's text is drawn as text (an isolated bidi context,
-  invisible characters shown, never HTML). The Confirm button is disabled for half a second, counts only a real
+  never HTML); what the device does with spacing and invisible characters is in the next item. The Confirm button is disabled for half a second, counts only a real
   (trusted) click, and works once. One sheet is open at a time: a second request on the same device is refused
   with "busy" there, while the host keeps that request parked with a live challenge until it expires (120 s).
   An abort (the frame rebuilt, another workspace opened) closes the sheet.
-- **A long text cannot hide its tail.** The host cleans the text but sets no length limit, so the device does:
-  runs of empty lines collapse into one visible marker, the sheet states the number of lines and characters, the
-  last 80 characters are shown in a fixed line of their own, a "more below" notice appears when the box scrolls,
-  and a text that is still over 40 lines or 2000 characters is refused ("too long to check on this phone") without
-  opening a sheet. Capping the text in the host and the specification is tracked separately.
+- **A text cannot hide its middle or its tail.** The host cleans the text but keeps spaces of every kind and sets
+  no length limit, so the device checks it before a sheet opens and refuses (with a fixed sentence, nothing is
+  asked of the authenticator) any space-like or invisible character other than the ASCII space and the line feed
+  (no-break and other Unicode spaces, the braille blank, format and bidi controls, line and paragraph separators,
+  tabs and other controls, private-use and unassigned code points), more than two combining marks in a row, and
+  text over 40 lines or 2000 characters. What remains is drawn so padding shows: a run of 3 or more spaces and a run
+  of 2 or more empty lines are each one styled marker element ("[900 spaces]", "[... blank lines ...]") that the
+  host cannot produce by typing the same characters (typed look-alikes stay plain text); the sheet states the number
+  of lines and characters; the last 80 characters are shown in a line of their own; and when the box scrolls,
+  Confirm stays disabled until it has been scrolled to its end. **Accepted limit:** visually similar letters
+  (a Cyrillic "a" for a Latin one) are not detected; the digest prefix to compare on the computer is the answer
+  (§9.3). Capping the text in the host and the specification is tracked in orch-core#259 and orch-tix#101.
+  The sheet uses the host's own notion of the text: lines end at a line feed only, characters are code points (not
+  UTF-16 units), nothing is normalised, "empty" means ASCII spaces only, and the challenge always covers the host's
+  original text, never what is drawn. The canonical JSON of the subject is checked against the Python reference with
+  astral characters, combining marks, U+2028/2029, escapes and a lone surrogate (an error on both sides).
 - **What the binding guards, and what it does not.** The challenge commits to the request, the scope and the
   exact text the host supplied. So a compromised TIX server or mailbox, or the dashboard frame, cannot change what
   an *honest* TIX page shows: any other text gives a different challenge and the host refuses the assertion. The
@@ -327,6 +338,15 @@ to a terminal that device opened. The site cannot
 make the host skip an assertion, read the passphrase (not held anywhere), or use the credential from another
 origin (the RP id and origin are the TIX site's own). If it was compromised while a device was being paired, the
 wider case above applies.
+
+**Registration and Safari.** At pairing the browser sends `credential_begin` and computes the challenge
+*before* the person presses the register button, and calls `navigator.credentials.create()` synchronously inside
+that click, so the call runs within the user activation. If the host's 120 s window has passed by the click, it
+begins again and asks for a second click. The unlock sheet's `get()` likewise runs synchronously in the Confirm
+click. **Not verified:** whether WebKit (iOS Safari, an installed PWA) accepts both ceremonies as written, and how
+it behaves when the page is hidden during the biometric prompt; there is no virtual authenticator for WebKit, so
+this needs a real phone. The ceremonies are given an abort signal, so closing the sheet or leaving the page withdraws
+the operating system's prompt where the platform honours it.
 
 **Synced passkeys.** A platform credential may sync between a person's devices through a cloud keychain; it is
 a separate thing from the device's signing key. Revoking a device on the computer revokes its signing key

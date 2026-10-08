@@ -12,9 +12,9 @@ and opens a paired, online one in this frame; the transport is `js/remote-transp
 every answer to the `pair` request is opened tag, pin, signature, then §7, and the pin is stored only after a verified
 `pending` answer whose fingerprint is the one this browser computed itself. Sign-out deletes the `fileshare-bridge`
 database (`js/bridge-wipe.js`). The reply's `page` flag is read from the host's signed reply meta (`page: true`), the
-one field this document asked the host to add. Not built: the unlock sheet and the WebAuthn ceremonies (R11), streams
-end to end against a real host, the viewer and download callbacks (they say "later"), a link from the status page to
-`/remote`. Not tested against the real orch dashboard (it lives in another repository); the test pages in
+one field this document asked the host to add. Streams now run end to end through the transport (below), a file or a
+download from the dashboard opens in the app's own preview (`js/remote-view.js`), and the status page's Open for an online
+workspace goes to `/remote?space=`. Not built: the unlock sheet and the WebAuthn ceremonies (R11). Not tested against the real orch dashboard (it lives in another repository); the test pages in
 `tests/browser/test_dash_frame.py` have its shape (R0 findings, orch-core#90 and #127), and `tests/browser/test_remote.py`
 drives the whole path against `tests/support/fake_bridge_host.py`, a host built on the Python reference implementation.
 
@@ -228,13 +228,52 @@ error pages, titles) are drawn as text; `tests/js/frame-scope.test.mjs` checks t
 thrown `Error` whose message is shown as text. `fakeTransport(answer)` is the test fake. The real implementation follows
 redirects itself, reports the final path in `head.url`, and sets `head.page` from the host's signed reply.
 
+## What the frame host guarantees about streams
+
+For the dashboard's own code (the terminal page posts its keys while its stream is open, so this is what a typing lease
+needs from the device side). `js/frame-host.js` and `js/remote-transport.js` together:
+
+- **A stream the page opens stays open** until the page closes it, the page changes (`write`), the workspace is switched, the
+  computer ends it (`LAST`), the computer is lost, or a refusal ends it. Showing the terminal page does not close it, and
+  nothing the host does on its own does (the heartbeat rebuilds a frame that stopped answering, which is a page change).
+- **Frames reach the page in order**, each chunk as its own `sdata`; the shim joins chunks and splits coalesced ones into
+  events. A keepalive is not a frame. `LAST` ends the stream (`send`: the page's `EventSource` sees an error and is closed).
+- **`cancel` goes to the computer** whenever the page side lets go: `sclose`, a page change, a workspace switch (the old
+  mailbox is kept for 10 s so the cancel is answered), silence, or a consumer that is too slow. It is best effort and a
+  request of its own.
+- **Silence is 40 s.** The computer sends a keepalive at least every 20 s; no chunk at all for 40 s (two missed) says "The
+  computer did not answer", cancels and ends the stream. The next answer of any kind clears the note.
+- **Reconnects back off.** Every reconnect is a bridged request and the host's quota is about 1.1 requests a second. A new
+  stream for a path waits until 10 s after the previous one for that path started; each stream that dies young (under 60 s)
+  doubles the wait: 10, 20, 40, 60 s. One that lived a minute starts it over. A stream the page closed itself changes
+  nothing. The path is taken without its query string (64 paths are remembered), and once any stream has failed no stream
+  for any path opens less than 2 s after the previous one. The wait is shown ("Reconnecting to the computer in N s") and costs no request. The page's own reconnect code is
+  held to this too, because the gate is in the transport. A stream whose answer is not a 200 `text/event-stream` is cancelled at the
+  computer.
+- **After a refusal that ends a stream for good** (`revoked`, `not_paired`, `stopped`, `scope_changed`) this transport opens
+  no stream again (zero requests); the fixed text is shown. Other refusals (`busy`) are not final.
+- **Backpressure.** More than 256 chunks waiting for a consumer that is not reading drops the stream, cancels it and leaves
+  the reconnect to the back-off above.
+- **Keys for a terminal** (`POST /terminals/{name}/keys`, `{n, page, ...}`) are ordinary page requests from the dashboard's
+  script; the lease needs the stream the same device opened to be open when they go out, and the above keeps it open.
+
+## The viewer and the download
+
+`viewer` and `download` are `js/remote-view.js`. A file answer (not a tagged dashboard page) needs a gesture first
+(`frame-host.js`); a download is then shown in a question (name and size) and saved on its button. The viewer uses the file
+view's renderers (`render.js`): text through `textContent`, JSON as text, an image or audio file from a blob URL, Markdown
+as text (the renderer library belongs to the files page). **HTML and SVG are never shown**, by name or by type
+(`previewKind`); the person can only save them. The panel is headed "From the dashboard: <name>" and the download question shows the same sanitised name that is saved; an audio type is used only as a plain token. Caps: 2 MiB for text, 8 MiB for an image or audio file, which is also the
+frame host's whole answer cap and the download cap. Nothing of the file runs; the panel holds no script and no frame.
 ## Typing into a terminal (R6, the phone side)
 
 The computer lets a paired device type only under a **typing lease** (bridge-protocol.md section 9.4): a Face ID, Touch ID,
 Windows Hello or PIN confirmation, valid 15 minutes from the unlock, and given only to a request whose header names a
-stream **this device opened**. The routes are POST `/terminals/new`, `/terminals/<name>/keys`, `/size`, `/end`, and
-`/t/<ref>/agent/start`, `/quick/<id>/agent/start` (orch-core `LEASE_ROUTES`). `js/remote-lease.js` is the device's half; it
-sits between the frame host and the transport.
+stream **this device opened**. The lease routes are POST `/terminals/<name>/keys`, `/size` and `/end`. Starting a session
+(`/terminals/new`, `/t/<ref>/agent/start`, `/quick/<id>/agent/start`) is **not** a lease route: the computer asks for a fresh
+assertion of its own for each start, which goes through the plain unlock sheet with the computer's text, names no stream,
+and works with no stream open. `js/remote-lease.js` is the device's half of the lease routes; it sits between the frame host
+and the transport.
 
 - **`orchHost.remote`** is `true`, set by the shim (`frame-shim.js`), which only ever runs in the frame of a workspace
   opened through the relay. It is a property of `window.orchHost`, which a page can replace (the real dashboard's own
@@ -244,7 +283,7 @@ sits between the frame host and the transport.
 - **The stream.** The shim's `EventSource` is a bridged stream request. The transport puts its request id on the `head`
   event (`rid`); `remote-lease.js` keeps the ids of the streams that are open (until the stream ends or is closed) and
   puts one in the header of a lease request (`streamRid`): the stream of that terminal (`/terminals/<name>/stream`) for
-  the routes of a terminal, any open stream for `new` and Start agent. The `assert` request that carries the proof names no
+  the routes of a terminal. The `assert` request that carries the proof names no
   stream: the computer takes the stream from the request it parked.
 - **No stream open** (it dropped, or the page is on its snapshot fallback): nothing is sent. The person reads "Typing needs
   the live screen." and the page keeps its keys and resends them, so they go out once the stream is back. The computer would
@@ -266,8 +305,17 @@ sits between the frame host and the transport.
   workspace is closed and when the time passes. It adds no protocol field; the computer's clock decides, this is an
   indication, not a promise.
 - **Sizing while watching.** The dashboard posts `/terminals/<name>/size` also when it only watches. With no open lease
-  that is answered here with a 409 `lease_required` that the page ignores: no request, no sheet, no banner. Only key posts,
-  `new`, `end` and Start agent (an action of the person) open the sheet.
+  that is answered here with a 409 `lease_required` that the page ignores: no request, no sheet, no banner. Only key posts
+  and `end` (an action of the person) open the lease sheet.
+- **Declined sheets are remembered by path.** A lease sheet the person cancelled, or that failed or ran out, is remembered for
+  30 seconds for the path (`LEASE_DECLINED_MS`; a stream's for 5 minutes, `DECLINED_MS`), whatever the spelling: query,
+  fragment, doubled, trailing and `.` segments and percent-escapes of plain characters are normalised (`normPath`). A page
+  that posts again, with any spelling, gets the same answer with no request and no new sheet. A sheet that was already open
+  (`busy`) is not remembered.
+- **A confirmed start the computer then refuses** with `assertion_failed` shows "The computer did not accept the confirmation.
+  The request may have changed while you were confirming; nothing was started." The computer adds no reason on the wire (its
+  `why` is for its own log), so the phone infers it from the order: our own confirmation of a fresh action, then the plain
+  refusal. A lease refusal keeps the plain text.
 - **Revoked, stopped, scope changed, not paired**: after one of these the lease routes are blocked here (`dead`), with the
   fixed text for the code; a stream that ends with one is handled by the stream work (#96). Every other request is still
   sent, and the computer refuses it.
@@ -276,8 +324,8 @@ sits between the frame host and the transport.
   resends a confirmed request. **This does not hold against a hostile page.** The page can open a stream for any terminal
   itself (a hidden `EventSource`), so the binding of the lease to a terminal is not a protection: effectively the lease is
   per device for 15 minutes, and any terminal route the page can reach is typeable meanwhile. The computer does not bind it
-  either (orch-core issue 239). The sheet text "Type for 15 minutes" does not say what is unlocked; a change in orch-core
-  makes Start agent ask for its own fresh assertion. The snapshot fallback does not give typing.
+  either (orch-core issue 239). The sheet text "Type for 15 minutes" does not say what is unlocked (starting a session now has
+  its own assertion and text). The snapshot fallback does not give typing.
 
 ## Limits you should know
 

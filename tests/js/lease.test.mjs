@@ -37,6 +37,7 @@ function rig(script) {
 }
 const lease = (code = "lease_required") => () => ({ result: "accept", rid: "x", last: true, refusal: true, meta: { refusal: code, purpose: "lease", scope: "type", expires_ms: 1, nonce: "0".repeat(64), subject: { kind: "lease", shown: "Type for 15 minutes", digest: "" } }, data: new Uint8Array(0) });
 const refuse = (code) => () => ({ result: "accept", rid: "x", last: true, refusal: true, meta: { refusal: code }, data: new Uint8Array(0) });
+const need = () => () => ({ result: "accept", rid: "x", last: true, refusal: true, meta: { refusal: "assertion_required", purpose: "fresh", scope: "type", expires_ms: 1, nonce: "0".repeat(64), subject: { kind: "action", shown: "s", digest: "" } }, data: new Uint8Array(0) });
 const done = (status = 204) => () => ({ result: "accept", rid: "x", last: true, refusal: false, meta: { status, headers: {} }, data: new Uint8Array(0) });
 const open = () => ({ result: "accept", rid: "x", last: false, refusal: false, meta: { status: 200, headers: { "content-type": "text/event-stream" } }, data: new Uint8Array(0) });
 const STREAM = (path) => ({ method: "GET", path, headers: {}, body: null, stream: true, signal: new AbortController().signal });
@@ -53,7 +54,7 @@ function setup(script, { ask, ...o } = {}) {
   const glue = L.leaseGlue({ ask: ask || (async (s, rf) => { log.asks.push(rf); return { ok: true, meta: { op: "assert", for: rf.rid } }; }),
     say: (t) => log.said.push(t), onLease: (u) => log.leases.push(u), now: () => clock.t, ...o });
   glues.push(glue);
-  const transport = glue.wrap(T.bridgeTransport({ session: r.session, mailbox: r.mailbox, unlock: glue.unlock, firstChunkMs: o.firstChunkMs ?? 20_000 }));
+  const transport = glue.wrap(T.bridgeTransport({ session: r.session, mailbox: r.mailbox, unlock: glue.unlock, firstChunkMs: o.firstChunkMs ?? 20_000, now: () => clock.t, reconnectMs: 0, floorMs: 0 }));
   // open a terminal stream and keep it open; returns {rid, close}
   const watch = async (path = "/terminals/work/stream") => {
     r.script = null;
@@ -92,15 +93,29 @@ test("with no stream open a lease route is refused in words and nothing is sent"
   assert.deepEqual(s.log.said, [L.LEASE_TEXT.no_stream]);
 });
 
-test("a terminal's keys never ride on another terminal's stream; new and agent start take any stream", async () => {
-  const s = setup([open, done(), done(), done()]);
+test("a terminal's keys never ride on another terminal's stream", async () => {
+  const s = setup([open]);
   const w = await s.watch("/terminals/other/stream");
   await assert.rejects(collect(s.transport.request(KEYS("work"))), (e) => e.message === L.LEASE_TEXT.no_stream);
   assert.equal(s.sent.length, 1);
-  await collect(s.transport.request({ ...KEYS(), path: "/terminals/new", body: null }));
-  await collect(s.transport.request({ ...KEYS(), path: "/t/TIX-4/agent/start", body: null }));
-  assert.deepEqual(s.sent.slice(1).map((x) => x.stream), [w.rid, w.rid]);
   await w.close();
+});
+
+test("new and Start agent are fresh-assertion routes: no stream is named and the plain sheet is asked", async () => {
+  const s = setup([open, need(), done(), need(), done()]);
+  const w = await s.watch();
+  for (const path of ["/terminals/new", "/t/TIX-4/agent/start"]) await collect(s.transport.request({ ...KEYS(), path, body: null }));
+  assert.deepEqual(s.sent.filter((x) => x.meta.op === "http" && !x.meta.path.endsWith("/stream")).map((x) => x.stream), [null, null]);
+  assert.deepEqual(s.log.asks.map((a) => a.code), ["assertion_required", "assertion_required"]);
+  assert.deepEqual(s.log.leases, []);
+  await w.close();
+});
+
+test("new works with no stream open at all", async () => {
+  const s = setup([done()]);
+  await collect(s.transport.request({ ...KEYS(), path: "/terminals/new", body: null }));
+  assert.equal(s.sent.length, 1);
+  assert.deepEqual(s.log.said, []);
 });
 
 test("a closed stream is forgotten: the next key post is refused locally", async () => {
@@ -346,4 +361,95 @@ test("the stream closed while the sheet was open: forbidden_scope is said, nothi
   await collect(s.transport.request(KEYS()));                       // answered with no confirmation behind it
   assert.deepEqual(s.log.leases, [null]);
   await w2.close();
+});
+
+test("a confirmed start the computer then refuses says the request may have changed; a lease refusal does not", async () => {
+  const { CHANGED_TEXT } = await import(new URL("remote-model.js", JS));
+  const s = setup([need(), refuse("assertion_failed"), open, lease(), refuse("assertion_failed")]);
+  const said = [];
+  const t = T.bridgeTransport({ session: s.session, mailbox: s.mailbox, unlock: s.glue.unlock, onRefusal: (c, text) => said.push(text) });
+  await assert.rejects(collect(t.request({ ...KEYS(), path: "/t/TIX-4/agent/start", body: null })), (e) => e.message === CHANGED_TEXT && e.code === "assertion_failed");
+  assert.deepEqual(said, [CHANGED_TEXT]);
+  assert.match(CHANGED_TEXT, /nothing was started/);
+  const w = await s.watch();
+  await assert.rejects(collect(s.transport.request(KEYS())), (e) => e.message !== CHANGED_TEXT && e.code === "assertion_failed");
+  await w.close();
+});
+
+test("a plain refusal for a start that was never confirmed keeps the plain sentence", async () => {
+  const { CHANGED_TEXT } = await import(new URL("remote-model.js", JS));
+  const s = setup([refuse("assertion_failed")]);
+  await assert.rejects(collect(s.transport.request({ ...KEYS(), path: "/terminals/new", body: null })), (e) => e.message !== CHANGED_TEXT);
+});
+
+test("normPath: one spelling for the query, dots, doubled and trailing slashes and escapes of plain characters", () => {
+  assert.equal(T.normPath("/terminals/work/keys"), "/terminals/work/keys");
+  for (const v of ["/terminals/work/keys?x=1", "/terminals/work/keys/", "/terminals//work/keys", "/terminals/./work/keys", "/terminals/x/../work/keys", "/terminals/%77ork/keys", "/terminals/work/keys#f"])
+    assert.equal(T.normPath(v), "/terminals/work/keys", v);
+  assert.equal(T.normPath("/a%2Fb"), "/a%2Fb");
+  assert.notEqual(T.normPath("/terminals/Work/keys"), T.normPath("/terminals/work/keys"));
+});
+
+// ---- a declined sheet is remembered for the path, in whatever spelling ------------------------------------------------
+
+function declining(script, extra = {}) {
+  const r = rig(script);
+  const clock = { t: 5_000_000 };
+  const asks = [];
+  const t = T.bridgeTransport({ session: r.session, mailbox: r.mailbox, now: () => clock.t, unlock: async (sess, rf) => { asks.push(rf.code); return { ok: false, reason: "cancelled" }; }, ...extra });
+  return { ...r, clock, asks, t };
+}
+
+test("a declined lease sheet is remembered for the path in any spelling: no request, no sheet", async () => {
+  const d = declining([lease(), open]);
+  await assert.rejects(collect(d.t.request(KEYS("work"))), (e) => e.declined === true);
+  const n = d.sent.length;
+  for (const path of ["/terminals/work/keys", "/terminals/work/keys?a=1", "/terminals/work/keys/", "/terminals/%77ork/keys", "/terminals/./work/keys"])
+    await assert.rejects(collect(d.t.request({ ...KEYS("work"), path })), (e) => e.declined === true, path);
+  assert.equal(d.sent.length, n);
+  assert.deepEqual(d.asks, ["lease_required"]);
+});
+
+test("another path is not covered, and the memory ends after the lease cool-down", async () => {
+  const d = declining([lease(), lease(), lease()]);
+  await assert.rejects(collect(d.t.request(KEYS("work"))));
+  await assert.rejects(collect(d.t.request(KEYS("other"))));              // a different path asks (its own sheet)
+  assert.equal(d.asks.length, 2);
+  d.clock.t += T.LEASE_DECLINED_MS;
+  await assert.rejects(collect(d.t.request(KEYS("work"))));
+  assert.equal(d.asks.length, 3);
+});
+
+test("a busy sheet is not remembered", async () => {
+  const r = rig([lease(), lease()]);
+  const asks = [];
+  const t = T.bridgeTransport({ session: r.session, mailbox: r.mailbox, unlock: async (s, rf) => { asks.push(1); return { ok: false, reason: "busy" }; } });
+  await assert.rejects(collect(t.request(KEYS("work"))));
+  await assert.rejects(collect(t.request(KEYS("work"))));
+  assert.equal(asks.length, 2);
+});
+
+test("a declined fresh sheet on a plain request is not held by the lease memory", async () => {
+  const d = declining([need(), need()]);
+  await assert.rejects(collect(d.t.request({ ...KEYS(), path: "/terminals/new", body: null })));
+  await assert.rejects(collect(d.t.request({ ...KEYS(), path: "/terminals/new", body: null })));
+  assert.equal(d.asks.length, 2);
+});
+
+test("a declined stream sheet is remembered for the path in any spelling too", async () => {
+  const d = declining([lease(), open]);
+  const st = (path) => ({ method: "GET", path, headers: {}, body: null, stream: true, signal: new AbortController().signal });
+  await assert.rejects(collect(d.t.request(st("/terminals/work/stream"))), (e) => e.declined === true);
+  const n = d.sent.length;
+  for (const p of ["/terminals/work/stream?x=1", "/terminals/%77ork/stream", "/terminals/work/stream/"])
+    await assert.rejects(collect(d.t.request(st(p))), (e) => e.declined === true, p);
+  assert.equal(d.sent.length, n);
+  assert.deepEqual(d.asks, ["lease_required"]);
+});
+
+test("another spelling of a lease path is still a lease request (no stream: refused here, nothing sent)", async () => {
+  const s = setup([]);
+  for (const path of ["/terminals/work/keys/", "/terminals/%77ork/keys?x=1", "/terminals/./work/keys"])
+    await assert.rejects(collect(s.transport.request({ ...KEYS(), path })), (e) => e.message === L.LEASE_TEXT.no_stream, path);
+  assert.equal(s.sent.length, 0);
 });

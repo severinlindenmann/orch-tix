@@ -37,17 +37,17 @@ async function start() {
   const note = el("p", { class: "hint", id: "pair-cred-note", role: "status" });
   fpHelp.after(note);
   // The platform credential (Face ID, Touch ID, Windows Hello, device PIN) is made on the person's own click.
-  const gate = () => new Promise((resolve, reject) => {
-    const t = setTimeout(() => { b.remove(); reject(Object.assign(new Error("not clicked in time"), { name: "TimeoutError" })); }, 100_000);
-    const b = el("button", { class: "btn btn-accent", type: "button", id: "pair-cred", onclick: (e) => { if (!e.isTrusted) return; clearTimeout(t); b.remove(); resolve(); } },
-      "Register this browser with Face ID or device unlock");
-    note.textContent = "This lets you confirm risky actions on this browser. It is not your passphrase and is not stored by TIX.";
+  const click = (run, again) => new Promise((resolve, reject) => {
+    const t = setTimeout(() => { b.remove(); reject(Object.assign(new Error("not clicked in time"), { name: "TimeoutError" })); }, 300_000);
+    const b = el("button", { class: "btn btn-accent", type: "button", id: "pair-cred", onclick: (e) => { if (!e.isTrusted) return; clearTimeout(t); b.remove(); try { resolve(run()); } catch (err) { reject(err); } } },
+      again ? "Try again: register this browser" : "Register this browser with Face ID or device unlock");
+    note.textContent = again ? "That took too long. Press the button again." : "This lets you confirm risky actions on this browser. It is not your passphrase and is not stored by TIX.";
     note.after(b);
   });
   go.addEventListener("click", async () => {
     go.disabled = label.disabled = true;
     try {
-      const r = await runPairing({ link, label: label.value.trim() || "This browser", gate,
+      const r = await runPairing({ link, label: label.value.trim() || "This browser", click,
         onCredential: (t) => { note.textContent = t; },
         onState: (t) => { state.textContent = t; },
         onFingerprint: (t) => { fp.textContent = t; fp.hidden = fpHelp.hidden = false; } });

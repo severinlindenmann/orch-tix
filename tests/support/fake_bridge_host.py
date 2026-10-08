@@ -78,6 +78,11 @@ class FakeHost:
         self.seen: list[dict] = []           # the meta of every request that ran
         self.lie_fingerprint = False         # True: the pending answer names a different device key's fingerprint
         self.silent = False                  # True: read requests and answer nothing
+        self.sse: dict[str, list[bytes]] = {}   # path -> the frames a stream for it opens with
+        self.open: dict[str, dict] = {}      # rid hex -> {"req": Header, "path", "idx", "device"}: the streams that are open
+        self.cancelled: list[str] = []       # rids a `cancel` op closed
+        self.stream_opens: list[tuple[str, float]] = []   # (path, time) of every stream request that ran
+        self._lock = threading.Lock()
         # R11: the platform credential and the assertions (docs/bridge-protocol.md section 9). `requires` maps a path to
         # {"kind", "shown", "digest", "scope", "purpose": "fresh" | "lease"}; a request for it is parked and refused
         # assertion_required / lease_required until an `assert` request verifies.
@@ -136,6 +141,34 @@ class FakeHost:
 
     def revoke(self, device: str):
         self.state["devices"][device]["revoked"] = True
+        self.end(refusal="revoked", device=device)        # §4: revocation ends the device's open streams with the stored refusal
+
+    # ---- streams (the host side of §4)
+    def push(self, path: str, *frames: bytes, coalesce: bool = False):
+        """Send frames (SSE text as bytes) to every open stream on `path`: one chunk each, or all in one chunk."""
+        for rid, s in list(self.open.items()):
+            if s["path"] == path:
+                for data in ([b"".join(frames)] if coalesce else frames):
+                    self._frame(s, {}, data)
+
+    def keepalive(self, path: str):
+        for s in list(self.open.values()):
+            if s["path"] == path:
+                self._frame(s, {"keepalive": True}, b"")
+
+    def end(self, path: str | None = None, refusal: str | None = None, device: str | None = None):
+        """Close the open streams (all, one path or one device's): LAST, and LAST | REFUSAL with a code."""
+        for rid, s in list(self.open.items()):
+            if (path is None or s["path"] == path) and (device is None or s["device"] == device):
+                self.open.pop(rid, None)
+                flags = ref.F_STREAM | ref.F_LAST | (ref.F_REFUSAL if refusal else 0)
+                self._frame(s, {"refusal": refusal} if refusal else {}, b"", flags)
+
+    def _frame(self, s: dict, meta: dict, data: bytes, flags: int = ref.F_STREAM):
+        with self._lock:
+            idx = s["idx"]
+            s["idx"] += 1
+            self._send(s["req"], meta, data, flags, idx=idx)
 
     # ---- the loop
     @staticmethod
@@ -155,11 +188,14 @@ class FakeHost:
             except Exception:
                 time.sleep(0.2)
 
-    def _send(self, req: ref.Header, meta: dict, data: bytes = b"", flags: int = ref.F_LAST):
-        h = ref.Header(ref.TO_DEVICE, flags, self.ws, req.device, req.rid, ref.ZERO_ID, 0, self._now(), os.urandom(16))
+    def _send(self, req: ref.Header, meta: dict, data: bytes = b"", flags: int = ref.F_LAST, idx: int = 0):
+        if req.flags & ref.F_STREAM:
+            flags |= ref.F_STREAM                # a refusal of a stream request carries STREAM too (§3.5)
+        h = ref.Header(ref.TO_DEVICE, flags, self.ws, req.device, req.rid, req.rid if flags & ref.F_STREAM else ref.ZERO_ID, idx,
+                       self._now(), os.urandom(16))
         env = ref.envelope(self.k_ws, self.priv, h, ref.frame(meta, data))
         self._http.post(f"/api/bridge/{self.space}/responses/{req.rid.hex()}", params={"holder": self.holder},
-                        json={"idx": 0, "last": True, "body": _b64u(env)}).raise_for_status()
+                        json={"idx": idx, "last": bool(flags & ref.F_LAST), "body": _b64u(env)}).raise_for_status()
 
     # ---- R11: credential_begin / credential_finish of a pending device, assertions
     def _credential(self, env: bytes) -> bool:
@@ -240,14 +276,29 @@ class FakeHost:
         """The assertion rule for a request that ran past host_check, or None. A subclass (fake_terminal_host.py) adds routes."""
         return self.requires.get(meta.get("path", "").split("?")[0])
 
-    def _serve(self, answer: ref.Header, meta: dict, data: bytes = b""):
+    def _serve(self, req: ref.Header, meta: dict, data: bytes = b""):
+        """Run a request that may run (also a parked one after its assertion): `req` is the header answered."""
+        rid = req.rid.hex()
         self.seen.append(meta)
-        page = self.pages.get(meta.get("path", "").split("?")[0])
+        path = meta.get("path", "").split("?")[0]
+        if meta.get("op") == "cancel":
+            self.cancelled.append(req.stream.hex())
+            self.open.pop(req.stream.hex(), None)
+            self._send(req, {"status": 200, "headers": {}})
+            return
+        if req.flags & ref.F_STREAM:
+            self.stream_opens.append((path, time.time()))
+            s = self.open[rid] = {"req": req, "path": path, "idx": 0, "device": req.device.hex()}
+            self._frame(s, {"status": 200, "headers": {"content-type": "text/event-stream"}}, b"")
+            for data in self.sse.get(path, []):
+                self._frame(s, {}, data)
+            return
+        page = self.pages.get(path)
         if page is None:
-            self._send(answer, {"status": 404, "headers": {"content-type": "text/plain"}}, b"not found")
+            self._send(req, {"status": 404, "headers": {"content-type": "text/plain"}}, b"not found")
         else:
-            body = page["body"]
-            self._send(answer, {"status": page["status"], "headers": page["headers"], **({"page": True} if page.get("page") else {})},
+            status, headers, body = page["status"], page["headers"], page["body"]
+            self._send(req, {"status": status, "headers": headers, **({"page": True} if page.get("page") else {})},
                        body.encode() if isinstance(body, str) else body)
 
     def _handle(self, rid: str, env: bytes):

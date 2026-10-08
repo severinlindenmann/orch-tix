@@ -100,6 +100,7 @@ TERMINAL_JS = """(() => {
   window.batching = Boolean(batcher);
   window.typeKeys = (t) => batcher.push({ text: t });
   window.waiting = () => batcher.active();
+  window.startNew = () => fetch("/terminals/new", { method: "POST", credentials: "same-origin" }).then((r) => { $("status").textContent = "new " + r.status; return r.status; }, () => { $("status").textContent = "new failed"; return 0; });
   window.replay = (n) => post({ seq: [{ text: "REPLAY" }], n, page }).then(async (r) => { $("status").textContent = r.status + " " + await r.text(); return r.status; });
 })();"""
 TERMINAL_PAGE = {"status": 200, "headers": HTML, "page": True, "body": f"""<!doctype html><html><head><meta charset="utf-8"><title>Terminal work</title>
@@ -142,8 +143,8 @@ def term(signed_in, base, make_host, authenticator):
     open_dash(page, base, host)
     frame_of(page).locator("#go").click()
     wait_h1(page, "Terminal work")
-    until(lambda: host.streams, what="the terminal stream opened")
-    host.push("work", "$ ")
+    until(lambda: host.open, what="the terminal stream opened")
+    host.push_screen("work", "$ ")
     expect(frame_of(page).locator("#screen")).to_have_text("$ ")
     return page, host, dev
 
@@ -262,10 +263,23 @@ def test_a_revoked_browser_gets_the_refusal_text_and_types_nothing(term):
 def test_without_an_open_stream_typing_is_refused_in_words_and_nothing_is_sent(term):
     page, host, dev = term
     frame_of(page).evaluate("window.closeStream()")
-    until(lambda: not host.streams, what="the stream closed on the computer")
+    until(lambda: not host.open, what="the stream closed on the computer")
     typed_in_frame(page, "z")
     expect(page.locator("#remote-notice")).to_contain_text("Typing needs the live screen", timeout=30000)
     assert host.typed == [] and host.audit == [] and sheet(page).count() == 0
+
+
+def test_a_new_session_is_a_fresh_assertion_with_its_own_text_and_names_no_stream(term):
+    page, host, dev = term
+    frame_of(page).evaluate("window.startNew()")
+    expect(sheet(page)).to_be_visible(timeout=30000)
+    expect(page.locator("#unlock-text")).to_have_text("Start a session")       # not the lease text
+    assert host.posts == []
+    confirm(page)
+    until(lambda: any(p["path"] == "/terminals/new" for p in host.posts), what="the start ran once")
+    assert host.headers_seen[-1] == ("/terminals/new", "")                      # no stream header
+    assert [a["purpose"] for a in host.audit] == ["fresh"] and host.leases.get(dev, 0) == 0
+    expect(note(page)).to_be_hidden()
 
 
 def test_only_watching_asks_for_nothing_and_shows_nothing(term):
@@ -301,7 +315,7 @@ def test_switching_workspace_clears_the_typing_unlocked_note(signed_in, base, ma
     open_dash(signed_in, base, a)
     frame_of(signed_in).locator("#go").click()
     wait_h1(signed_in, "Terminal work")
-    until(lambda: a.streams)
+    until(lambda: a.open)
     typed_in_frame(signed_in, "x")
     expect(sheet(signed_in)).to_be_visible(timeout=30000)
     confirm(signed_in)

