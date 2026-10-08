@@ -10,6 +10,8 @@ import json
 import pytest
 from playwright.sync_api import expect
 
+from tests.support import factory_subjects as fs
+
 from .test_remote import HTML, dash, frame_of, wait_h1
 from .test_unlock import (_chromium_only, authenticator, base, confirm, live_server, make_host, pair, open_dash,  # noqa: F401
                           sheet, signed_in)
@@ -41,10 +43,10 @@ def rule(kind, shown, **bound):
     return {"kind": kind, "shown": shown, "digest": digest(kind=kind, **bound), "scope": "type"}
 
 
-START = rule("charter", f"Start the AI Factory on epic {EPIC} Billing cleanup with 3 open children. Limits: factory True", seen=SEEN)
-ONCE = rule("permission", f"Allow once request PR-3 on epic {EPIC}: git push origin factory/b-0007", scope="once", sha=SHA)
-FOR_EPIC = rule("permission", f"Allow for the whole epic request PR-4 on epic {EPIC}: git push origin factory/b-0007", scope="epic", sha=SHA)
-VERDICT = rule("verdict", f"Accept epic {EPIC} Billing cleanup: mark done B-0008, B-0009", seen=SEEN)
+START = rule("charter", fs.start(EPIC, "Billing cleanup", 3), seen=SEEN)
+ONCE = rule("permission", fs.permission("PR-3", EPIC, "git push origin factory/b-0007"), scope="once", sha=SHA)
+FOR_EPIC = rule("permission", fs.permission("PR-4", EPIC, "git push origin factory/b-0007", "epic"), scope="epic", sha=SHA)
+VERDICT = rule("verdict", fs.verdict(EPIC, "Billing cleanup", ["B-0008", "B-0009"]), seen=SEEN)
 
 PAGES = {
     "/": home(form(f"/t/{EPIC}/approve", "start", gate="requirements", seen=SEEN, factory="on"),
@@ -53,6 +55,7 @@ PAGES = {
               form(f"{PR}/PR-3/deny", "deny", sha=SHA),
               form(f"{PR}/grants/G-1/revoke", "revoke"),
               form(f"/t/{EPIC}/epic/pause", "pause"),
+              form(f"/t/{EPIC}/epic/pause", "stop"),       # the dashboard has one route: Pause is also Stop
               form(f"/t/{EPIC}/verdict", "verdict", seen=SEEN, verdict="done"),
               form(f"{PR}/PR-9/grant", "stale", sha="0" * 64, scope="once")),
     "/other": dash("Other"),
@@ -102,7 +105,7 @@ def test_a_factory_approval_shows_the_hosts_exact_text_and_runs_the_same_form_on
     expect(sheet(page)).to_have_count(0)
 
 
-@pytest.mark.parametrize("button,path", [("deny", f"{PR}/PR-3/deny"), ("revoke", f"{PR}/grants/G-1/revoke"), ("pause", f"/t/{EPIC}/epic/pause")])
+@pytest.mark.parametrize("button,path", [("deny", f"{PR}/PR-3/deny"), ("revoke", f"{PR}/grants/G-1/revoke"), ("pause", f"/t/{EPIC}/epic/pause"), ("stop", f"/t/{EPIC}/epic/pause")])
 def test_deny_revoke_and_pause_need_no_sheet(setup, button, path):
     page, host = setup
     frame_of(page).locator(f"#{button}").click()
@@ -135,6 +138,37 @@ def test_a_start_text_that_looks_like_markup_is_drawn_as_text(signed_in, base, m
     expect(sheet(signed_in)).to_be_visible(timeout=30000)
     expect(signed_in.locator("#unlock-text")).to_have_text(hostile["shown"])
     assert signed_in.locator("#unlock-sheet img").count() == 0 and signed_in.evaluate("window.__x") is None
+
+
+def test_a_realistic_long_start_and_verdict_are_not_refused_by_the_sheet(signed_in, base, make_host, authenticator):
+    """Titles are escaped to printable ASCII by the host (an umlaut is 6 characters), 25 children is the default limit."""
+    title = "Rechnungswesen für Zürich und Genève: " + "Übergabe der Abrechnung " * 8
+    kids = [f"B-{n:04d}" for n in range(100, 125)]
+    long_start = rule("charter", fs.start(EPIC, title, 25), seen=SEEN)
+    long_verdict = rule("verdict", fs.verdict(EPIC, title, kids, "Alles geprüft, bitte übernehmen"), seen=SEEN)
+    assert 300 < len(long_start["shown"]) < 2000 and 300 < len(long_verdict["shown"]) < 2000
+    host = make_host(PAGES, {**requires(), f"/t/{EPIC}/approve": lambda m, b: dict(long_start), f"/t/{EPIC}/verdict": lambda m, b: dict(long_verdict)})
+    pair(signed_in, base, host)
+    open_dash(signed_in, base, host)
+    for button, want in (("start", long_start), ("verdict", long_verdict)):
+        frame_of(signed_in).locator(f"#{button}").click()
+        expect(sheet(signed_in)).to_be_visible(timeout=30000)
+        expect(signed_in.locator("#unlock-text")).to_contain_text(want["shown"][:60])
+        signed_in.locator("#unlock-cancel").click()
+        expect(sheet(signed_in)).to_have_count(0)
+
+
+def test_a_permission_command_the_host_can_show_but_the_sheet_cannot_is_refused_in_words(signed_in, base, make_host, authenticator):
+    """PRODUCT MISMATCH, pinned here: the host shows up to 4000 characters (factory_remote.MAX_SHOWN), the sheet checks 2000.
+    A command of 2100 characters is a legitimate subject for the host and is refused on the phone, so it cannot be allowed from it."""
+    long = rule("permission", fs.permission("PR-3", EPIC, "echo " + "x" * 2100), scope="once", sha=SHA)
+    assert 2000 < len(long["shown"]) < 4000
+    host = make_host(PAGES, {**requires(), f"{PR}/PR-3/grant": lambda m, b: dict(long)})
+    pair(signed_in, base, host)
+    open_dash(signed_in, base, host)
+    frame_of(signed_in).locator("#once").click()
+    expect(signed_in.locator("#remote-notice")).to_contain_text("too long to check on this phone", timeout=30000)
+    assert sheet(signed_in).count() == 0 and ran(host, f"{PR}/PR-3/grant") == [] and host.audit == []
 
 
 # ---- the status side ------------------------------------------------------------------------------------------------
