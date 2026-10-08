@@ -19,8 +19,8 @@ FRAME_CSS = ["frame.css"]          # loaded by frame-host.js itself, so app.css 
 FRAME_JS_BUDGET = 72_000           # bytes, uncompressed (the scripts)
 # The Remote pages' glue (R10 wiring: the ceremony, the workspace list, the transport over the mailbox) is likewise its
 # own allowance; the tiny sign-out wipe (bridge-wipe.js) is counted here too.
-REMOTE_JS = ["bridge-wipe.js", "remote.js", "remote-mailbox.js", "remote-model.js", "remote-pair.js", "remote-pair-ui.js", "remote-transport.js", "remote-view.js"]
-REMOTE_JS_BUDGET = 44_050          # bytes, uncompressed; main (streams, viewer: 40_000) plus the R11 hooks in remote*.js (credential step at pairing, the unlock call and its once-per-exchange rule, declined-stream memory, the not-remote notice): 43_684 measured; R13 (#27): +332 bytes, all in remote.js; 44_016 measured (the Factory line and waiting hint on the card)
+REMOTE_JS = ["bridge-wipe.js", "remote.js", "remote-lease.js", "remote-mailbox.js", "remote-model.js", "remote-pair.js", "remote-pair-ui.js", "remote-transport.js", "remote-view.js"]
+REMOTE_JS_BUDGET = 53_500          # bytes, uncompressed; one allowance for all the Remote work, by increment: #96 streams and viewer (40_000 with main's earlier work), #97 the unlock hooks in remote*.js (+3_684: credential step at pairing, the unlock call and its once-per-exchange rule, declined-stream memory, the not-remote notice), #100 the Factory line and waiting hint on the card (+332), #99 typing from the phone (remote-lease.js, the lease note, the path memory for declined lease sheets: about +9_000); 52_805 measured on the merge
 # The unlock sheet and the platform credential (R11, docs/bridge-protocol.md section 9): its own allowance, outside the shell's.
 UNLOCK_JS = ["unlock.js"]
 UNLOCK_JS_BUDGET = 14_500          # bytes, uncompressed: the sheet, its text checks (padding, markers, limits) and the registration click

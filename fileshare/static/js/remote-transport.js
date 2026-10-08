@@ -9,7 +9,7 @@
 import { F_STREAM } from "./bridge-crypto.js";
 import { hexToBytes } from "./crypto.js";
 import { validPath } from "./frame-scope.js";
-import { HOST_SILENT, SIGNED_OUT, refusalText } from "./remote-model.js";
+import { CHANGED_TEXT, HOST_SILENT, SIGNED_OUT, refusalText } from "./remote-model.js";
 import { unlockText } from "./unlock.js";
 
 export const FIRST_CHUNK_MS = 20_000;     // no first chunk: cancel and send the same bytes once more (§5.3), then give up
@@ -21,10 +21,15 @@ export const FLOOR_MS = 2_000;           // once any stream has failed, no two s
 export const MAX_GATES = 64;              // paths remembered
 export const HEALTHY_MS = 60_000;         // a stream that lived this long was healthy: the back-off starts over
 export const DECLINED_MS = 300_000;       // a stream path whose unlock sheet was declined or failed is refused without a new sheet this long
+export const LEASE_DECLINED_MS = 30_000;  // a request path whose typing-lease sheet was declined is refused without a new sheet this long (remote-lease.js has the same cool-down)
 export const MAX_QUEUED = 256;            // chunks waiting for a consumer that does not read: beyond this the stream is dropped
 const ENDS_STREAMS = new Set(["revoked", "not_paired", "stopped", "scope_changed"]);   // after these no stream is opened again
 const MAX_REDIRECTS = 5;
 const EMPTY = new Uint8Array(0);
+// The key under which a path is remembered (declined sheets, stream gates, lease streams): no query or fragment, no empty
+// segment, so no trailing slash. Frame requests already pass validPath (no dot segments, no needless escapes). It is a lookup
+// key only: the path that is sent is never rewritten.
+export const normPath = (p) => "/" + String(p).split(/[?#]/)[0].split("/").filter(Boolean).join("/");
 const SLOW = "The dashboard could not keep up with the computer. Reconnecting.";
 
 export class RefusalError extends Error {
@@ -67,14 +72,16 @@ const NEEDS_UNLOCK = new Set(["assertion_required", "lease_required"]);
 // once, as the `assert` request whose answer is the refused request's own result (§9.4). Asked once per exchange; a stream
 // whose sheet was declined is not asked about again for DECLINED_MS, so a reconnect loop cannot pile sheets up.
 export function bridgeTransport({ session, mailbox, onRefusal = () => {}, onHost = () => {}, unlock = null, firstChunkMs = FIRST_CHUNK_MS, chunkMs = CHUNK_MS,
-  quietMs = QUIET_MS, reconnectMs = RECONNECT_MS, reconnectMax = RECONNECT_MAX_MS, healthyMs = HEALTHY_MS, floorMs = FLOOR_MS, now = Date.now }) {
+  quietMs = QUIET_MS, reconnectMs = RECONNECT_MS, reconnectMax = RECONNECT_MAX_MS, healthyMs = HEALTHY_MS, floorMs = FLOOR_MS, leaseDeclinedMs = LEASE_DECLINED_MS, now = () => Date.now() }) {
   let note = null, ended = null;          // note: what onHost last said, until the next answer
+  const declinedPlain = new Map();     // normalised path -> {until, err}: a lease sheet the person declined
   const gates = new Map();             // stream path (no query) -> {start, delay, fails}
   let lastOpen = 0, failed = false;    // when any stream last opened; whether any has failed
 
-  async function* exchange({ method, path, headers, body, stream, signal }) {
+  async function* exchange({ method, path, headers, body, stream, streamRid, signal }) {
     const args = { meta: { op: "http", method, path, headers }, data: body || EMPTY, flags: stream ? F_STREAM : 0 };
-    let asked = false;
+    if (streamRid) args.stream = hexToBytes(streamRid);    // a typing-lease request names the stream this device opened (§9.4, remote-lease.js)
+    let asked = false, askedCode = null;
     for (let round = 0; round < 3; round++) {            // a second and third round only for a resend the host asked for
       const q = queue();
       const listener = { chunk: (c) => { if (q.size() >= MAX_QUEUED) { q.reset(); q.push({ slow: true }); } else q.push(c); },
@@ -110,13 +117,17 @@ export function bridgeTransport({ session, mailbox, onRefusal = () => {}, onHost
             const code = String(r.meta.refusal);
             if (unlock && !asked && NEEDS_UNLOCK.has(code)) {
               asked = true;
+              askedCode = code;
               const u = await unlock(session, { code, meta: r.meta, rid: sent.id }, { signal });
               if (signal?.aborted) return;
-              if (u.ok) { args.meta = u.meta; resend = true; break; }
+              if (u.ok) { args.meta = u.meta; delete args.stream; resend = true; break; }
               const text = u.text || unlockText(u.reason);
               onRefusal(code, text);
               throw Object.assign(new RefusalError(code), { message: text, declined: u.reason !== "busy" });
             }
+            // The computer refuses a confirmed start whose details changed meanwhile with the plain code (it adds no reason on the
+            // wire): after our own confirmation of a fresh action that is the likeliest cause; the sentence says no more than that.
+            if (code === "assertion_failed" && askedCode === "assertion_required") { onRefusal(code, CHANGED_TEXT); throw Object.assign(new RefusalError(code), { message: CHANGED_TEXT }); }
             onRefusal(code, r.message || refusalText(code));
             throw new RefusalError(code);
           }
@@ -127,7 +138,7 @@ export function bridgeTransport({ session, mailbox, onRefusal = () => {}, onHost
             const h = {};
             for (const [k, v] of Object.entries(m.headers && typeof m.headers === "object" ? m.headers : {})) if (typeof v === "string") h[k.toLowerCase()] = v;
             if (stream && (m.status !== 200 || !(h["content-type"] || "").startsWith("text/event-stream"))) { cancelStream(sent.id); throw new Error("The computer did not answer with a stream."); }
-            yield { type: "head", status: m.status, headers: h, page: m.page === true };
+            yield { type: "head", status: m.status, headers: h, page: m.page === true, rid: sent.id };
           }
           if (r.data?.length) yield { type: "chunk", data: r.data };
           if (r.last) { finished = true; yield { type: "end" }; return; }
@@ -151,7 +162,7 @@ export function bridgeTransport({ session, mailbox, onRefusal = () => {}, onHost
   async function* redirecting(req) {
     let { method, path, body } = req;
     for (let hops = 0; ; hops++) {
-      const it = exchange({ method, path, headers: req.headers, body, stream: req.stream, signal: req.signal });
+      const it = exchange({ method, path, headers: req.headers, body, stream: req.stream, streamRid: hops ? null : req.streamRid, signal: req.signal });
       let redirect = null;
       for await (const ev of it) {
         if (ev.type === "head" && !req.stream && [301, 302, 303, 307, 308].includes(ev.status)) {
@@ -188,7 +199,7 @@ export function bridgeTransport({ session, mailbox, onRefusal = () => {}, onHost
   // frame closed itself changes nothing.
   async function* stream(req) {
     if (ended) { onRefusal(ended, refusalText(ended)); throw new RefusalError(ended); }
-    const key = req.path.split("?")[0];
+    const key = normPath(req.path);
     let g = gates.get(key);
     if (g?.declined && g.declined.until > now()) throw g.declined.err;      // the person said no a moment ago
     const until = Math.max(g ? g.start + g.delay : 0, failed ? lastOpen + floorMs : 0);
@@ -219,7 +230,23 @@ export function bridgeTransport({ session, mailbox, onRefusal = () => {}, onHost
     }
   }
 
-  return { request: (req) => (req.stream ? stream(req) : plain(req)) };
+  // A plain request whose lease sheet was declined is refused again without a sheet for leaseDeclinedMs, whatever the
+  // spelling of its path: a page that posts again and again cannot raise a sheet each time.
+  async function* checked(req) {
+    const key = normPath(req.path), d = declinedPlain.get(key);
+    if (d && d.until > now()) throw d.err;
+    try {
+      yield* plain(req);
+    } catch (e) {
+      if (e?.declined && e.code === "lease_required") {
+        if (declinedPlain.size >= MAX_GATES) declinedPlain.delete(declinedPlain.keys().next().value);
+        declinedPlain.set(key, { until: now() + leaseDeclinedMs, err: e });
+      }
+      throw e;
+    }
+  }
+
+  return { request: (req) => (req.stream ? stream(req) : checked(req)) };
 }
 
 function mailboxProblem(e) {

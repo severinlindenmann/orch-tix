@@ -18,6 +18,7 @@ import { hexToBytes } from "./crypto.js";
 import { createMailbox } from "./remote-mailbox.js";
 import { bridgeTransport } from "./remote-transport.js";
 import { askAssertion, sheetOpen } from "./unlock.js";
+import { leaseGlue } from "./remote-lease.js";
 import { isNeverPage } from "./frame-render.js";
 import { SCOPES, canOpen, fileName, hostMessage, HOST_SILENT } from "./remote-model.js";
 import { createViewer } from "./remote-view.js";
@@ -42,6 +43,13 @@ function notice(text) {
   const n = $("remote-notice");
   n.textContent = text || "";
   n.hidden = !text;
+}
+
+// "Typing unlocked until 14:32": the lease is 15 minutes from the confirmation (remote-lease.js); gone when it ends.
+function leaseNote(until) {
+  const n = $("lease-note");
+  n.textContent = until ? `Typing unlocked until ${new Date(until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "";
+  n.hidden = !until;
 }
 
 const pill = (role, ic, text) => el("span", { class: `pill r-${role}` }, icon(ic), el("span", {}, text));
@@ -75,6 +83,8 @@ function render(state) {
 
 function closeCurrent(state) {
   const mailbox = state.mailbox;
+  state.glue?.stop();
+  leaseNote(null);
   state.host?.destroy();                       // closes every stream: each one sends `cancel` to its computer
   state.viewer?.close();
   state.host = state.mailbox = null;
@@ -92,7 +102,8 @@ async function select(state, id) {
   const session = await openSession(id).catch(() => null);
   if (!session || !canOpen(s, true)) { render(state); notice(session ? hostMessage(s?.state) : "This browser is not paired with this workspace."); return; }
   const mailbox = createMailbox(id);
-  const transport = bridgeTransport({ session, mailbox, unlock: askAssertion, onRefusal: (code, text) => {
+  const glue = leaseGlue({ ask: askAssertion, say: (t) => { if (state.selected === id) notice(t); }, onLease: (u) => { if (state.selected === id) leaseNote(u); } });
+  const transport = glue.wrap(bridgeTransport({ session, mailbox, unlock: glue.unlock, onRefusal: (code, text) => {
     if (state.selected !== id) return;                       // a workspace we have left says nothing here
     state.refusal = text; notice(text);
     if (code === "not_paired") forgetWorkspace(id).then(() => { state.paired.set(id, false); render(state); }).catch(() => {});   // the host does not know us
@@ -100,8 +111,9 @@ async function select(state, id) {
     if (state.selected !== id) return;
     state.hostNote = what === "lost" ? HOST_SILENT : what === "waiting" ? `Reconnecting to the computer in ${Math.ceil(ms / 1000)} s.` : null;
     if (state.hostNote) notice(state.hostNote); else if (!state.refusal) notice("");
-  } });
+  } }));
   state.mailbox = mailbox;
+  state.glue = glue;
   const viewer = state.viewer = createViewer($("remote-viewer"));
   state.host = createFrameHost({ blocked: sheetOpen, mount: $("remote-frame"), transport, scopes: SCOPES, start: "/", title: `Dashboard of ${state.labels.get(id) || "a workspace"}`,
     viewer: (v) => { if (isNeverPage(v?.path || "")) { state.refusal = NOT_REMOTE; notice(NOT_REMOTE); } else viewer.open(v); },

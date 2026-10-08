@@ -34,6 +34,7 @@ export function viewPlan(view, { markdown = false } = {}) {
 export const SCOPES = { rules: [
   { methods: ["GET"], pattern: "/" }, { methods: ["GET", "POST"], pattern: "/*" },
   { methods: ["GET"], pattern: "/events", stream: true }, { methods: ["GET"], pattern: "/api/events", stream: true },
+  { methods: ["GET"], pattern: "/terminals/stream", stream: true }, { methods: ["GET"], pattern: "/terminals/:name/stream", stream: true },
 ] };
 
 // A refusal is shown as the device's own fixed text for its code; nothing the host or the request said is echoed (§6.2).
@@ -50,6 +51,7 @@ export const REFUSAL_TEXT = Object.freeze({
   already_done: MESSAGES.outcomeUnknown,
   stale_timestamp: MESSAGES.clockWrong,
 });
+export const CHANGED_TEXT = "The confirmation was refused. The request may have changed while you were confirming; nothing was done.";
 export const refusalText = (code) => REFUSAL_TEXT[code] || "The computer refused the request.";
 export const HOST_SILENT = "The computer did not answer. Is it awake and running the workspace?";
 export const SIGNED_OUT = "You are signed out. Sign in again to open a workspace.";

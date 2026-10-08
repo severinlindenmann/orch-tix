@@ -94,6 +94,7 @@ class FakeHost:
         self.challenges: dict[str, dict] = {}    # challenge hex -> {device, expires_ms, rid, purpose}
         self.parked: dict[str, tuple] = {}       # rid hex -> (header, meta, data)
         self.leases: dict[str, int] = {}
+        self.lease_ms = 15 * 60_000
         self.lie_subject: str | None = None      # the refusal shows this text, the challenge was built from the real one
         self.refuse_registration = False         # True: credential_finish is refused
         self.audit: list[dict] = []              # one row per assert request: the verdict and the subject
@@ -267,10 +268,14 @@ class FakeHost:
             self.parked.pop(meta.get("for"), None)
             self._send(req, {"refusal": "assertion_failed"}, flags=ref.F_LAST | ref.F_REFUSAL)
             return
-        _, m1, m3 = self.parked.pop(meta["for"])
+        _, m1, d1 = self.parked.pop(meta["for"])
         if issued["purpose"] == "lease":
-            self.leases[did] = self._now() + 15 * 60_000
-        self._serve(req, m1, m3)
+            self.leases[did] = self._now() + self.lease_ms
+        self._serve(req, m1, d1)
+
+    def rule_for(self, req: ref.Header, meta: dict, data: bytes):
+        """The assertion rule for a request that ran past host_check, or None. A subclass (fake_terminal_host.py) adds routes."""
+        return self.requires.get(meta.get("path", "").split("?")[0])
 
     def _serve(self, req: ref.Header, meta: dict, data: bytes = b""):
         """Run a request that may run (also a parked one after its assertion): `req` is the header answered."""
@@ -323,12 +328,12 @@ class FakeHost:
                 return
             if meta.get("op") == "assert":
                 return self._assert(req, meta)
-            rule = self.requires.get(meta.get("path", "").split("?")[0])
             data = bytes.fromhex(res["data"])
+            rule = self.rule_for(req, meta, data)
             if callable(rule):                  # a rule that reads the request: (meta, body bytes) -> rule | None
                 rule = rule(meta, data)
             if rule and rule.get("refuse"):      # the host builds no subject (a stale hash, an unknown request): a plain refusal
                 return self._send(req, {"refusal": rule["refuse"]}, flags=ref.F_LAST | ref.F_REFUSAL)
-            if rule and not (rule.get("purpose") == "lease"and self.leases.get(req.device.hex(), 0) > self._now()):
+            if rule and not (rule.get("purpose") == "lease" and self.leases.get(req.device.hex(), 0) > self._now()):
                 return self._ask_assertion(req, meta, data, rule)
             self._serve(req, meta, data)
