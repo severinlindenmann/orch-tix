@@ -66,8 +66,12 @@ export function leaseGlue({ ask, say = () => {}, onLease = () => {}, now = Date.
           if (ev.type === "head" && ev.rid) { if (mine) streams.delete(mine); mine = ev.rid; streams.set(mine, String(req.path).split("?")[0]); }
           yield ev;
         }
+      } catch (e) {
+        gone(e);
+        throw e;
       } finally { if (mine) streams.delete(mine); }
     }
+    const gone = (e) => { if (DEAD.has(e?.code)) { dead = e.message; setLease(0); } };
     async function* typing(req, r) {
       const refuse = (text) => { say(text); throw new Error(text); };
       if (dead) refuse(dead);
@@ -81,7 +85,7 @@ export function leaseGlue({ ask, say = () => {}, onLease = () => {}, now = Date.
         }
       } catch (e) {
         unlockedAt = 0;
-        if (DEAD.has(e?.code)) { dead = e.message; setLease(0); }
+        gone(e);
         throw e;
       }
     }

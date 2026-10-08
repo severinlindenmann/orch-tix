@@ -228,6 +228,51 @@ error pages, titles) are drawn as text; `tests/js/frame-scope.test.mjs` checks t
 thrown `Error` whose message is shown as text. `fakeTransport(answer)` is the test fake. The real implementation follows
 redirects itself, reports the final path in `head.url`, and sets `head.page` from the host's signed reply.
 
+## Typing into a terminal (R6, the phone side)
+
+The computer lets a paired device type only under a **typing lease** (bridge-protocol.md section 9.4): a Face ID, Touch ID,
+Windows Hello or PIN confirmation, valid 15 minutes from the unlock, and given only to a request whose header names a
+stream **this device opened**. The routes are POST `/terminals/new`, `/terminals/<name>/keys`, `/size`, `/end`, and
+`/t/<ref>/agent/start`, `/quick/<id>/agent/start` (orch-core `LEASE_ROUTES`). `js/remote-lease.js` is the device's half; it
+sits between the frame host and the transport.
+
+- **`orchHost.remote`** is `true`, set by the shim (`frame-shim.js`), which only ever runs in the frame of a workspace
+  opened through the relay. It is a frozen property of a frozen object: the page cannot change it, and a page that says it
+  is remote itself only gets batching, nothing else. The dashboard batches its key posts when it is true: one post a
+  second, `{seq, page, n}`, one in flight, the same body and the same `n` for a post that did not arrive.
+- **The stream.** The shim's `EventSource` is a bridged stream request. The transport puts its request id on the `head`
+  event (`rid`); `remote-lease.js` keeps the ids of the streams that are open (until the stream ends or is closed) and
+  puts one in the header of a lease request (`streamRid`): the stream of that terminal (`/terminals/<name>/stream`) for
+  the routes of a terminal, any open stream for `new` and Start agent. The `assert` request that carries the proof names no
+  stream: the computer takes the stream from the request it parked.
+- **No stream open** (it dropped, or the page is on its snapshot fallback): nothing is sent. The person reads "Typing needs
+  the live screen." and the page keeps its keys and resends them, so they go out once the stream is back. The computer would
+  refuse such a request anyway (`assertion_failed`, orch-core issue 239); this is the same answer without a bridged request.
+- **The sheet.** `lease_required` on a lease route opens the unlock sheet once; after a confirmation the computer runs
+  the refused request itself, exactly once, and answers the `assert` request with its result. The key post is therefore
+  **not sent again** and its `n` is used once. Nothing times out while the sheet is open: the transport's first-chunk limit
+  starts again with the `assert` request, and the sheet ends by itself at the challenge's own expiry (about two minutes).
+  A refusal comes before the route runs, so it never takes a post number; a post resent after a cancelled sheet is new to
+  the computer and is run with its `n`.
+- **Cancelled, failed or expired sheet.** The post fails (the page resends it unchanged after a second). For 30 seconds
+  the transport neither sends it nor opens a new sheet (a resend every second would be a bridged request and a prompt every
+  second); the person reads "Typing is locked because it was not confirmed. Your keys are kept; you will be asked again in a
+  moment.", and after the 30 seconds the next resend asks again. A sheet that was already open (`busy`) is not a
+  cool-down. Keys typed meanwhile queue behind the post in the page, in order.
+- **Expiry.** After 15 minutes the computer answers `lease_required` again, and the same happens. `Typing unlocked until
+  HH:MM` (the `lease-note` line on the Remote page) is the confirmation time plus 15 minutes on this device's clock: it is
+  set when a post that followed a confirmation was answered, cleared at the next `lease_required`, on a revoke, when the
+  workspace is closed and when the time passes. It adds no protocol field; the computer's clock decides, this is an
+  indication, not a promise.
+- **Revoked, stopped, scope changed, not paired**: after one of these (also when it ends the stream) nothing more is sent
+  to that computer from this page; the fixed text for the code stays.
+- **What the phone guarantees, and what it does not.** It names only a stream this device opened and that is open, and for
+  a terminal's routes only that terminal's stream. It never types without the person's confirmation and never resends a
+  confirmed request. The page never names a stream: the frame host forwards only method, path, headers and body, and
+  `remote-lease.js` picks the stream. It does not make the computer bind the lease to one terminal: the computer accepts
+  any stream the device opened (orch-core issue 239), so for `new` and Start agent the phone names any open stream, and
+  the computer's own check is the only one there. The snapshot fallback does not give typing.
+
 ## Limits you should know
 
 - The shim and the dashboard page share one JavaScript realm. A hostile page can poison prototypes after the shim has

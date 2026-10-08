@@ -17,7 +17,7 @@ const tick = (ms = 5) => new Promise((r) => setTimeout(r, ms));
 // A session and a mailbox that answer from a script, and remember what was sent (meta, body, the stream the request names).
 function rig(script) {
   let n = 0;
-  const sent = [];
+  const sent = [], listeners = [];
   const session = {
     pending: new Map(),
     async request(args) {
@@ -29,10 +29,11 @@ function rig(script) {
     async receive() { return script.shift()(); },
   };
   const mailbox = {
-    async post(id, env, stream, listener) { queueMicrotask(() => listener.chunk({ env: new Uint8Array(1), mailbox: { id, idx: 0, last: !stream, stream: !!stream } })); },
+    async post(id, env, stream, listener) { listeners.push({ id, listener }); queueMicrotask(() => listener.chunk({ env: new Uint8Array(1), mailbox: { id, idx: 0, last: !stream, stream: !!stream } })); },
     async cancel() {}, close() {},
   };
-  return { session, mailbox, sent };
+  const deliver = (i, idx = 1) => listeners[i].listener.chunk({ env: new Uint8Array(1), mailbox: { id: listeners[i].id, idx, last: true, stream: true } });
+  return { session, mailbox, sent, deliver };
 }
 const lease = (code = "lease_required") => () => ({ result: "accept", rid: "x", last: true, refusal: true, meta: { refusal: code, purpose: "lease", scope: "type", expires_ms: 1, nonce: "0".repeat(64), subject: { kind: "lease", shown: "Type for 15 minutes", digest: "" } }, data: new Uint8Array(0) });
 const refuse = (code) => () => ({ result: "accept", rid: "x", last: true, refusal: true, meta: { refusal: code }, data: new Uint8Array(0) });
@@ -58,7 +59,7 @@ function setup(script, { ask, ...o } = {}) {
     r.script = null;
     const it = transport.request(STREAM(path))[Symbol.asyncIterator]();
     const head = await it.next();
-    return { rid: head.value.rid, close: () => it.return() };
+    return { rid: head.value.rid, close: () => it.return(), next: () => it.next() };
   };
   return { ...r, clock, log, glue, transport, watch };
 }
@@ -258,4 +259,25 @@ test("a stream request is passed through unchanged", async () => {
   assert.equal(s.sent[0].meta.path, "/events");
   assert.equal(s.sent[0].stream, null);
   await w.close();
+});
+
+test("the computer ending the stream with a revoke stops everything: nothing more is sent, the note is gone", async () => {
+  const s = setup([open, refuse("revoked")]);
+  const w = await s.watch();
+  s.glue.stop();
+  s.deliver(0);                                                       // the stream's last chunk is the revoke
+  await assert.rejects(w.next(), (e) => e.code === "revoked");
+  const n = s.sent.length;
+  await assert.rejects(collect(s.transport.request(KEYS())), (e) => /removed from that computer/.test(e.message));
+  assert.equal(s.sent.length, n);
+  assert.equal(s.log.leases.at(-1), null);
+});
+
+test("the scope table lets the frame open the terminal streams, and no other path as a stream", async () => {
+  const { compileScopes } = await import(new URL("frame-scope.js", JS));
+  const { SCOPES } = await import(new URL("remote-model.js", JS));
+  const sc = compileScopes(SCOPES);
+  for (const p of ["/terminals/stream", "/terminals/work/stream"]) assert.equal(sc.allows("GET", p, { stream: true }), true, p);
+  for (const p of ["/terminals/a/b/stream", "/terminals", "/t/DEMO-1/agent/start"]) assert.equal(sc.allows("GET", p, { stream: true }), false, p);
+  assert.equal(sc.allows("POST", "/terminals/work/keys"), true);
 });
