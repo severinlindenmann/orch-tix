@@ -1172,8 +1172,10 @@ def test_a_page_that_was_left_stops_everything_it_started_and_the_new_page_works
     assert page.evaluate("window.__portCount") == 2                          # Home was written into the first frame, A is the first page shown in a new one
     page.evaluate("document.querySelector('iframe.frame-dash').focus(); window.__oldPort = window.__port; window.__oldFrame = document.querySelector('iframe.frame-dash')")
     pongs = len([m for m in dash.ev("msgs") if m["t"] == "pong"])
+    page.evaluate("void (window.__onPortHook = () => { window.__onPortHook = null; window.__atHello = window.__fake.streams.map((s) => s.closed); })")
     dash.frame().locator("#to-b").click()
     dash.wait_title("B")
+    assert page.evaluate("window.__atHello") == [True, True]                  # its stream was cancelled before the next frame even said hello
     assert page.evaluate("window.__oldFrame.isConnected") is False and page.evaluate("window.__portCount") == 3
     assert page.evaluate("document.activeElement === document.querySelector('iframe.frame-dash')")      # keyboard focus follows the person
     stale = _stale_count(dash, "stale-a") + _stale_count(dash, "stale-keys")
@@ -1261,3 +1263,25 @@ def test_the_app_starting_a_page_while_another_is_being_shown_wins(dash, page):
     dash.wait_title("C")
     page.wait_for_timeout(800)
     assert dash.title() == "C" and page.evaluate("window.__host.current") == "/stale-c"
+
+
+def test_an_older_page_answer_that_arrives_first_is_dropped_and_a_rebuilt_frame_shows_what_the_host_knows(dash, page):
+    html = {"content-type": "text/html; charset=utf-8"}
+    _stale_pages(page)
+    _add_routes(page, {"/gate-a": {"body": "<!doctype html><h1>Gate A</h1>", "headers": html, "page": True, "gate": True},
+                       "/gate-b": {"body": "<!doctype html><h1>Gate B</h1>", "headers": html, "page": True, "gate": True}}, ["/gate-a", "/gate-b"])
+    dash.open()
+    dash.frame().evaluate("() => { orchHost.navigate('/gate-a'); orchHost.navigate('/gate-b'); }")
+    page.wait_for_function("() => ['/gate-a', '/gate-b'].every((p) => window.__fake.calls.some((c) => c.path === p))")
+    page.evaluate("window.__release('/gate-a')")                                # the older one answers first: not shown
+    page.wait_for_timeout(500)
+    assert dash.title() == "Home"
+    page.evaluate("window.__release('/gate-b')")
+    dash.wait_title("Gate B")
+    # a rebuild (the page set location) shows the page the host knows now, not the one the last swap carried
+    page.evaluate("window.__host.go('/stale-a')")
+    dash.wait_title("A")
+    dash.frame().locator("#to-b").click()
+    dash.wait_title("B")
+    dash.frame().evaluate("() => { orchHost.pageHistory.replace('/stale-c'); setTimeout(() => { location.href = location.origin + '/healthz'; }, 50); }")
+    dash.wait_title("C")
