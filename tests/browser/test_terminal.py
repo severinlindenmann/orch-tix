@@ -271,7 +271,7 @@ def test_without_an_open_stream_typing_is_refused_in_words_and_nothing_is_sent(t
 
 def test_a_new_session_is_a_fresh_assertion_with_its_own_text_and_names_no_stream(term):
     page, host, dev = term
-    frame_of(page).evaluate("window.startNew()")
+    frame_of(page).evaluate("() => { window.startNew(); }")
     expect(sheet(page)).to_be_visible(timeout=30000)
     expect(page.locator("#unlock-text")).to_have_text("Start a session")       # not the lease text
     assert host.posts == []

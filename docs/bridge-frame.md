@@ -312,7 +312,7 @@ and the transport.
   fragment, doubled, trailing and `.` segments and percent-escapes of plain characters are normalised (`normPath`). A page
   that posts again, with any spelling, gets the same answer with no request and no new sheet. A sheet that was already open
   (`busy`) is not remembered.
-- **A confirmed start the computer then refuses** with `assertion_failed` shows "The computer did not accept the confirmation.
+- **A confirmed start the computer then refuses** with `assertion_failed` shows "The confirmation was refused.
   The request may have changed while you were confirming; nothing was started." The computer adds no reason on the wire (its
   `why` is for its own log), so the phone infers it from the order: our own confirmation of a fresh action, then the plain
   refusal. A lease refusal keeps the plain text.
