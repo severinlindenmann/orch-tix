@@ -70,7 +70,7 @@ export function groupByMachine(spaces, labels = new Map()) {
     .map((g) => ({ ...g, spaces: g.spaces.sort((a, b) => byName(a.label, b.label)) }));
 }
 
-// The row's action: Open while the host answers, Snapshot otherwise. Both go to the same placeholder for now.
+// The row's action: Open (the live dashboard, /remote) while the host answers, Snapshot otherwise.
 export const actionFor = (s) => (s?.state === "online" ? "Open" : "Snapshot");
-export const openHref = (id) => `/workspaces?open=${encodeURIComponent(id)}`;
+export const openHref = (id, online) => `/${online ? "remote?space" : "workspaces?open"}=${encodeURIComponent(id)}`;
 export const SPACE_ID = /^[0-9a-f]{32}$/;

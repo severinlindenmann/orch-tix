@@ -3,16 +3,25 @@
 // its answer chunks are opened by the session (host signature against the pinned key, tag, order, window; §7).
 // A drop is never rendered. A refusal throws a fixed text (remote-model.js), never an echo. `page` comes only from the
 // host's signed reply meta. Redirects are followed here (a 3xx never reaches the frame) and only to a valid path.
+// Streams (docs/bridge-frame.md, "What the frame host guarantees"): chunk 0 is the head, then frames in order,
+// keepalives are not frames, LAST ends, `cancel` goes to the computer when the frame lets go, and a new stream for a
+// path waits its turn (every reconnect is a bridged request).
 import { F_STREAM } from "./bridge-crypto.js";
 import { hexToBytes } from "./crypto.js";
 import { validPath } from "./frame-scope.js";
 import { HOST_SILENT, SIGNED_OUT, refusalText } from "./remote-model.js";
-import { STREAM_SILENCE_MS } from "./bridge-session.js";
 
 export const FIRST_CHUNK_MS = 20_000;     // no first chunk: cancel and send the same bytes once more (§5.3), then give up
 export const CHUNK_MS = 60_000;           // between chunks of one page
+export const QUIET_MS = 40_000;           // a stream with no chunk, not even a keepalive (every 20 s), for this long: the computer is lost
+export const RECONNECT_MS = 10_000;       // a new stream for the same path at most this often, growing to RECONNECT_MAX_MS
+export const RECONNECT_MAX_MS = 60_000;   //   (every reconnect is a bridged request; the host's quota is about 1.1 a second)
+export const HEALTHY_MS = 60_000;         // a stream that lived this long was healthy: the back-off starts over
+export const MAX_QUEUED = 256;            // chunks waiting for a consumer that does not read: beyond this the stream is dropped
+const ENDS_STREAMS = new Set(["revoked", "not_paired", "stopped", "scope_changed"]);   // after these no stream is opened again
 const MAX_REDIRECTS = 5;
 const EMPTY = new Uint8Array(0);
+const SLOW = "The dashboard could not keep up with the computer. Reconnecting.";
 
 export class RefusalError extends Error {
   constructor(code) { super(refusalText(code)); this.name = "RefusalError"; this.code = code; }
@@ -24,8 +33,10 @@ function queue() {
   let wake = null;
   return {
     push: (v) => { items.push(v); wake?.(); },
+    size: () => items.length,
+    reset: () => { items.length = 0; },
     async next(ms, signal) {
-      if (!items.length) {
+      if (!items.length && !signal?.aborted) {
         await new Promise((resolve) => {
           const t = setTimeout(resolve, ms), done = () => { clearTimeout(t); signal?.removeEventListener("abort", done); wake = null; resolve(); };
           wake = done;
@@ -37,13 +48,25 @@ function queue() {
   };
 }
 
-// opts: session (DeviceSession), mailbox, onRefusal(code, text), onEvent(name) for tests.
-export function bridgeTransport({ session, mailbox, onRefusal = () => {}, firstChunkMs = FIRST_CHUNK_MS, chunkMs = CHUNK_MS }) {
+const sleep = (ms, signal) => new Promise((resolve) => {
+  const done = () => { clearTimeout(t); signal?.removeEventListener("abort", done); resolve(); };
+  const t = setTimeout(done, ms);
+  signal?.addEventListener("abort", done);
+});
+
+// opts: session (DeviceSession), mailbox, onRefusal(code, text), and onHost("lost") when the computer stopped answering,
+// onHost("waiting", ms) while a reconnect waits its turn, onHost("ok") when it answers again. The rest are timings (tests).
+export function bridgeTransport({ session, mailbox, onRefusal = () => {}, onHost = () => {}, firstChunkMs = FIRST_CHUNK_MS, chunkMs = CHUNK_MS,
+  quietMs = QUIET_MS, reconnectMs = RECONNECT_MS, reconnectMax = RECONNECT_MAX_MS, healthyMs = HEALTHY_MS, now = Date.now }) {
+  let note = null, ended = null;          // note: what onHost last said, until the next answer
+  const gates = new Map();             // stream path -> {start, delay, fails}
+
   async function* exchange({ method, path, headers, body, stream, signal }) {
     const args = { meta: { op: "http", method, path, headers }, data: body || EMPTY, flags: stream ? F_STREAM : 0 };
     for (let round = 0; round < 3; round++) {            // a second and third round only for a resend the host asked for
       const q = queue();
-      const listener = { chunk: (c) => q.push(c), fail: (e) => q.push({ error: e }) };
+      const listener = { chunk: (c) => { if (q.size() >= MAX_QUEUED) { q.reset(); q.push({ slow: true }); } else q.push(c); },
+        fail: (e) => q.push({ error: e }) };
       let sent = await session.request(args), finished = false, retried = false, resend = false, first = true;
       const abort = () => {
         mailbox.cancel(sent.id);
@@ -53,16 +76,17 @@ export function bridgeTransport({ session, mailbox, onRefusal = () => {}, firstC
       try {
         try { await mailbox.post(sent.id, sent.envelope, stream, listener); } catch (e) { throw mailboxProblem(e); }
         for (;;) {
-          const c = await q.next(first ? firstChunkMs : stream ? STREAM_SILENCE_MS : chunkMs, signal);
+          const c = await q.next(first ? firstChunkMs : stream ? quietMs : chunkMs, signal);
           if (signal?.aborted) return;
           if (c === null) {
-            if (stream && !first) { session.expire(); throw new Error(HOST_SILENT); }
+            if (stream && !first) { session.pending?.delete(sent.id); cancelStream(sent.id); throw new Error(HOST_SILENT); }
             if (!first || retried) throw new Error(HOST_SILENT);
             retried = true;                                // the same bytes, after giving the first post up
             await mailbox.cancel(sent.id);
             await mailbox.post(sent.id, session.retry(sent.id), stream, listener).catch((e) => { throw mailboxProblem(e); });
             continue;
           }
+          if (c.slow) { cancelStream(sent.id); throw new Error(SLOW); }
           if (c.error) throw mailboxProblem(c.error);
           const r = await session.receive(c.env, c.mailbox);
           if (r.result === "drop") {
@@ -102,29 +126,70 @@ export function bridgeTransport({ session, mailbox, onRefusal = () => {}, firstC
     } catch { /* the stream is closed on this side either way */ }
   }
 
-  return {
-    async *request(req) {
-      let { method, path, body } = req;
-      for (let hops = 0; ; hops++) {
-        const it = exchange({ method, path, headers: req.headers, body, stream: req.stream, signal: req.signal });
-        let redirect = null;
-        for await (const ev of it) {
-          if (ev.type === "head" && !req.stream && [301, 302, 303, 307, 308].includes(ev.status)) {
-            const loc = validPath(ev.headers.location);
-            if (!loc || hops >= MAX_REDIRECTS) throw new Error("The computer sent the page somewhere this app will not follow.");
-            redirect = loc;                                // ponytail: once SCOPES is narrowed, the target must pass scopes.allows too
-            continue;                                      // drain the redirect's own body
-          }
-          if (redirect) continue;
-          yield hops && ev.type === "head" ? { ...ev, url: path } : ev;
+  async function* redirecting(req) {
+    let { method, path, body } = req;
+    for (let hops = 0; ; hops++) {
+      const it = exchange({ method, path, headers: req.headers, body, stream: req.stream, signal: req.signal });
+      let redirect = null;
+      for await (const ev of it) {
+        if (ev.type === "head" && !req.stream && [301, 302, 303, 307, 308].includes(ev.status)) {
+          const loc = validPath(ev.headers.location);
+          if (!loc || hops >= MAX_REDIRECTS) throw new Error("The computer sent the page somewhere this app will not follow.");
+          redirect = loc;                                // ponytail: once SCOPES is narrowed, the target must pass scopes.allows too
+          continue;                                      // drain the redirect's own body
         }
-        if (!redirect) return;
-        path = redirect;                                   // ponytail: every redirect becomes a GET, also a 307/308
-        method = "GET";
-        body = null;
+        if (redirect) continue;
+        yield hops && ev.type === "head" ? { ...ev, url: path } : ev;
       }
-    },
-  };
+      if (!redirect) return;
+      path = redirect;                                   // ponytail: every redirect becomes a GET, also a 307/308
+      method = "GET";
+      body = null;
+    }
+  }
+
+  // Says "lost" once when the computer stops answering and "ok" when the next answer arrives.
+  async function* plain(req) {
+    try {
+      for await (const ev of redirecting(req)) {
+        if (ev.type === "head" && note) { note = null; onHost("ok"); }
+        yield ev;
+      }
+    } catch (e) {
+      if (e?.message === HOST_SILENT && note !== "lost") { note = "lost"; onHost("lost"); }
+      throw e;
+    }
+  }
+
+  // A stream is never opened again after a refusal that ended it for good. Otherwise one per path per `delay`: 10, 20,
+  // 40, 60 s while the ones before died young, and from the start again after one that lived a minute. A stream the
+  // frame closed itself changes nothing.
+  async function* stream(req) {
+    if (ended) { onRefusal(ended, refusalText(ended)); throw new RefusalError(ended); }
+    let g = gates.get(req.path);
+    if (g && g.start + g.delay > now()) {
+      note = "waiting";
+      onHost("waiting", g.start + g.delay - now());
+      await sleep(g.start + g.delay - now(), req.signal);
+      if (req.signal?.aborted) return;
+    }
+    if (!g) gates.set(req.path, g = { start: 0, delay: reconnectMs, fails: 0 });
+    g.start = now();
+    try {
+      yield* plain(req);
+    } catch (e) {
+      if (ENDS_STREAMS.has(e?.code)) ended = e.code;
+      throw e;
+    } finally {
+      if (!req.signal?.aborted) {
+        const healthy = now() - g.start >= healthyMs;
+        g.fails = healthy ? 0 : g.fails + 1;
+        g.delay = healthy ? reconnectMs : Math.min(reconnectMax, reconnectMs * 2 ** (g.fails - 1));
+      }
+    }
+  }
+
+  return { request: (req) => (req.stream ? stream(req) : plain(req)) };
 }
 
 function mailboxProblem(e) {

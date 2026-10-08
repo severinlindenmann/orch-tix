@@ -321,7 +321,9 @@ export function createFrameHost(opts) {
         } else if (ev.type === "chunk") send({ t: "sdata", id: req.id, gen: req.gen, chunk: decoder.decode(ev.data, { stream: true }) });
         else if (ev.type === "end") break;
       }
-    } catch { /* the stream ends below */ }
+    } catch (e) {   // the stream ends below; a refusal was already said by the transport, anything else is said once, as text
+      if (!ac.signal.aborted && !e?.code) notice({ kind: "error", text: String(e?.message || "the stream failed").slice(0, 200) });
+    }
     if (!ac.signal.aborted) send({ t: "send", id: req.id, gen: req.gen });
     inflight.delete(req.id);
     streams.delete(req.id);
