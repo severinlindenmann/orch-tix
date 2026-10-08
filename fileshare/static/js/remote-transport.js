@@ -16,6 +16,8 @@ export const CHUNK_MS = 60_000;           // between chunks of one page
 export const QUIET_MS = 40_000;           // a stream with no chunk, not even a keepalive (every 20 s), for this long: the computer is lost
 export const RECONNECT_MS = 10_000;       // a new stream for the same path at most this often, growing to RECONNECT_MAX_MS
 export const RECONNECT_MAX_MS = 60_000;   //   (every reconnect is a bridged request; the host's quota is about 1.1 a second)
+export const FLOOR_MS = 2_000;           // once any stream has failed, no two stream opens (any path) closer than this
+export const MAX_GATES = 64;              // paths remembered
 export const HEALTHY_MS = 60_000;         // a stream that lived this long was healthy: the back-off starts over
 export const MAX_QUEUED = 256;            // chunks waiting for a consumer that does not read: beyond this the stream is dropped
 const ENDS_STREAMS = new Set(["revoked", "not_paired", "stopped", "scope_changed"]);   // after these no stream is opened again
@@ -57,9 +59,10 @@ const sleep = (ms, signal) => new Promise((resolve) => {
 // opts: session (DeviceSession), mailbox, onRefusal(code, text), and onHost("lost") when the computer stopped answering,
 // onHost("waiting", ms) while a reconnect waits its turn, onHost("ok") when it answers again. The rest are timings (tests).
 export function bridgeTransport({ session, mailbox, onRefusal = () => {}, onHost = () => {}, firstChunkMs = FIRST_CHUNK_MS, chunkMs = CHUNK_MS,
-  quietMs = QUIET_MS, reconnectMs = RECONNECT_MS, reconnectMax = RECONNECT_MAX_MS, healthyMs = HEALTHY_MS, now = Date.now }) {
+  quietMs = QUIET_MS, reconnectMs = RECONNECT_MS, reconnectMax = RECONNECT_MAX_MS, healthyMs = HEALTHY_MS, floorMs = FLOOR_MS, now = Date.now }) {
   let note = null, ended = null;          // note: what onHost last said, until the next answer
-  const gates = new Map();             // stream path -> {start, delay, fails}
+  const gates = new Map();             // stream path (no query) -> {start, delay, fails}
+  let lastOpen = 0, failed = false;    // when any stream last opened; whether any has failed
 
   async function* exchange({ method, path, headers, body, stream, signal }) {
     const args = { meta: { op: "http", method, path, headers }, data: body || EMPTY, flags: stream ? F_STREAM : 0 };
@@ -86,7 +89,7 @@ export function bridgeTransport({ session, mailbox, onRefusal = () => {}, onHost
             await mailbox.post(sent.id, session.retry(sent.id), stream, listener).catch((e) => { throw mailboxProblem(e); });
             continue;
           }
-          if (c.slow) { cancelStream(sent.id); throw new Error(SLOW); }
+          if (c.slow) { session.pending?.delete(sent.id); cancelStream(sent.id); throw new Error(SLOW); }
           if (c.error) throw mailboxProblem(c.error);
           const r = await session.receive(c.env, c.mailbox);
           if (r.result === "drop") {
@@ -105,6 +108,7 @@ export function bridgeTransport({ session, mailbox, onRefusal = () => {}, onHost
             if (!Number.isInteger(m.status) || m.status < 100 || m.status > 599) throw new Error("The computer sent an answer this app cannot read.");
             const h = {};
             for (const [k, v] of Object.entries(m.headers && typeof m.headers === "object" ? m.headers : {})) if (typeof v === "string") h[k.toLowerCase()] = v;
+            if (stream && (m.status !== 200 || !(h["content-type"] || "").startsWith("text/event-stream"))) { cancelStream(sent.id); throw new Error("The computer did not answer with a stream."); }
             yield { type: "head", status: m.status, headers: h, page: m.page === true };
           }
           if (r.data?.length) yield { type: "chunk", data: r.data };
@@ -166,15 +170,20 @@ export function bridgeTransport({ session, mailbox, onRefusal = () => {}, onHost
   // frame closed itself changes nothing.
   async function* stream(req) {
     if (ended) { onRefusal(ended, refusalText(ended)); throw new RefusalError(ended); }
-    let g = gates.get(req.path);
-    if (g && g.start + g.delay > now()) {
+    const key = req.path.split("?")[0];
+    let g = gates.get(key);
+    const until = Math.max(g ? g.start + g.delay : 0, failed ? lastOpen + floorMs : 0);
+    if (until > now()) {
       note = "waiting";
-      onHost("waiting", g.start + g.delay - now());
-      await sleep(g.start + g.delay - now(), req.signal);
+      onHost("waiting", until - now());
+      await sleep(until - now(), req.signal);
       if (req.signal?.aborted) return;
     }
-    if (!g) gates.set(req.path, g = { start: 0, delay: reconnectMs, fails: 0 });
-    g.start = now();
+    if (!g) {
+      if (gates.size >= MAX_GATES) gates.delete(gates.keys().next().value);
+      gates.set(key, g = { start: 0, delay: reconnectMs, fails: 0 });
+    }
+    g.start = lastOpen = now();
     try {
       yield* plain(req);
     } catch (e) {
@@ -183,6 +192,7 @@ export function bridgeTransport({ session, mailbox, onRefusal = () => {}, onHost
     } finally {
       if (!req.signal?.aborted) {
         const healthy = now() - g.start >= healthyMs;
+        if (!healthy) failed = true;
         g.fails = healthy ? 0 : g.fails + 1;
         g.delay = healthy ? reconnectMs : Math.min(reconnectMax, reconnectMs * 2 ** (g.fails - 1));
       }

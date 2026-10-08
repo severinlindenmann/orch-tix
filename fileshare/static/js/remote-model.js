@@ -22,6 +22,7 @@ export function viewPlan(view, { markdown = false } = {}) {
   const name = fileName(view);
   let kind = previewKind({ name, mime: (view.headers || {})["content-type"] });
   if (kind.kind === "markdown" && !markdown) kind = { kind: "text" };   // the markdown renderer is the files page's library
+  if (kind.kind === "audio" && !/^audio\/[a-z0-9.+-]{1,30}$/.test(kind.type)) kind = { kind: "none" };   // a sender's type only as a plain token
   if (kind.kind === "none") return { name, reason: "none" };
   if (view.body.length > (kind.kind === "image" || kind.kind === "audio" ? MEDIA_MAX : VIEW_MAX)) return { name, reason: "large" };
   return { name, kind };

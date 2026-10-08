@@ -19,7 +19,7 @@ export function createViewer(mount) {
       : el("p", { class: "preview-msg" }, plan.reason === "large" ? "This file is too large to show here." : "This file cannot be shown here.");
     const done = el("button", { class: "btn", type: "button", onclick: close }, "Close");
     mount.append(el("section", { class: "card remote-viewer", role: "group", "aria-label": "File from the dashboard" },
-      el("h2", {}, plan.name), body, el("div", { class: "row" }, save, done)));
+      el("h2", {}, `From the dashboard: ${plan.name}`), body, el("div", { class: "row" }, save, done)));
     done.focus();
   }
 

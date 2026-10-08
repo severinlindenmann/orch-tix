@@ -243,8 +243,10 @@ needs from the device side). `js/frame-host.js` and `js/remote-transport.js` tog
 - **Reconnects back off.** Every reconnect is a bridged request and the host's quota is about 1.1 requests a second. A new
   stream for a path waits until 10 s after the previous one for that path started; each stream that dies young (under 60 s)
   doubles the wait: 10, 20, 40, 60 s. One that lived a minute starts it over. A stream the page closed itself changes
-  nothing. The wait is shown ("Reconnecting to the computer in N s") and costs no request. The page's own reconnect code is
-  held to this too, because the gate is in the transport.
+  nothing. The path is taken without its query string (64 paths are remembered), and once any stream has failed no stream
+  for any path opens less than 2 s after the previous one. The wait is shown ("Reconnecting to the computer in N s") and costs no request. The page's own reconnect code is
+  held to this too, because the gate is in the transport. A stream whose answer is not a 200 `text/event-stream` is cancelled at the
+  computer.
 - **After a refusal that ends a stream for good** (`revoked`, `not_paired`, `stopped`, `scope_changed`) this transport opens
   no stream again (zero requests); the fixed text is shown. Other refusals (`busy`) are not final.
 - **Backpressure.** More than 256 chunks waiting for a consumer that is not reading drops the stream, cancels it and leaves
@@ -258,7 +260,7 @@ needs from the device side). `js/frame-host.js` and `js/remote-transport.js` tog
 (`frame-host.js`); a download is then shown in a question (name and size) and saved on its button. The viewer uses the file
 view's renderers (`render.js`): text through `textContent`, JSON as text, an image or audio file from a blob URL, Markdown
 as text (the renderer library belongs to the files page). **HTML and SVG are never shown**, by name or by type
-(`previewKind`); the person can only save them. Caps: 2 MiB for text, 8 MiB for an image or audio file, which is also the
+(`previewKind`); the person can only save them. The panel is headed "From the dashboard: <name>" and the download question shows the same sanitised name that is saved; an audio type is used only as a plain token. Caps: 2 MiB for text, 8 MiB for an image or audio file, which is also the
 frame host's whole answer cap and the download cap. Nothing of the file runs; the panel holds no script and no frame.
 
 ## Limits you should know

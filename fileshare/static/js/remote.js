@@ -17,7 +17,7 @@ import { deviceId } from "./bridge-crypto.js";
 import { hexToBytes } from "./crypto.js";
 import { createMailbox } from "./remote-mailbox.js";
 import { bridgeTransport } from "./remote-transport.js";
-import { SCOPES, canOpen, hostMessage, HOST_SILENT } from "./remote-model.js";
+import { SCOPES, canOpen, fileName, hostMessage, HOST_SILENT } from "./remote-model.js";
 import { createViewer } from "./remote-view.js";
 
 const REFRESH_MS = 10_000;
@@ -86,16 +86,18 @@ async function select(state, id) {
   if (!session || !canOpen(s, true)) { render(state); notice(session ? hostMessage(s?.state) : "This browser is not paired with this workspace."); return; }
   const mailbox = createMailbox(id);
   const transport = bridgeTransport({ session, mailbox, onRefusal: (code, text) => {
+    if (state.selected !== id) return;                       // a workspace we have left says nothing here
     state.refusal = text; notice(text);
     if (code === "not_paired") forgetWorkspace(id).then(() => { state.paired.set(id, false); render(state); }).catch(() => {});   // the host does not know us
   }, onHost: (what, ms) => {
+    if (state.selected !== id) return;
     state.hostNote = what === "lost" ? HOST_SILENT : what === "waiting" ? `Reconnecting to the computer in ${Math.ceil(ms / 1000)} s.` : null;
     if (state.hostNote) notice(state.hostNote); else if (!state.refusal) notice("");
   } });
   state.mailbox = mailbox;
   const viewer = state.viewer = createViewer($("remote-viewer"));
   state.host = createFrameHost({ mount: $("remote-frame"), transport, scopes: SCOPES, start: "/", title: `Dashboard of ${state.labels.get(id) || "a workspace"}`,
-    viewer: viewer.open, download: viewer.download,
+    viewer: viewer.open, download: viewer.download, fileName,
     notice: (n) => { if (n.text) notice(n.text); } });
   render(state);
 }

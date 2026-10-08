@@ -497,3 +497,44 @@ def test_the_status_page_opens_an_online_workspace_in_the_live_view(signed_in, l
     signed_in.get_by_role("link", name="Open Acme Energy").click()
     wait_h1(signed_in, "Home dashboard")
     assert signed_in.url == f"{live_server.url}/remote?space={host.space}"
+
+
+LONG = "a" * 130 + ".pdf.html"
+FILES["/f/long"] = {"status": 200, "headers": {"content-type": "application/octet-stream", "content-disposition": f'attachment; filename="{LONG}"'}, "body": b"xyz"}
+FILES["/"]["body"] = FILES["/"]["body"].replace("</body>", '<a id="long" href="/f/long">l</a></body>')
+
+
+def test_the_download_question_shows_the_name_that_is_saved(signed_in, live_server, make_host):
+    host = make_host(pages=FILES)
+    pair(signed_in, live_server, host)
+    signed_in.goto(f"{live_server.url}/remote?space={host.space}")
+    wait_h1(signed_in, "Home dashboard")
+    frame_of(signed_in).locator("#long").click()
+    prompt = signed_in.locator(".frame-prompt")
+    expect(prompt).to_contain_text(f"{LONG} (3 bytes)", timeout=30000)
+    with signed_in.expect_download() as dl:
+        prompt.get_by_role("button", name="Download").click()
+    assert dl.value.suggested_filename == LONG
+
+
+def test_the_viewer_says_the_file_is_from_the_dashboard(signed_in, live_server, make_host):
+    host = make_host(pages=FILES)
+    pair(signed_in, live_server, host)
+    signed_in.goto(f"{live_server.url}/remote?space={host.space}")
+    wait_h1(signed_in, "Home dashboard")
+    frame_of(signed_in).locator("#txt").click()
+    expect(signed_in.locator(".remote-viewer h2")).to_have_text("From the dashboard: notes.txt", timeout=30000)
+
+
+def test_a_page_that_navigates_by_script_without_a_click_opens_nothing_outside_the_frame(signed_in, live_server, make_host):
+    host = make_host(pages=FILES)
+    pair(signed_in, live_server, host)
+    signed_in.goto(f"{live_server.url}/remote?space={host.space}")
+    wait_h1(signed_in, "Home dashboard")
+    # the driver's own scripts switch user activation on for about five seconds, so the page waits it out and acts by itself
+    frame_of(signed_in).evaluate("() => { setTimeout(() => window.orchHost.navigate('/f/notes.txt'), 6500); setTimeout(() => window.orchHost.navigate('/f/data.bin'), 8500); }")
+    signed_in.wait_for_timeout(11000)
+    assert signed_in.locator(".remote-viewer").count() == 0
+    assert signed_in.locator(".frame-prompt").count() == 0
+    frame_of(signed_in).locator("#txt").click()                       # a real click does
+    expect(signed_in.locator(".remote-viewer")).to_contain_text("hello", timeout=30000)

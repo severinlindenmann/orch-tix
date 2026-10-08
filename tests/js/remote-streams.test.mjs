@@ -21,7 +21,7 @@ function rig(script) {
   const requests = [], posted = [], cancelled = [], listeners = [];
   const session = {
     pending: new Map(),
-    async request(args) { const id = (++n).toString(16).padStart(32, "0"); requests.push({ id, ...args }); return { id, envelope: new Uint8Array([n]) }; },
+    async request(args) { const id = (++n).toString(16).padStart(32, "0"); requests.push({ id, ...args }); this.pending.set(id, {}); return { id, envelope: new Uint8Array([n]) }; },
     retry: () => new Uint8Array([9]),
     async receive(env, mb) { return script.shift()(env, mb); },
   };
@@ -40,7 +40,7 @@ const KEEP = accept({ keepalive: true });
 const LAST = accept({}, "", true);
 const refuse = (code) => () => ({ result: "accept", rid: "x", last: true, refusal: true, meta: { refusal: code }, data: new Uint8Array(0) });
 const REQ = (extra = {}) => ({ method: "GET", path: "/events", headers: {}, body: null, stream: true, signal: new AbortController().signal, ...extra });
-const FAST = { reconnectMs: 40, reconnectMax: 160, healthyMs: 40, quietMs: 60 };
+const FAST = { reconnectMs: 40, reconnectMax: 160, healthyMs: 40, quietMs: 60, floorMs: 0 };
 
 async function until(fn, ms = 1000) { const t = Date.now(); while (!fn()) { if (Date.now() - t > ms) throw new Error("timeout"); await sleep(2); } }
 
@@ -245,4 +245,105 @@ test("a file name comes from the header or the path and is made safe", () => {
   assert.equal(M.fileName(view("/f/x", { "content-disposition": 'attachment; filename="../../etc/pass wd.txt"' })), "pass wd.txt");
   assert.equal(M.fileName(view("/f/x", { "content-disposition": "attachment; filename*=UTF-8''a%20b.txt" })), "a b.txt");
   assert.equal(M.fileName(view("/f/x", { "content-disposition": "attachment; filename=%E0%A4%A.txt" })), "%E0%A4%A.txt", "a broken escape does not throw");
+});
+
+// ---- review follow-ups: keys, floor, cap, pending, wrong type, not-a-failure, the default silence limit ------------------------
+
+const cycle = async (t, r, path, extra = {}) => {      // one short stream: open, head, LAST
+  const n = r.listeners.length;
+  const run = (async () => { for await (const e of t.request(REQ({ path, ...extra }))) { void e; } })();
+  await until(() => r.listeners.length === n + 1, 3000);
+  const at = r.posted.at(-1).at;
+  r.feed(2);
+  await run;
+  return at;
+};
+
+test("the back-off is keyed on the path without its query; another path waits for the floor after a failure", async () => {
+  const r = rig([...Array(8)].flatMap(() => [HEAD, LAST]));
+  const t = T.bridgeTransport({ ...r, ...FAST, reconnectMs: 60, floorMs: 80 });
+  const a = await cycle(t, r, "/events?1");
+  const b = await cycle(t, r, "/events?2");
+  assert.ok(b - a >= 55, `a new query is the same path: ${b - a}`);
+  const c = await cycle(t, r, "/other");
+  assert.ok(c - b >= 75, `a different path still waits for the floor: ${c - b}`);
+});
+
+test("a path whose gate was dropped (more than MAX_GATES paths) is not held back", async () => {
+  const n = T.MAX_GATES + 2;
+  const r = rig([...Array(n + 1)].flatMap(() => [HEAD, LAST]));
+  const t = T.bridgeTransport({ ...r, ...FAST, reconnectMs: 400 });
+  await cycle(t, r, "/p0");
+  for (let i = 1; i < n; i++) await cycle(t, r, `/p${i}`);
+  const t0 = Date.now();
+  const at = await cycle(t, r, "/p0");
+  assert.ok(at - t0 < 100, `forgotten: ${at - t0}`);
+});
+
+test("the slow-consumer path forgets the pending request; a stream with another type is cancelled at the computer", async () => {
+  const r = rig([HEAD, ...Array(400).fill(frame("data: x\n\n"))]);
+  const it = T.bridgeTransport({ ...r, ...FAST, quietMs: 1000 }).request(REQ())[Symbol.asyncIterator]();
+  const first = it.next();
+  await until(() => r.listeners.length === 1);
+  r.feed(1);
+  await first;
+  const second = it.next();
+  r.feed(T.MAX_QUEUED + 50);
+  await assert.rejects(second, /could not keep up/);
+  assert.equal(r.session.pending.has(r.requests[0].id), false);
+  const w = rig([accept({ status: 200, headers: { "Content-Type": "text/html" } })]);
+  const run = (async () => { for await (const e of T.bridgeTransport({ ...w, ...FAST }).request(REQ())) { void e; } })();
+  await until(() => w.listeners.length === 1);
+  w.feed(1);
+  await assert.rejects(run, /did not answer with a stream/);
+  await until(() => w.requests.some((q) => q.meta.op === "cancel"));
+});
+
+test("a mailbox error is not a final refusal: the next stream opens", async () => {
+  const r = rig([HEAD, HEAD, LAST]);
+  const t = T.bridgeTransport({ ...r, ...FAST, reconnectMs: 5, reconnectMax: 10 });
+  const run = (async () => { for await (const e of t.request(REQ())) { void e; } })();
+  await until(() => r.listeners.length === 1);
+  r.feed(1);
+  r.listeners[0].fail(Object.assign(new Error("net"), { status: 500 }));
+  await assert.rejects(run, (e) => e.message === M.HOST_SILENT);
+  await cycle(t, r, "/events");
+});
+
+test("a stream the page closed itself is not a failure: early closes in a row wait only the base", async () => {
+  const r = rig([...Array(6)].flatMap(() => [HEAD]));
+  const t = T.bridgeTransport({ ...r, ...FAST, reconnectMs: 40, reconnectMax: 400 });
+  const starts = [];
+  for (let i = 0; i < 4; i++) {
+    const ac = new AbortController();
+    const run = (async () => { for await (const e of t.request(REQ({ signal: ac.signal }))) { void e; } })();
+    await until(() => r.listeners.length === i + 1, 3000);
+    starts.push(Date.now());
+    r.feed(1);
+    await sleep(5);
+    ac.abort();
+    await run;
+  }
+  assert.ok(starts[3] - starts[2] < 90, `the fourth opens after the base wait, not a grown one: ${starts[3] - starts[2]}`);
+});
+
+test("the silence limit is 40 s, not 60: the default, with the clock mocked", async (ctx) => {
+  assert.equal(T.QUIET_MS, 40_000);
+  ctx.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const r = rig([HEAD, frame("data: 1\n\n")]);
+  const run = (async () => { for await (const e of T.bridgeTransport({ session: r.session, mailbox: r.mailbox }).request(REQ())) { void e; } })();
+  const out = run.then(() => "done", (e) => e.message);
+  for (let i = 0; i < 20 && !r.listeners.length; i++) await Promise.resolve();
+  r.feed(2);
+  for (let i = 0; i < 50; i++) await Promise.resolve();
+  ctx.mock.timers.tick(39_000);
+  for (let i = 0; i < 50; i++) await Promise.resolve();
+  assert.equal(await Promise.race([out, Promise.resolve("pending")]), "pending", "not yet at 39 s");
+  ctx.mock.timers.tick(1_500);
+  assert.equal(await out, M.HOST_SILENT);
+});
+
+test("an audio type that is not a plain token is not played; the plain ones are", () => {
+  assert.equal(M.viewPlan(view("/f/a.mp3", { "content-type": "audio/é" })).reason, "none");
+  assert.equal(M.viewPlan(view("/f/a.mp3", { "content-type": "audio/mpeg" })).kind.type, "audio/mpeg");
 });
