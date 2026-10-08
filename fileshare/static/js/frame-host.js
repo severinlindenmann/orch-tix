@@ -8,7 +8,11 @@
 // origin, carrying the one-time token written into the document it asked for. The host answers with ONE MessagePort
 // (ready) and everything else, both ways, travels on that port. A document that replaced the shim's (a navigation the
 // shim did not start, a page that sets location) never holds the port: it cannot speak to the host and cannot listen.
-// Window messages other than a valid hello are dropped. A heartbeat over the port rebuilds the iframe when it stops
+// Window messages other than a valid hello are dropped. A document that has been replaced is destroyed, not overwritten
+// (orch-core#328): a document write keeps the window, so the old page's timers, retries, streams and closures would go on
+// running as the new page. So every page after the first is shown in a NEW iframe: the host takes the answer for a page
+// request, tears the old frame down (streams cancelled first, port closed) and hands the page to the new frame's shim
+// after its hello. A heartbeat over the port rebuilds the iframe when it stops
 // answering, whatever the iframe's load events did, and any load the app did not start rebuilds it at once.
 import { el, shown } from "./ui.js";
 import { PROTOCOL, BODY_MAX, checkRequest, compileScopes, validPath } from "./frame-scope.js";
@@ -28,6 +32,9 @@ export const LIMITS = {
   promptDelayMs: 500,    // a click on a question's button counts only this long after it appeared
   gestureGapMs: 1000,    // one action that needs a user gesture per this long
   rebuilds: 5,           // rebuilds per minute before the frame is left stopped
+  swaps: 60,             // pages shown in a new frame per minute (a page that navigates in a loop gets refused answers)
+  assetEntries: 128,     // assets kept by the host across frames (the new frame of each page would fetch them again)
+  assetBytes: 24 * 1024 * 1024,
   helloMs: 6000,         // the shim must say hello within this
   pingMs: 1000,          // heartbeat: a ping over the port every second; the frame is rebuilt when two in a row go unanswered (about 2 s)
   writeLoads: 2,         // loads one document write of the shim may cause (Chromium and WebKit fire one more)
@@ -88,6 +95,12 @@ export function createFrameHost(opts) {
   let graceTimer = null;
   let writeLoads = 0;
   let writeUntil = 0;
+  let fresh = true;        // the frame holds no page yet (its own skeleton): the first page is written into it
+  let pendingShow = null;  // the page the next frame shows once it has said hello
+  let newestPage = 0;      // the newest page request of this frame: an older answer is dropped
+  const swaps = [];
+  const assets = new Map();          // path -> {status, headers, url, body}; the answers to the shim's asset requests
+  let assetSize = 0;
   let loadsExpected = 0;   // the load of the document this host asked for
   let flooding = false;
   let current = opts.start || "/";
@@ -161,15 +174,17 @@ export function createFrameHost(opts) {
     if (opts.tap) opts.tap(msg);
   }
 
-  function build() {
+  function build(keepHistory) {
     tok = randomToken();
+    fresh = true;
+    newestPage = 0;                  // request ids restart in a new frame
     port = null;
     awaiting = false;
     missed = 0;
     writeLoads = 0;
     writeUntil = 0;
     loadsExpected = 1;
-    histBack = histFwd = 0;
+    if (!keepHistory) histBack = histFwd = 0;
     windowStart = windowCount = overSeconds = 0;
     frame = el("iframe", { class: "frame-dash", sandbox: "allow-scripts", referrerpolicy: "no-referrer", loading: "eager",
       title: opts.title || "Dashboard", src: `/sandbox/dash?tok=${tok}` });
@@ -179,14 +194,33 @@ export function createFrameHost(opts) {
     helloTimer = setTimeout(() => rebuild("no hello"), limits.helloMs);
   }
 
-  function rebuild(reason) {
-    if (destroyed) return;
+  // The old document ends here: its streams are cancelled first, then the channel is closed and the iframe removed, which
+  // destroys the browsing context with every timer, retry and closure the page had.
+  function retire() {
     clearTimers();
     abortAll();
     closePrompt(false);
     if (port) { port.onmessage = null; port.close(); port = null; }
     frame?.remove();
     frame = null;
+  }
+
+  // A page answer for a frame that already shows a page: show it in a new frame (history and the pending questions stay).
+  function swap(m) {
+    const now = Date.now();
+    while (swaps.length && now - swaps[0] > 60000) swaps.shift();
+    if (m.id < newestPage || swaps.length >= limits.swaps) return send({ t: "err", id: m.id, gen: m.gen, code: "busy", message: "the page was not shown" });
+    swaps.push(now);
+    pendingShow = { path: m.path, html: m.html, hash: m.hash, push: m.push };
+    const focused = frame && document.activeElement === frame;
+    retire();
+    build(true);
+    if (focused) frame.focus();
+  }
+
+  function rebuild(reason) {
+    if (destroyed) return;
+    retire();
     const now = Date.now();
     while (rebuilds.length && now - rebuilds[0] > 60000) rebuilds.shift();
     rebuilds.push(now);
@@ -279,6 +313,9 @@ export function createFrameHost(opts) {
 
   async function handleRequest(req) {
     if (inflight.size >= limits.inflight) return refused(req, "busy");
+    const cached = req.intent === "asset" ? assets.get(req.path) : null;
+    if (cached) return send({ t: "res", id: req.id, gen: req.gen, status: cached.status, headers: cached.headers, url: cached.url, body: cached.body.slice().buffer });
+    if (req.intent === "page") newestPage = Math.max(newestPage, req.id);
     const ac = new AbortController();
     inflight.set(req.id, ac);
     try {
@@ -290,7 +327,10 @@ export function createFrameHost(opts) {
       const view = { path, status: head.status, headers: head.headers || {}, body };
       if (req.intent === "page" || req.intent === "open") {
         const kind = classify({ path, status: head.status, headers: view.headers, page: head.page }, { allowPage: req.intent === "page" });
-        if (kind === "page") return send({ t: "page", id: req.id, gen: req.gen, path, html: text.decode(body) });
+        if (kind === "page") {
+          const m = { id: req.id, gen: req.gen, path, html: text.decode(body), hash: req.hash, push: req.push };
+          return fresh ? send({ t: "page", ...m }) : swap(m);
+        }
         if (kind === "error") notice({ kind: "error", text: `The dashboard answered ${Number(head.status) || "with an error"} for ${path.slice(0, 120)}.` });
         else if (req.intent === "page" && !gesture()) notice({ kind: "error", text: "Click the link to open that." });   // opening anything outside the frame needs a click
         else if (kind === "viewer") cb.viewer(view);
@@ -299,6 +339,14 @@ export function createFrameHost(opts) {
       }
       const headers = {};
       for (const name of REPLY_HEADERS) if (typeof view.headers[name] === "string") headers[name] = view.headers[name];
+      if (req.intent === "asset" && head.status === 200 && body.length <= limits.assetBytes / 4) {
+        assets.set(req.path, { status: head.status, headers, url: path, body: body.slice() });
+        assetSize += body.length;
+        for (const [k, a] of assets) {   // the oldest go first
+          if (assets.size <= limits.assetEntries && assetSize <= limits.assetBytes) break;
+          assets.delete(k); assetSize -= a.body.length;
+        }
+      }
       send({ t: "res", id: req.id, gen: req.gen, status: head.status, headers, url: path, body: body.buffer }, [body.buffer]);
     } catch (e) {
       if (!ac.signal.aborted) send({ t: "err", id: req.id, gen: req.gen, code: "failed", message: String(e?.message || "request failed").slice(0, 200) });
@@ -387,12 +435,14 @@ export function createFrameHost(opts) {
     if (opts.onPort) opts.onPort(port);
     frame.contentWindow.postMessage({ k: PROTOCOL, t: "ready" }, "*", [channel.port2]);   // the only message that names no secret
     pingTimer = setInterval(heartbeat, limits.pingMs);
-    send({ t: "go", path: current });
+    const show = pendingShow;
+    pendingShow = null;
+    send(show ? { t: "show", ...show } : { t: "go", path: current });
   }
 
   // ---- everything else: on the port ----------------------------------------------------------------------
   function onPortMessage(event) {
-    if (destroyed || !port) return;
+    if (destroyed || !port || event.target !== port) return;       // only the live channel: a closed one's late message is nothing
     if (!rateOk()) return;
     const m = event.data;
     if (!boundedShape(m, limits)) return;
@@ -401,6 +451,7 @@ export function createFrameHost(opts) {
       case "write":
         abortAll();
         closePrompt(false);
+        fresh = false;
         writeLoads = limits.writeLoads;
         writeUntil = Date.now() + limits.writeMs;
         if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; takeWriteLoad(); }   // its load came first
@@ -469,19 +520,16 @@ export function createFrameHost(opts) {
       const p = validPath(path);
       if (!p || !scopes.allows("GET", p)) return false;
       current = p;
+      pendingShow = null;               // a page waiting for the new frame loses to the app's own navigation
       send({ t: "go", path: p });
       return true;
     },
     send,
     destroy() {
       destroyed = true;
-      clearTimers();
-      abortAll();
+      retire();
       removeEventListener("message", onWindowMessage);
-      closePrompt(false);
-      if (port) { port.onmessage = null; port.close(); port = null; }
-      frame?.remove();
-      frame = null;
+      assets.clear();
       wrap.remove();
     },
   };

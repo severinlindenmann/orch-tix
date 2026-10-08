@@ -13,7 +13,7 @@
 // Reflect.apply, so a page that poisons prototypes (Function.prototype.call, MessageEvent.prototype.data, Object.assign,
 // Array and Promise methods) never sees the port or a secret. Messages are built as object literals.
 // Messages on the port: {t, ...}. To the host: pong {n}, req, sopen, sclose, abort, write, rendered, hist, theme, copy,
-// open, download, log. From the host: ping {n}, go {path}, res, page, handled, err, sdata, send, copied.
+// open, download, log. From the host: ping {n}, go {path}, show {path, html, hash, push}, res, page, handled, err, sdata, send, copied.
 // docs/bridge-frame.md has the fields.
 (() => {
   "use strict";
@@ -66,14 +66,14 @@
   };
 
   // ---- requests to the TIX page ------------------------------------------------------------------------------
-  function call(intent, method, path, headers, body) {
+  function call(intent, method, path, headers, body, extra = {}) {
     let id = 0;
     const p = new Promise((resolve, reject) => {
       if (port === null) { reject(new TypeError("the frame is not connected")); return; }
       id = ++seq;
       pending.set(id, { resolve, reject, gen });
-      if (body) post({ t: "req", id, gen, intent, method, path, headers: headers || {}, body }, [body]);
-      else post({ t: "req", id, gen, intent, method, path, headers: headers || {} });
+      if (body) post({ t: "req", id, gen, intent, method, path, headers: headers || {}, body, hash: extra.hash, push: extra.push }, [body]);
+      else post({ t: "req", id, gen, intent, method, path, headers: headers || {}, hash: extra.hash, push: extra.push });
     });
     p.id = id;
     return p;
@@ -431,7 +431,7 @@
     const hash = target.includes("#") ? target.slice(target.indexOf("#")) : "";
     const path = target.split("#")[0];
     let r;
-    try { r = await call("page", method, path, headers, body); } catch (e) { return; }
+    try { r = await call("page", method, path, headers, body, { hash, push }); } catch (e) { return; }
     if (mine !== navSeq || r.t !== "page") return;
     try {
       await render(r.html, r.path, hash, push, mine);
@@ -533,6 +533,8 @@
     const m = apply(evData, e, []);
     if (m === null || typeof m !== "object") return;
     if (m.t === "ping") { post({ t: "pong", n: m.n }); return; }
+    // a page the host chose to show in this fresh frame (it destroyed the frame of the page before)
+    if (m.t === "show") { if (typeof m.path === "string" && typeof m.html === "string") render(m.html, m.path, typeof m.hash === "string" ? m.hash : "", m.push === true, ++navSeq).catch((e) => log(`render: ${e.message}`)); return; }
     if (m.t === "go") { if (typeof m.path === "string") navigate("GET", m.path, null, null, false); return; }
     if (m.t === "copied") { const f = mGet(copies, m.id); mDel(copies, m.id); if (f) f(m.ok === true); return; }
     if (m.t === "sdata" || m.t === "send") {

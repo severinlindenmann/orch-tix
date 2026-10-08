@@ -499,7 +499,7 @@ def test_streams_work_and_every_navigation_closes_them_all(dash, page):
     page.wait_for_function("() => window.__fake.streams.length === 9")
     assert page.evaluate("window.__fake.streams.filter((s) => !s.closed).length") == 1      # only the page on screen
     assert page.evaluate("window.__fake.streams.slice(0, 8).every((s) => s.closed)")
-    assert dash.frame().evaluate("window.__oldEs.readyState") == 2        # and the page's own EventSource object says so
+    # (the page's own EventSource object died with its frame: see the stale-page tests below)
 
 
 def test_an_answer_for_an_older_page_is_dropped(dash, page):
@@ -732,7 +732,7 @@ def test_a_hostile_page_string_runs_nothing_and_leaves_no_handler_or_script_url(
     }""")
     assert left["x"] == 0 and left["bad"] == [] and left["scripts"] == 0 and left["base"] == 0, left
     assert left["links"] == [] and left["path"] == "/sandbox/dash"            # no refresh, no navigation
-    assert page.evaluate("document.querySelector('iframe.frame-dash') === window.__first")   # the app never had to rebuild it
+    assert not [m for m in dash.ev("log") if m.startswith("frame rebuilt")]   # nothing made the app rebuild the frame
     assert not [c for c in dash.calls() if c["path"] in ("/secret", "/healthz")]
     # a script: link in the page that survived in any form is neutralised when clicked
     f.evaluate("() => { const a = document.createElement('a'); a.id = 'late'; a.setAttribute('href', 'javascript:window.__x=1'); document.body.appendChild(a); a.click(); }")
@@ -774,6 +774,7 @@ def test_the_frame_cannot_write_the_clipboard_without_a_click_in_the_app(dash, p
     page.wait_for_selector(".frame-prompt")
     f.evaluate("document.getElementById('board').click()")
     dash.wait_title("Board")
+    f = dash.frame()                                       # the page changed: a new frame
     page.wait_for_function("() => !document.querySelector('.frame-prompt')")
     assert dash.ev("copy") == []
     # a real click on Copy, after the delay, writes it, once
@@ -992,10 +993,10 @@ def test_an_svg_anchor_is_intercepted_like_any_link_and_its_foreign_address_is_d
     f.locator("#r2").click(force=True)                                                                   # the foreign one: nothing happens
     f.locator("#r3").click(force=True)                                                                   # the animated one: nothing happens
     page.wait_for_timeout(800)
-    assert page.evaluate("document.querySelector('iframe.frame-dash') === window.__first") and not hits
+    assert not [m for m in dash.ev("log") if m.startswith("frame rebuilt")] and not hits
     f.locator("#r1").click()                                                                             # an SVG anchor is handled by the shim, not the browser
     dash.wait_title("Board")
-    assert page.evaluate("document.querySelector('iframe.frame-dash') === window.__first")                # (a native navigation would have rebuilt the frame)
+    assert not [m for m in dash.ev("log") if m.startswith("frame rebuilt")]                               # (a native navigation would have rebuilt the frame)
 
 
 # ---- scripts: only the dashboard's own static JavaScript runs -------------------------------------------------------------
