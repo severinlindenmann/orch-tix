@@ -102,6 +102,7 @@
     "/static/js/ticketreply-model.js",
     "/static/js/transcribe-settings.js",
     "/static/js/ui.js",
+    "/static/js/unlock.js",
     "/static/js/upload.js",
     "/static/js/wakelock.js",
     "/static/js/widget-model.js",

@@ -17,9 +17,12 @@ import { deviceId } from "./bridge-crypto.js";
 import { hexToBytes } from "./crypto.js";
 import { createMailbox } from "./remote-mailbox.js";
 import { bridgeTransport } from "./remote-transport.js";
+import { askAssertion } from "./unlock.js";
+import { isNeverPage } from "./frame-render.js";
 import { SCOPES, canOpen, hostMessage } from "./remote-model.js";
 
 const REFRESH_MS = 10_000;
+const NOT_REMOTE = "Agent widgets and artifacts are not available remotely. Open them on the computer.";
 const $ = (id) => document.getElementById(id);
 
 export async function openSession(workspace) {
@@ -27,8 +30,10 @@ export async function openSession(workspace) {
   const hostKey = await pinnedHostKey(workspace);
   if (!rec?.hostPub || !hostKey) return null;            // not paired in this browser
   const dk = await deviceKey();
-  return new DeviceSession({ workspace, kWs: rec.kWs, keyVersion: rec.keyVersion, deviceId: await deviceId(hexToBytes(workspace), dk.pub),
+  const session = new DeviceSession({ workspace, kWs: rec.kWs, keyVersion: rec.keyVersion, deviceId: await deviceId(hexToBytes(workspace), dk.pub),
     signKey: dk.privateKey, hostKey });
+  session.credentialId = rec.credentialId || null;       // the platform credential registered at pairing (unlock.js)
+  return session;
 }
 
 function notice(text) {
@@ -81,13 +86,13 @@ async function select(state, id) {
   const session = await openSession(id).catch(() => null);
   if (!session || !canOpen(s, true)) { render(state); notice(session ? hostMessage(s?.state) : "This browser is not paired with this workspace."); return; }
   const mailbox = createMailbox(id);
-  const transport = bridgeTransport({ session, mailbox, onRefusal: (code, text) => {
+  const transport = bridgeTransport({ session, mailbox, unlock: askAssertion, onRefusal: (code, text) => {
     state.refusal = text; notice(text);
     if (code === "not_paired") forgetWorkspace(id).then(() => { state.paired.set(id, false); render(state); }).catch(() => {});   // the host does not know us
   } });
   state.mailbox = mailbox;
   state.host = createFrameHost({ mount: $("remote-frame"), transport, scopes: SCOPES, start: "/", title: `Dashboard of ${state.labels.get(id) || "a workspace"}`,
-    viewer: () => toast("Opening files from the dashboard comes later.", "info"),
+    viewer: (v) => { if (isNeverPage(v?.path || "")) { state.refusal = NOT_REMOTE; notice(NOT_REMOTE); } else toast("Opening files from the dashboard comes later.", "info"); },
     download: () => toast("Downloads from the dashboard come later.", "info"),
     notice: (n) => { if (n.text) notice(n.text); } });
   render(state);

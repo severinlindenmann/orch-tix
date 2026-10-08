@@ -7,6 +7,7 @@ import { F_STREAM } from "./bridge-crypto.js";
 import { hexToBytes } from "./crypto.js";
 import { validPath } from "./frame-scope.js";
 import { HOST_SILENT, SIGNED_OUT, refusalText } from "./remote-model.js";
+import { unlockText } from "./unlock.js";
 import { STREAM_SILENCE_MS } from "./bridge-session.js";
 
 export const FIRST_CHUNK_MS = 20_000;     // no first chunk: cancel and send the same bytes once more (§5.3), then give up
@@ -37,10 +38,16 @@ function queue() {
   };
 }
 
-// opts: session (DeviceSession), mailbox, onRefusal(code, text), onEvent(name) for tests.
-export function bridgeTransport({ session, mailbox, onRefusal = () => {}, firstChunkMs = FIRST_CHUNK_MS, chunkMs = CHUNK_MS }) {
+const NEEDS_UNLOCK = new Set(["assertion_required", "lease_required"]);
+
+// opts: session (DeviceSession), mailbox, onRefusal(code, text), unlock(session, {code, meta, rid}) (unlock.js
+// askAssertion; without it the refusal is just said). A request refused for an assertion is never retried silently:
+// the sheet is shown, and only a confirmed assertion is sent, once, as the `assert` request whose answer is the
+// refused request's own result (9.4). The same request is not asked a second time.
+export function bridgeTransport({ session, mailbox, onRefusal = () => {}, unlock = null, firstChunkMs = FIRST_CHUNK_MS, chunkMs = CHUNK_MS }) {
   async function* exchange({ method, path, headers, body, stream, signal }) {
     const args = { meta: { op: "http", method, path, headers }, data: body || EMPTY, flags: stream ? F_STREAM : 0 };
+    let asked = false;
     for (let round = 0; round < 3; round++) {            // a second and third round only for a resend the host asked for
       const q = queue();
       const listener = { chunk: (c) => q.push(c), fail: (e) => q.push({ error: e }) };
@@ -72,6 +79,14 @@ export function bridgeTransport({ session, mailbox, onRefusal = () => {}, firstC
           if (r.refusal) {
             if (r.resend) { args.meta = r.resend.meta; resend = true; break; }
             const code = String(r.meta.refusal);
+            if (unlock && !asked && NEEDS_UNLOCK.has(code)) {
+              asked = true;
+              const u = await unlock(session, { code, meta: r.meta, rid: sent.id });
+              if (signal?.aborted) return;
+              if (u.ok) { args.meta = u.meta; resend = true; break; }
+              onRefusal(code, unlockText(u.reason));
+              throw Object.assign(new RefusalError(code), { message: unlockText(u.reason) });
+            }
             onRefusal(code, r.message || refusalText(code));
             throw new RefusalError(code);
           }
