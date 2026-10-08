@@ -82,7 +82,7 @@ export function drawSheet({ title, text = "", atoms = null, tail = "", tailAtoms
   const shownAt = Date.now();
   let used = false, timeOk = false;
   const body = el("pre", { id: "unlock-text", dir: "auto", tabindex: "0" }, nodesOf(atoms || [{ t: "c", s: text }]));
-  const atEnd = () => body.scrollHeight - body.scrollTop - body.clientHeight <= 1;
+  const atEnd = () => body.scrollHeight - body.scrollTop - body.clientHeight <= 2;      // 2: scroll positions can be fractional
   const go = el("button", { type: "button", class: "btn btn-accent", id: "unlock-go", disabled: true, onclick: (e) => {
     if (used || !e.isTrusted || Date.now() - shownAt < delayMs || !atEnd()) return;
     used = true;
@@ -103,7 +103,8 @@ export function drawSheet({ title, text = "", atoms = null, tail = "", tailAtoms
   body.addEventListener("scroll", refresh);
   more.hidden = atEnd();
   const enable = setTimeout(() => { timeOk = true; refresh(); }, delayMs);
-  return { close() { clearTimeout(enable); node.remove(); } };
+  const watch = setInterval(refresh, 200);          // the text can grow after it is drawn (fonts): no scroll event says so
+  return { close() { clearTimeout(enable); clearInterval(watch); node.remove(); } };
 }
 
 // ---- an assertion for a refusal -----------------------------------------------------------------------------------
