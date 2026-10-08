@@ -214,6 +214,13 @@ leave a device. The mailbox keeps a sealed request for at most 60 seconds, delet
 memory only and are not written to the database (`add_frame`). Pending rows are lost on a restart on purpose
 (`bridge.py` docstring).
 
+**In one list.** TIX learns: opaque ids (workspace, device, request), whether a workspace is online and when it
+was last seen, three counts (sessions, in progress, needs you), the size and timing of every envelope, and which
+device asked. TIX does not learn: a path, a page, a ticket's text, a terminal's output or a keystroke, a file
+name, a label, a key, or the text an unlock sheet asked you to confirm (it travels sealed). The TIX page, not
+the server, runs the WebAuthn ceremony as the relying party (the TIX host name is the RP id): the page sees the
+browser's prompt and its result, and the server only carries sealed envelopes. The passphrase is part of none of it.
+
 ### Scenarios
 
 **A curious or compromised TIX server.**
@@ -271,6 +278,81 @@ session expires (a 401), so the next account on a shared browser never inherits 
 an expiry the browser pairs again. **Limits that remain:** a signed-in browser can act at its scope; deleting the
 database cannot reach anything a script already did with the keys (they are non-extractable, so their use, not
 their bytes, is exposed); revoking the device on the host remains the control for a stolen profile.
+
+### The unlock sheet and the platform credential
+
+*In place (R11, `fileshare/static/js/unlock.js`).*
+
+- **What it is.** When the host answers a request with `assertion_required` or `lease_required` (§9.4), the TIX
+  page, never the dashboard frame, draws a sheet: the host's text for the action, the scope it needs, the time it
+  expires, a digest to compare on the computer, Confirm and Cancel. Confirm asks the platform authenticator (Face
+  ID, Touch ID, Windows Hello or the device PIN) to sign a challenge the browser rebuilt itself from the host's
+  parts and from exactly the text on the sheet, with user verification required. Only then is the request run.
+  A request asked once is not asked again, and nothing is sent after a Cancel, a timeout or a failed
+  verification, only a sentence saying nothing was done.
+- **The passphrase is never involved.** The sheet never asks for it and the browser never stores it. The master
+  key is re-opened from the stored key encryption key, as everywhere else, and a stolen phone's lock screen
+  is what stands between a thief and Face ID. The platform credential is registered once, inside pairing and
+  before the owner approves (§9.2); the browser keeps only its public id. A browser with no platform
+  authenticator can still pair and use Look, Decide and Operate where the host allows it, but is told plainly
+  that it cannot get Type.
+- **The frame cannot spoof, move or click it.** The sheet lives in the TIX page outside the sandboxed frame,
+  which has no WebAuthn and no access to that DOM. The host's text is drawn as text (an isolated bidi context,
+  never HTML); what the device does with spacing and invisible characters is in the next item. The Confirm button is disabled for half a second, counts only a real
+  (trusted) click, and works once. One sheet is open at a time: a second request on the same device is refused
+  with "busy" there, while the host keeps that request parked with a live challenge until it expires (120 s).
+  An abort (the frame rebuilt, another workspace opened) closes the sheet.
+- **A text cannot hide its middle or its tail.** The host cleans the text but keeps spaces of every kind and sets
+  no length limit, so the device checks it before a sheet opens and refuses (with a fixed sentence, nothing is
+  asked of the authenticator) any space-like or invisible character other than the ASCII space and the line feed
+  (no-break and other Unicode spaces, the braille blank, format and bidi controls, line and paragraph separators,
+  tabs and other controls, private-use and unassigned code points), more than two combining marks in a row, and
+  text over 40 lines or 2000 characters. What remains is drawn so padding shows: a run of 3 or more spaces and a run
+  of 2 or more empty lines are each one styled marker element ("[900 spaces]", "[... blank lines ...]") that the
+  host cannot produce by typing the same characters (typed look-alikes stay plain text); the sheet states the number
+  of lines and characters; the last 80 characters are shown in a line of their own; and when the box scrolls,
+  Confirm stays disabled until it has been scrolled to its end. **Accepted limit:** visually similar letters
+  (a Cyrillic "a" for a Latin one) are not detected; the digest prefix to compare on the computer is the answer
+  (§9.3). Capping the text in the host and the specification is tracked in orch-core#259 and orch-tix#101.
+- **What the binding guards, and what it does not.** The challenge commits to the request, the scope and the
+  exact text the host supplied. So a compromised TIX server or mailbox, or the dashboard frame, cannot change what
+  an *honest* TIX page shows: any other text gives a different challenge and the host refuses the assertion. The
+  host's audit log then holds what the honest page displayed. Against a compromised TIX *site* (modified
+  JavaScript) or a compromised host it guards nothing: the page computes the challenge over the host's real text
+  and may display anything else, and the host accepts it. All an assertion then proves is that the person
+  performed a user verification on that device at about that time (§9.6).
+
+**If the TIX site is compromised.** It can act as a paired device, at that device's scope, in any browser that
+loads it while it is loaded (§1; the owner accepted this). What limits it: the device signing key is
+non-extractable, so it cannot be used elsewhere or after revocation; the scope is decided by the host per
+request; Type and Factory actions need a fresh assertion that the compromised page cannot produce without the
+person's own verification on the device (it cannot read or sign with the authenticator's key), though it can
+trigger that prompt at a moment of its choosing and show different text; fresh assertions are rate limited (6 per
+10 minutes per device) and every assertion-backed action is listed with its subject on the computer, so a
+misleading one shows up afterwards. A typing lease is not rate limited: once granted it covers 15 minutes of input
+to a terminal that device opened. The site cannot
+make the host skip an assertion, read the passphrase (not held anywhere), or use the credential from another
+origin (the RP id and origin are the TIX site's own). If it was compromised while a device was being paired, the
+wider case above applies.
+
+**Registration and Safari.** At pairing the browser sends `credential_begin` and computes the challenge
+*before* the person presses the register button, and calls `navigator.credentials.create()` synchronously inside
+that click, so the call runs within the user activation. If the host's 120 s window has passed by the click, it
+begins again and asks for a second click. The unlock sheet's `get()` likewise runs synchronously in the Confirm
+click. **Not verified:** whether WebKit (iOS Safari, an installed PWA) accepts both ceremonies as written, and how
+it behaves when the page is hidden during the biometric prompt; there is no virtual authenticator for WebKit, so
+this needs a real phone. The ceremonies are given an abort signal, so closing the sheet or leaving the page withdraws
+the operating system's prompt where the platform honours it.
+
+**Synced passkeys.** A platform credential may sync between a person's devices through a cloud keychain; it is
+a separate thing from the device's signing key. Revoking a device on the computer revokes its signing key
+and so its ability to act, even though the passkey lives on elsewhere; another device needs its own pairing and
+registers its own credential. The passkey cannot be exported from the authenticator by TIX, but a cloud keychain
+is the platform's, not ours, and removing a passkey is an operating-system action the computer cannot see (§9.6).
+
+**Agent widgets and artifacts are not available remotely.** They run as pages with their own policy on the
+computer and cannot be shown safely through the bridge, so the dashboard frame never draws them: a link to one
+shows "not available remotely" instead of a blank frame or an error.
 
 ### What each scope allows, and the accepted limits
 

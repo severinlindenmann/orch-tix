@@ -105,6 +105,14 @@ export async function pinHost(workspace, hostPub, pin) {
   }));
 }
 
+// §9.2: the platform credential's id (b64u), kept with the pinned host once the owner approved the pairing. Public
+// data: the credential's private key never leaves the authenticator.
+export const saveCredential = (workspace, credentialId) => tx(HOSTS, "readwrite", (s, done, fail) => step(s.get(workspace), fail, (cur) => {
+  if (!cur) throw new BridgeStorageError("no workspace key for this workspace");
+  s.put({ ...cur, credentialId });
+  done();
+}));
+
 export async function pinnedHostKey(workspace) {
   const rec = await workspaceRecord(workspace);
   return rec?.hostPub ? importPublicKey(rec.hostPub) : null;

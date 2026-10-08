@@ -10,7 +10,8 @@ import {
   F_REFUSAL, MESSAGES, PAIR_ANSWER_MS, decodeHeader, deviceFingerprint, deviceId, hostKeyFromPin, importPublicKey, openBody,
   pairRequestMeta, parsePairFragment, signedBytes, splitEnvelope, unframe, verifySigned,
 } from "./bridge-crypto.js";
-import { deviceKey, forgetWorkspace, openWorkspaceKey, pinHost, workspaceRecord } from "./bridge-store.js";
+import { deviceKey, forgetWorkspace, openWorkspaceKey, pinHost, saveCredential, workspaceRecord } from "./bridge-store.js";
+import { registerCredential, unlockText } from "./unlock.js";
 import { createMailbox } from "./remote-mailbox.js";
 import { pairRefusalText } from "./remote-model.js";
 
@@ -56,7 +57,7 @@ export async function openPairAnswer(session, env, mailbox, hostPin) {
 // Runs the whole ceremony up to "waiting for the owner". Dependencies are injectable for tests.
 // events: onFingerprint(text) once the host's pending answer is verified, onState(text) for progress.
 // Resolves {approved: true, scope} | {approved: false, why} .
-export async function runPairing({ link, label, signal, now = Date.now, onFingerprint, onState,
+export async function runPairing({ link, label, signal, now = Date.now, onFingerprint, onState, click, onCredential,
   deps = {} }) {
   const { openKey = openWorkspaceKey, device = deviceKey, pin = pinHost, record = workspaceRecord, forget = forgetWorkspace,
     mailbox = createMailbox(link.workspace), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), pollMs = STATUS_EVERY_MS,
@@ -109,6 +110,11 @@ export async function runPairing({ link, label, signal, now = Date.now, onFinger
     await pin(link.workspace, pending.hostPub, hostPin);                          // the pin; throws on a mismatch
     session.hostKey = await importPublicKey(pending.hostPub);
     onFingerprint?.(myFingerprint);
+    // §9.2: the platform credential is made now, before the owner approves, so the owner sees whether there is one.
+    // click() runs the ceremony inside the person's click (Safari needs a gesture). No credential: still paired, but no Type.
+    const send = async (m) => { const a = await ask({ meta: m }, (c) => session.receive(c.env, c.mailbox), 15_000); return a.silent || a.refusal ? null : a.meta; };
+    const cred = await (deps.register || registerCredential)({ session, label, send, click, signal });
+    onCredential?.(cred.ok ? "" : unlockText(cred.reason === "no_platform" || cred.reason === "timeout" ? cred.reason : "refused"));
     onState?.("Waiting for you to approve this browser on the computer.");
 
     while (now() - sentAt < offerMs && !signal?.aborted) {
@@ -116,7 +122,10 @@ export async function runPairing({ link, label, signal, now = Date.now, onFinger
       const r = await ask({ meta: { op: "pair_status", pairing_id: meta.pairing_id } }, (c) => session.receive(c.env, c.mailbox), 15_000);
       if (r.silent || r.refusal) continue;
       const st = r.meta?.state;
-      if (st === "approved") return { approved: true, scope: typeof r.meta.scope === "string" ? r.meta.scope : "" };
+      if (st === "approved") {
+        if (cred.ok) await saveCredential(link.workspace, cred.credentialId);         // only once approved: a rejected pairing leaves nothing
+        return { approved: true, scope: typeof r.meta.scope === "string" ? r.meta.scope : "", credential: cred.ok };
+      }
       if (st === "rejected") return await undo("The computer rejected this browser.");
     }
     return await undo("The link expired. Make a new one on the computer.");

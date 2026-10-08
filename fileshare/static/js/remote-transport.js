@@ -10,6 +10,7 @@ import { F_STREAM } from "./bridge-crypto.js";
 import { hexToBytes } from "./crypto.js";
 import { validPath } from "./frame-scope.js";
 import { HOST_SILENT, SIGNED_OUT, refusalText } from "./remote-model.js";
+import { unlockText } from "./unlock.js";
 
 export const FIRST_CHUNK_MS = 20_000;     // no first chunk: cancel and send the same bytes once more (§5.3), then give up
 export const CHUNK_MS = 60_000;           // between chunks of one page
@@ -19,6 +20,7 @@ export const RECONNECT_MAX_MS = 60_000;   //   (every reconnect is a bridged req
 export const FLOOR_MS = 2_000;           // once any stream has failed, no two stream opens (any path) closer than this
 export const MAX_GATES = 64;              // paths remembered
 export const HEALTHY_MS = 60_000;         // a stream that lived this long was healthy: the back-off starts over
+export const DECLINED_MS = 300_000;       // a stream path whose unlock sheet was declined or failed is refused without a new sheet this long
 export const MAX_QUEUED = 256;            // chunks waiting for a consumer that does not read: beyond this the stream is dropped
 const ENDS_STREAMS = new Set(["revoked", "not_paired", "stopped", "scope_changed"]);   // after these no stream is opened again
 const MAX_REDIRECTS = 5;
@@ -56,9 +58,15 @@ const sleep = (ms, signal) => new Promise((resolve) => {
   signal?.addEventListener("abort", done);
 });
 
-// opts: session (DeviceSession), mailbox, onRefusal(code, text), and onHost("lost") when the computer stopped answering,
+const NEEDS_UNLOCK = new Set(["assertion_required", "lease_required"]);
+
+// opts: session (DeviceSession), mailbox, onRefusal(code, text), unlock(session, {code, meta, rid}, {signal}) (unlock.js
+// askAssertion; without it the refusal is just said) and onHost("lost") when the computer stopped answering,
 // onHost("waiting", ms) while a reconnect waits its turn, onHost("ok") when it answers again. The rest are timings (tests).
-export function bridgeTransport({ session, mailbox, onRefusal = () => {}, onHost = () => {}, firstChunkMs = FIRST_CHUNK_MS, chunkMs = CHUNK_MS,
+// A request refused for an assertion is never retried silently: the sheet is shown, and only a confirmed assertion is sent,
+// once, as the `assert` request whose answer is the refused request's own result (§9.4). Asked once per exchange; a stream
+// whose sheet was declined is not asked about again for DECLINED_MS, so a reconnect loop cannot pile sheets up.
+export function bridgeTransport({ session, mailbox, onRefusal = () => {}, onHost = () => {}, unlock = null, firstChunkMs = FIRST_CHUNK_MS, chunkMs = CHUNK_MS,
   quietMs = QUIET_MS, reconnectMs = RECONNECT_MS, reconnectMax = RECONNECT_MAX_MS, healthyMs = HEALTHY_MS, floorMs = FLOOR_MS, now = Date.now }) {
   let note = null, ended = null;          // note: what onHost last said, until the next answer
   const gates = new Map();             // stream path (no query) -> {start, delay, fails}
@@ -66,6 +74,7 @@ export function bridgeTransport({ session, mailbox, onRefusal = () => {}, onHost
 
   async function* exchange({ method, path, headers, body, stream, signal }) {
     const args = { meta: { op: "http", method, path, headers }, data: body || EMPTY, flags: stream ? F_STREAM : 0 };
+    let asked = false;
     for (let round = 0; round < 3; round++) {            // a second and third round only for a resend the host asked for
       const q = queue();
       const listener = { chunk: (c) => { if (q.size() >= MAX_QUEUED) { q.reset(); q.push({ slow: true }); } else q.push(c); },
@@ -99,6 +108,15 @@ export function bridgeTransport({ session, mailbox, onRefusal = () => {}, onHost
           if (r.refusal) {
             if (r.resend) { args.meta = r.resend.meta; resend = true; break; }
             const code = String(r.meta.refusal);
+            if (unlock && !asked && NEEDS_UNLOCK.has(code)) {
+              asked = true;
+              const u = await unlock(session, { code, meta: r.meta, rid: sent.id }, { signal });
+              if (signal?.aborted) return;
+              if (u.ok) { args.meta = u.meta; resend = true; break; }
+              const text = u.text || unlockText(u.reason);
+              onRefusal(code, text);
+              throw Object.assign(new RefusalError(code), { message: text, declined: u.reason !== "busy" });
+            }
             onRefusal(code, r.message || refusalText(code));
             throw new RefusalError(code);
           }
@@ -172,6 +190,7 @@ export function bridgeTransport({ session, mailbox, onRefusal = () => {}, onHost
     if (ended) { onRefusal(ended, refusalText(ended)); throw new RefusalError(ended); }
     const key = req.path.split("?")[0];
     let g = gates.get(key);
+    if (g?.declined && g.declined.until > now()) throw g.declined.err;      // the person said no a moment ago
     const until = Math.max(g ? g.start + g.delay : 0, failed ? lastOpen + floorMs : 0);
     if (until > now()) {
       note = "waiting";
@@ -188,6 +207,7 @@ export function bridgeTransport({ session, mailbox, onRefusal = () => {}, onHost
       yield* plain(req);
     } catch (e) {
       if (ENDS_STREAMS.has(e?.code)) ended = e.code;
+      if (e?.declined) g.declined = { until: now() + DECLINED_MS, err: e };
       throw e;
     } finally {
       if (!req.signal?.aborted) {
