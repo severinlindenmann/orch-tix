@@ -177,7 +177,10 @@ sends its own Content-Security-Policy on every page, so "no policy of its own" i
 - `attachment`, `application/octet-stream` or no type are offered as a download (gesture and a click on the question);
 - anything not 2xx becomes a one-line notice drawn with `textContent`.
 
-Nested frames (an artifact, a widget) are replaced by a link, "Open ... in the viewer". Host-supplied strings (names,
+Nested frames (an artifact, a widget) are replaced by a link, "Open ... in the viewer". On the Remote page the
+viewer does not exist for the routes that carry their own policy (`isNeverPage`): the link shows the notice "Agent
+widgets and artifacts are not available remotely. Open them on the computer." (`remote.js`) instead of a blank frame
+or an error. Host-supplied strings (names,
 error pages, titles) are drawn as text; `tests/js/frame-scope.test.mjs` checks that the host modules contain no
 `innerHTML`, `outerHTML`, `insertAdjacentHTML` or `document.write`.
 
