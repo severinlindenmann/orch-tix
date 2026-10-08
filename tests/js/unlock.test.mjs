@@ -550,3 +550,90 @@ test("empty lines: one stays, two or more are one marker, whitespace-only lines 
   assert.equal(U.inspectText(marked).ok, true);
   assert.equal(U.inspectText(marked + "\nz").ok, false);
 });
+
+// ---- streams share the refusal path (R10 streams, #96) ---------------------------------------------------------------
+
+const SSE = () => ({ result: "accept", rid: "x", last: true, refusal: false, meta: { status: 200, headers: { "content-type": "text/event-stream" } }, data: new Uint8Array(0) });
+const SREQ = (extra = {}) => ({ method: "GET", path: "/term/out", headers: {}, body: null, stream: true, signal: new AbortController().signal, ...extra });
+const FASTS = { reconnectMs: 0, reconnectMax: 0, floorMs: 0 };
+
+test("a stream refused for an assertion goes through the same sheet and opens with the proof, flagged STREAM", async () => {
+  const r = rig([need("lease_required"), SSE]);
+  let asked = 0;
+  const unlock = async (s, rf) => { asked++; assert.equal(rf.code, "lease_required"); return { ok: true, meta: { op: "assert", for: rf.rid } }; };
+  const ev = await collect(T.bridgeTransport({ ...r, ...FASTS, unlock }).request(SREQ()));
+  assert.deepEqual(ev.map((e) => e.type), ["head", "end"]);
+  assert.equal(asked, 1);
+  assert.equal(r.session.requests.length, 2);
+  assert.equal(r.session.requests[1].meta.op, "assert");
+  assert.equal(r.session.requests[1].flags, 2);                          // the proof carries the STREAM flag of the request it allows
+});
+
+test("a stream whose sheet was declined is not asked about again at once; after the pause it is", async () => {
+  let t = 1_000_000, asked = 0;
+  const r = rig([need(), need()]);
+  const unlock = async () => { asked++; return { ok: false, reason: "cancelled" }; };
+  const tr = T.bridgeTransport({ ...r, ...FASTS, unlock, now: () => t });
+  await assert.rejects(collect(tr.request(SREQ())), (e) => e.code === "assertion_required" && e.message === U.unlockText("cancelled"));
+  assert.equal(asked, 1);
+  await assert.rejects(collect(tr.request(SREQ())), (e) => e.message === U.unlockText("cancelled"));      // the frame's reconnect
+  await assert.rejects(collect(tr.request(SREQ())), (e) => e.message === U.unlockText("cancelled"));
+  assert.equal(asked, 1);
+  assert.equal(r.session.requests.length, 1);                            // nothing was sent for the reconnects
+  t += T.DECLINED_MS + 1;
+  await assert.rejects(collect(tr.request(SREQ())), (e) => e.code === "assertion_required");
+  assert.equal(asked, 2);
+  const other = await collect(T.bridgeTransport({ ...rig([SSE]), ...FASTS, unlock }).request(SREQ()));      // an open lease: no refusal, no sheet
+  assert.equal(other.length, 2);
+  assert.equal(asked, 2);
+});
+
+test("a busy sheet does not count as a decline", async () => {
+  const r = rig([need(), need()]);
+  const tr = T.bridgeTransport({ ...r, ...FASTS, unlock: async () => ({ ok: false, reason: "busy" }) });
+  await assert.rejects(collect(tr.request(SREQ())), (e) => e.message === U.unlockText("busy"));
+  await assert.rejects(collect(tr.request(SREQ())), (e) => e.message === U.unlockText("busy"));
+  assert.equal(r.session.requests.length, 2);                            // asked for again: the second request really went out
+});
+
+// ---- one parser: what the sheet processes against what the challenge commits to ------------------------------------------
+
+test("canonical JSON and the subject hash agree with the Python reference for astral characters, combining marks, separators and escapes", async () => {
+  const B = await import(new URL("bridge-crypto.js", JS));
+  assert.ok(VEC.assertion.subject_cases.length >= 8);
+  for (const c of VEC.assertion.subject_cases) {
+    const subject = { kind: "action", shown: c.shown, digest: "" };
+    assert.equal(C.canonicalJson(B.subjectOf(subject)), c.subject_json, c.name);
+    assert.equal(bytesToHex(new Uint8Array(await crypto.subtle.digest("SHA-256", te.encode(c.subject_json)))), c.subject_hash, c.name);
+  }
+  const nfc = VEC.assertion.subject_cases.find((c) => c.name === "nfc"), nfd = VEC.assertion.subject_cases.find((c) => c.name === "combining_nfd");
+  assert.notEqual(nfc.subject_hash, nfd.subject_hash);                      // no normalisation anywhere
+  const lone = JSON.parse(VEC.assertion.subject_invalid.lone_surrogate_json_text);
+  assert.equal(VEC.assertion.subject_invalid.host_refuses, true);
+  assert.throws(() => B.subjectOf({ kind: "action", shown: lone, digest: "" }), TypeError);      // refused on both sides
+  assert.deepEqual(await ask(session(), refusal({ subject: subj(lone) }), win(), sheets()), { ok: false, reason: "bad_request" });
+});
+
+test("the challenge always covers the ORIGINAL text, never the collapsed view", async () => {
+  const B = await import(new URL("bridge-crypto.js", JS));
+  for (const shown of [PAD, "if x:\n    run()", "a" + " ".repeat(40) + "b", "x\n \n\n   \ny"]) {
+    const w = win(), log = sheets();
+    const p = ask(session(), refusal({ subject: subj(shown) }), w, log);
+    await drawn(log);
+    assert.notEqual(log.drawn[0].text, shown);                                // the view is processed ...
+    log.drawn[0].onConfirm();
+    await p;
+    const want = await B.assertionChallenge({ workspace: hex(I.workspace), deviceId: hex(I.device), rid: hex(I.rid), purpose: "fresh", scope: I.scope,
+      expiresMs: I.expires_ms, nonce: hex(I.nonce), subject: subj(shown) });
+    assert.deepEqual(new Uint8Array(w.gets[0].publicKey.challenge), want);     // ... the hash is not
+  }
+});
+
+test("counts are code points, lines are LF only, and 'empty' means ASCII spaces only", () => {
+  assert.equal(U.inspectText("\u{1F600}".repeat(2000)).chars, 2000);        // UTF-16 length would be 4000
+  assert.equal(U.inspectText("a\u{10FFFF}".repeat(1)).ok, false);           // unassigned: refused whatever its length
+  assert.equal(U.inspectText("a\r\nb").ok, false);                          // CR is never a line end here: refused
+  assert.equal(U.inspectText("a\nb").lines, 2);
+  assert.equal(U.inspectText("a\n \u00a0\nb").ok, false);                   // a no-break space is not "empty": refused, not collapsed
+  assert.equal(U.inspectText("a\n\t\nb").ok, false);
+});

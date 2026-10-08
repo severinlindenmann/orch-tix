@@ -47,7 +47,9 @@ export const MUTATIONS = [
   ["begin not redone after a stale click", "unlock.js", "if (fields === STALE) { if (again) return no(\"timeout\"); continue; }", "if (fields === STALE) return no(\"timeout\");"],
   ["credential made without a platform authenticator check", "unlock.js", "if (!await win.PublicKeyCredential?.isUserVerifyingPlatformAuthenticatorAvailable?.()) return no(\"no_platform\");", ""],
   // the text
-  ["empty lines not collapsed", "unlock.js", 'if (l.trim() === "") { blank++; continue; }', "if (false) { blank++; continue; }"],
+  ["empty lines not collapsed", "unlock.js", 'if (/^ *$/.test(l)) { blank++; continue; }', "if (false) { blank++; continue; }"],
+  ["the challenge covers the processed text", "unlock.js", "assertionChallenge({ workspace: hexToBytes(session.workspace), deviceId: session.deviceIdBytes, rid: hexToBytes(rid),\n    purpose, scope: meta.scope, expiresMs: meta.expires_ms, nonce: hexToBytes(meta.nonce), subject })", "assertionChallenge({ workspace: hexToBytes(session.workspace), deviceId: session.deviceIdBytes, rid: hexToBytes(rid),\n    purpose, scope: meta.scope, expiresMs: meta.expires_ms, nonce: hexToBytes(meta.nonce), subject: { ...subject, shown: view.text } })"],
+  ["characters counted in UTF-16 units", "unlock.js", "Array.from(a.s).length", "a.s.length"],
   ["a run of exactly two empty lines not collapsed", "unlock.js", "if (blank > 1) rows.push", "if (blank > 2) rows.push"],
   ["a single empty line dropped", "unlock.js", "else if (blank === 1) rows.push([]);", ""],
   ["end of the text not shown apart", "unlock.js", "tail: more ? v.tail : \"\", tailAtoms: more ? v.tailAtoms : null", "tail: \"\", tailAtoms: null"],

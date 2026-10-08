@@ -50,7 +50,7 @@ export function inspectText(text) {
   let blank = 0;
   const flush = () => { if (blank > 1) rows.push([{ t: "b" }]); else if (blank === 1) rows.push([]); blank = 0; };
   for (const l of s.split("\n")) {
-    if (l.trim() === "") { blank++; continue; }
+    if (/^ *$/.test(l)) { blank++; continue; }
     flush();
     rows.push(l.split(/( {3,})/).map((p, i) => (i % 2 ? { t: "s", n: p.length } : { t: "c", s: p })).filter((a) => a.t === "s" || a.s));
   }

@@ -314,6 +314,10 @@ their bytes, is exposed); revoking the device on the host remains the control fo
   Confirm stays disabled until it has been scrolled to its end. **Accepted limit:** visually similar letters
   (a Cyrillic "a" for a Latin one) are not detected; the digest prefix to compare on the computer is the answer
   (§9.3). Capping the text in the host and the specification is tracked in orch-core#259 and orch-tix#101.
+  The sheet uses the host's own notion of the text: lines end at a line feed only, characters are code points (not
+  UTF-16 units), nothing is normalised, "empty" means ASCII spaces only, and the challenge always covers the host's
+  original text, never what is drawn. The canonical JSON of the subject is checked against the Python reference with
+  astral characters, combining marks, U+2028/2029, escapes and a lone surrogate (an error on both sides).
 - **What the binding guards, and what it does not.** The challenge commits to the request, the scope and the
   exact text the host supplied. So a compromised TIX server or mailbox, or the dashboard frame, cannot change what
   an *honest* TIX page shows: any other text gives a different challenge and the host refuses the assertion. The
