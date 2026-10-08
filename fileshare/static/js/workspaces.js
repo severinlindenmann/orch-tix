@@ -103,7 +103,7 @@ function renderOpen(state) {
   const seen = seenText(s, state.now);
   root.replaceChildren(back,
     el("div", { class: "wrow-state" }, pill(role, ic, text), seen ? el("span", { class: "hint" }, seen) : null),
-    el("p", { class: "hint" }, "This is the last synced snapshot of the tickets. The live view arrives in a later update."),
+    el("p", { class: "hint" }, "This is the last synced snapshot of the tickets."),
     state.rows === null ? el("p", { class: "banner banner-error", role: "alert" }, "Couldn't load the tickets.")
       : rows.length ? el("div", { class: "wgroup-rows" }, rows.map((r) => el("a", { class: "card ncard-link", href: `/t/${r.n}` },
         el("span", { class: "ncard-row" }, el("b", { class: "ncard-key" }, r.doc.id || r.id),

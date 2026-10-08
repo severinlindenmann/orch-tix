@@ -384,6 +384,8 @@ def test_switching_workspace_sends_cancel_for_the_stream(signed_in, live_server,
     frame_of(signed_in).evaluate(OPEN_ES)
     wait_stream(a)
     rid = next(iter(a.open))
+    gave_up = []
+    signed_in.on("request", lambda r: gave_up.append(r.url.rsplit("/", 1)[-1]) if r.method == "DELETE" else None)
     signed_in.get_by_role("button", name="Open Second").click()
     wait_h1(signed_in, "Second home")
     for _ in range(100):
@@ -391,6 +393,11 @@ def test_switching_workspace_sends_cancel_for_the_stream(signed_in, live_server,
             break
         time.sleep(0.1)
     assert a.cancelled == [rid]
+    for _ in range(100):                                          # the old mailbox stays long enough to read the cancel's answer
+        if any(i != rid for i in gave_up):
+            break
+        time.sleep(0.1)
+    assert any(i != rid for i in gave_up), gave_up
 
 
 def test_a_revoked_device_sees_the_stored_refusal_and_its_stream_ends(signed_in, live_server, make_host):

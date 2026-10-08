@@ -89,10 +89,12 @@ def test_an_absent_number_is_unknown_not_zero(page, live_server, sim, mirror_wit
 def test_open_shows_the_synced_ticket_snapshot(page, live_server, sim, two_workspaces):
     first, _ = two_workspaces
     open_page(page, live_server, sim, PHONE)
-    page.locator(f'.wrow[data-space="{first.space}"]').get_by_role("link", name="Open Acme Energy").click()
+    link = page.locator(f'.wrow[data-space="{first.space}"]').get_by_role("link", name="Open Acme Energy")
+    assert link.get_attribute("href") == f"/remote?space={first.space}"      # an online workspace opens the live view
+    page.goto(f"{live_server.url}/workspaces?open={first.space}")             # the snapshot is still there, by its own address
     expect(page.locator("#ws-title")).to_have_text("Acme Energy")
     expect(page.locator("#ws-list")).to_contain_text(EXAMPLE_DOC["id"])
-    expect(page.locator("#ws-list")).to_contain_text("later update")
+    expect(page.locator("#ws-list")).to_contain_text("last synced snapshot")
     page.get_by_role("link", name="Workspaces").first.click()
     expect(page.locator(".wrow").first).to_be_visible()
 

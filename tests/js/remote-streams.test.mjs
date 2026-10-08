@@ -40,7 +40,7 @@ const KEEP = accept({ keepalive: true });
 const LAST = accept({}, "", true);
 const refuse = (code) => () => ({ result: "accept", rid: "x", last: true, refusal: true, meta: { refusal: code }, data: new Uint8Array(0) });
 const REQ = (extra = {}) => ({ method: "GET", path: "/events", headers: {}, body: null, stream: true, signal: new AbortController().signal, ...extra });
-const FAST = { reconnectMs: 40, reconnectMax: 160, healthyMs: 100, quietMs: 60 };
+const FAST = { reconnectMs: 40, reconnectMax: 160, healthyMs: 40, quietMs: 60 };
 
 async function until(fn, ms = 1000) { const t = Date.now(); while (!fn()) { if (Date.now() - t > ms) throw new Error("timeout"); await sleep(2); } }
 
@@ -127,7 +127,7 @@ test("a reconnect for the same path waits 1x, 2x, 4x the base and stops growing 
   const run = (async () => { for await (const e of t.request(REQ())) { void e; } })();
   await until(() => r.posted.length === before + 1, 2000);
   const start = r.posted.at(-1).at;
-  await sleep(FAST.healthyMs + 20);
+  await sleep(FAST.healthyMs + 15);
   r.feed(2);
   await run;
   const t1 = Date.now();
@@ -163,6 +163,19 @@ test("plain pages are never held back, whatever the streams did", async () => {
     await run;
   }
   assert.equal(r.posted.length, 2);
+  // even after a stream ended young for the same path, a page is not held back
+  const r2 = rig([HEAD, LAST, accept({ status: 200, headers: {} }, "c", true)]);
+  const t2 = T.bridgeTransport({ ...r2, ...FAST, reconnectMs: 300 });
+  const s = (async () => { for await (const e of t2.request(REQ())) { void e; } })();
+  await until(() => r2.listeners.length === 1);
+  r2.feed(2);
+  await s;
+  const t0 = Date.now();
+  const p = (async () => { for await (const e of t2.request(REQ({ stream: false }))) { void e; } })();
+  await until(() => r2.listeners.length === 2);
+  r2.listeners[1].chunk({ env: new Uint8Array(1), mailbox: { id: "x", idx: 0, last: true, stream: false } });
+  await p;
+  assert.ok(Date.now() - t0 < 100, "a page for the path of a stream that just ended waits for nothing");
 });
 
 test("a consumer that does not read gets the stream dropped and the computer told", async () => {
