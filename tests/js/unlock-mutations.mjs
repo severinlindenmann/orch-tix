@@ -13,7 +13,7 @@ const SRC = fileURLToPath(new URL("../../fileshare/static/js/", import.meta.url)
 const TEST = fileURLToPath(new URL("./unlock.test.mjs", import.meta.url));
 
 export const MUTATIONS = [
-  ["subject text not shown", "unlock.js", 'text: p.subject.shown, facts', 'text: "", facts'],
+  ["subject text not shown", "unlock.js", 'text: p.view.text,', 'text: "",'],
   ["retried twice (the ask is not remembered)", "remote-transport.js", "asked = true;", "asked = false;"],
   ["retried although the sheet failed", "remote-transport.js", "if (u.ok) { args.meta = u.meta;", "if (true) { args.meta = u.meta;"],
   ["user verification only preferred", "bridge-crypto.js", 'allowCredentials: [{ type: "public-key", id: credentialId }], userVerification: "required"', 'allowCredentials: [{ type: "public-key", id: credentialId }], userVerification: "preferred"'],
@@ -32,10 +32,20 @@ export const MUTATIONS = [
   ["lease treated as a fresh action", "unlock.js", 'lease_required: "lease"', 'lease_required: "fresh"'],
   ["any refusal code is accepted", "unlock.js", "if (!purpose || meta?.purpose !== purpose ||", "if (!purpose ||"],
   ["unknown subject kind accepted", "bridge-crypto.js", "!KINDS.has(s.kind) || ", ""],
-  ["credential made before the person's click", "unlock.js", "await gate?.();\n", ""],
+  ["credential made without the person's click", "unlock.js", "await gate?.();", ""],
   ["credential made without a platform authenticator check", "unlock.js", "if (!await win.PublicKeyCredential?.isUserVerifyingPlatformAuthenticatorAvailable?.()) return no(\"no_platform\");", ""],
-  ["cancel does not close the sheet", "unlock.js", "const finish = (r) => { if (done) return; done = true; clearTimeout(timer); sheet?.close(); resolve(r); };", "const finish = (r) => { if (done) return; done = true; clearTimeout(timer); resolve(r); };"],
-  ["a refusal is not shown the fixed sentence", "remote-transport.js", "onRefusal(code, unlockText(u.reason));", "onRefusal(code, \"\");"],
+  ["credential_begin sent before the click", "unlock.js", ["await gate?.();", "const challenge = await registrationChallenge({"], ["", "await gate?.(); const challenge = await registrationChallenge({"]],
+  ["scope fixed to type in the challenge", "unlock.js", "purpose, scope: meta.scope, expiresMs", "purpose, scope: \"type\", expiresMs"],
+  ["empty lines not collapsed", "unlock.js", 'if (l.trim() === "") { blank++; continue; }', "if (false) { blank++; continue; }"],
+  ["end of the text not shown apart", "unlock.js", "tail: p.view.lines > 1 || p.view.chars > TAIL_CHARS ? p.view.tail : \"\"", "tail: \"\""],
+  ["size not stated", "unlock.js", "const facts = [`${p.view.lines} line${p.view.lines === 1 ? \"\" : \"s\"}, ${p.view.chars} characters`, ", "const facts = ["],
+  ["too long text still opens", "unlock.js", "if (!view.ok) throw", "if (false) throw"],
+  ["line limit raised", "unlock.js", "MAX_LINES = 40", "MAX_LINES = 4000"],
+  ["character limit raised", "unlock.js", "MAX_CHARS = 2000", "MAX_CHARS = 2000000"],
+  ["abort does not close the sheet", "unlock.js", 'signal?.addEventListener("abort", onAbort, { once: true });', ""],
+  ["transport does not hand over its abort", "remote-transport.js", "rid: sent.id }, { signal });", "rid: sent.id }, {});"],
+  ["cancel does not close the sheet", "unlock.js", "sheet?.close(); resolve(r); };", "resolve(r); };"],
+  ["a refusal is not shown the fixed sentence", "remote-transport.js", "onRefusal(code, text);\n              throw", "onRefusal(code, \"\");\n              throw"],
 ];
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -46,8 +56,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const dir = mkdtempSync(join(tmpdir(), "unlock-mut-"));
     cpSync(SRC, dir, { recursive: true });
     const p = join(dir, file), s = readFileSync(p, "utf8");
-    if (!s.includes(from)) { console.log(`SKIPPED (pattern not found): ${name}`); survivors++; rmSync(dir, { recursive: true }); continue; }
-    writeFileSync(p, s.replace(from, to));
+    const pairs = Array.isArray(from) ? from.map((f, i) => [f, to[i]]) : [[from, to]];
+    if (!pairs.every(([f]) => s.includes(f))) { console.log(`SKIPPED (pattern not found): ${name}`); survivors++; rmSync(dir, { recursive: true }); continue; }
+    writeFileSync(p, pairs.reduce((acc, [f, t]) => acc.replace(f, t), s));
     const r = spawnSync(process.execPath, ["--test", "--test-force-exit", TEST], { env: { ...process.env, UNLOCK_JS_DIR: dir }, encoding: "utf8", timeout: 60_000 });
     const killed = r.status !== 0;
     if (!killed) survivors++;

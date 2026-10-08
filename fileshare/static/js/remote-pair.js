@@ -114,7 +114,7 @@ export async function runPairing({ link, label, signal, now = Date.now, onFinger
     // gate() is the person's click (the ceremony follows a gesture). No credential: still paired, but no Type.
     const send = async (m) => { const a = await ask({ meta: m }, (c) => session.receive(c.env, c.mailbox), 15_000); return a.silent || a.refusal ? null : a.meta; };
     const cred = await (deps.register || registerCredential)({ session, label, send, gate });
-    onCredential?.(cred.ok ? "" : unlockText(cred.reason === "no_platform" ? "no_platform" : "refused"));
+    onCredential?.(cred.ok ? "" : unlockText(cred.reason === "no_platform" || cred.reason === "timeout" ? cred.reason : "refused"));
     onState?.("Waiting for you to approve this browser on the computer.");
 
     while (now() - sentAt < offerMs && !signal?.aborted) {

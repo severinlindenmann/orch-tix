@@ -17,7 +17,7 @@ import { deviceId } from "./bridge-crypto.js";
 import { hexToBytes } from "./crypto.js";
 import { createMailbox } from "./remote-mailbox.js";
 import { bridgeTransport } from "./remote-transport.js";
-import { askAssertion } from "./unlock.js";
+import { askAssertion, sheetOpen } from "./unlock.js";
 import { isNeverPage } from "./frame-render.js";
 import { SCOPES, canOpen, hostMessage } from "./remote-model.js";
 
@@ -91,7 +91,7 @@ async function select(state, id) {
     if (code === "not_paired") forgetWorkspace(id).then(() => { state.paired.set(id, false); render(state); }).catch(() => {});   // the host does not know us
   } });
   state.mailbox = mailbox;
-  state.host = createFrameHost({ mount: $("remote-frame"), transport, scopes: SCOPES, start: "/", title: `Dashboard of ${state.labels.get(id) || "a workspace"}`,
+  state.host = createFrameHost({ blocked: sheetOpen, mount: $("remote-frame"), transport, scopes: SCOPES, start: "/", title: `Dashboard of ${state.labels.get(id) || "a workspace"}`,
     viewer: (v) => { if (isNeverPage(v?.path || "")) { state.refusal = NOT_REMOTE; notice(NOT_REMOTE); } else toast("Opening files from the dashboard comes later.", "info"); },
     download: () => toast("Downloads from the dashboard come later.", "info"),
     notice: (n) => { if (n.text) notice(n.text); } });

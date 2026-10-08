@@ -23,7 +23,7 @@ REMOTE_JS = ["bridge-wipe.js", "remote.js", "remote-mailbox.js", "remote-model.j
 REMOTE_JS_BUDGET = 34_500          # bytes, uncompressed; +2.5 kB for the R11 wiring (credential step at pairing, retry once after the sheet)
 # The unlock sheet and the platform credential (R11, docs/bridge-protocol.md section 9): its own allowance, outside the shell's.
 UNLOCK_JS = ["unlock.js"]
-UNLOCK_JS_BUDGET = 9_500           # bytes, uncompressed
+UNLOCK_JS_BUDGET = 11_500          # bytes, uncompressed (the text limits and the abort handling of the review round included)
 
 
 def test_the_offline_shell_stays_within_its_budget():
