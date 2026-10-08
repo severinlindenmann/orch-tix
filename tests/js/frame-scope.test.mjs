@@ -179,3 +179,11 @@ test("the shim talks to the host through one captured port: window.postMessage o
   assert.match(src, /^\s*Object\.freeze\(window\.orchHost\);/m);
   assert.match(src, /^\s*Object\.freeze\(window\.orchHost\.pageHistory\);/m);
 });
+
+test("checkRequest: a page request may name a fragment and a push flag, nothing else carries them", () => {
+  const ok = (over) => checkRequest(req({ intent: "page", path: "/t/L-1", ...over }), scopes);
+  assert.deepEqual([ok({ hash: "#a", push: true }).req.hash, ok({ hash: "#a", push: true }).req.push], ["#a", true]);
+  for (const hash of ["a", 7, null, "#" + "x".repeat(1024)]) assert.equal(ok({ hash }).req.hash, "", String(hash));
+  assert.equal(ok({ push: "yes" }).req.push, false);
+  assert.equal(checkRequest(req({ hash: "#a" }), scopes).req.hash, "", "not for a fetch");
+});

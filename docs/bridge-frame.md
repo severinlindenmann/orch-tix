@@ -83,6 +83,20 @@ is speaking. The frame host therefore does not trust a name; it hands the shim o
    the shim opens by announcing `write` (it writes each page into the same window; that fires one more load in Chromium
    and WebKit): at most two within 1.5 s. The announcement (a message) and the load are separate tasks and may arrive in
    either order, so an unannounced load gets 150 ms of grace. Any other load rebuilds the iframe at once.
+7. **A page that was left is destroyed** (orch-core#328). A document write keeps the window, so the previous page's
+   timers, retries, streams and closures would go on running inside the next page (no `pagehide` fires), stale code
+   acting as the current page with the frame's powers. So the shim writes only the *first* page into a frame (a frame
+   that has not sent `write` yet is "fresh"). Every later page request is answered by the host with a **new iframe**: it
+   cancels the old document's streams and requests, closes its port, removes the iframe (the browsing context, with
+   everything in it, is gone) and builds a new one (new token, new nonce, a new `hello`/`ready` handshake), then sends
+   the page as `show` on the new port. History bookkeeping, the swap cap and the pending questions' rules carry over
+   (questions are withdrawn). Messages from the old port are dropped (its handler is removed and every handler checks
+   that the event came from the live port). An older page answer loses to a newer request (ids rise within a frame); a
+   page that navigates in a loop gets `err busy` after 60 swaps a minute. The host keeps the answers to `asset`
+   requests across frames (128 entries, 24 MB), because the new frame of every page would fetch the same stylesheets
+   and scripts again over the relay. Not done, on purpose: tracking and cancelling what the shim can see (timers,
+   `EventSource`, `fetch`) would miss a captured native reference, a Promise or message-channel loop and any page
+   script that ran before the hooks; destroying the frame needs no list of what a page might have started.
 
 Hardening of the shim against its own realm. A page's scripts run in the same JavaScript realm as the shim and can
 poison prototypes. Before any page script exists, the shim captures the port's `postMessage`, `Reflect.apply`, the
@@ -104,7 +118,7 @@ On the port (no `k` field). Frame to host:
 | `t` | Fields | Meaning |
 | --- | --- | --- |
 | `pong` | `n` | answer to `ping` |
-| `req` | `id`, `gen`, `intent` (`page`, `fetch`, `asset`, `open`), `method`, `path`, `headers`, `body` (ArrayBuffer) | one request. `page`: a navigation; `open`: a link that opens elsewhere (the answer is never drawn in the frame) |
+| `req` | `id`, `gen`, `intent` (`page`, `fetch`, `asset`, `open`), `method`, `path`, `headers`, `body` (ArrayBuffer), `hash`, `push` (page only) | one request. `page`: a navigation (`hash`, `push`: the fragment and whether it is a history entry, for the frame that will show it); `open`: a link that opens elsewhere (the answer is never drawn in the frame) |
 | `sopen` | `id`, `gen`, `path` | an EventSource (a GET stream) |
 | `sclose`, `abort` | `id` | the page closed a stream or aborted a request |
 | `write` | | the shim is about to write a page; the host cancels everything in flight and withdraws any question |
@@ -116,7 +130,7 @@ On the port (no `k` field). Frame to host:
 | `download` | `path` | a `download` link |
 | `log` | `m` | a script error, 200 characters at most |
 
-Host to frame: `ping {n}`, `go {path}` (the app starts a page: first page, Back, Forward), `res {id, gen, status, headers,
+Host to frame: `ping {n}`, `go {path}` (the app starts a page: first page, Back, Forward), `show {path, html, hash, push}` (a fresh frame's first page after a swap), `res {id, gen, status, headers,
 url, body}`, `page {id, gen, path, html}`, `handled {id, gen, outcome}`, `err {id, gen, code, message}`, `sdata {id, gen,
 chunk}`, `send {id, gen}`, `copied {id, ok}`. On the window: `hello {k, t, tok}` (frame to host) and `ready {k, t}` with the
 port (host to frame).

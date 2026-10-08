@@ -104,5 +104,7 @@ export function checkRequest(msg, scopes, { bodyMax = BODY_MAX } = {}) {
   const headers = cleanHeaders(msg.headers);
   if (headers === null) return { ok: false, code: "shape" };
   if (!scopes.allows(method, path, { stream })) return { ok: false, code: "scope" };
-  return { ok: true, req: { id: msg.id, gen: msg.gen, intent, method, path, headers, body, stream } };
+  // a page request also names the fragment and whether it is a new history entry: the host may show the answer in a fresh frame
+  const hash = intent === "page" && typeof msg.hash === "string" && msg.hash.length <= 1024 && msg.hash.startsWith("#") ? msg.hash : "";
+  return { ok: true, req: { id: msg.id, gen: msg.gen, intent, method, path, headers, body, stream, hash, push: msg.push === true } };
 }
