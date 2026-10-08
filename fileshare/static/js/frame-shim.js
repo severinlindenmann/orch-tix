@@ -225,6 +225,7 @@
   // (an SVG anchor's .target is an object, so the attribute is read)
   const outClick = (e, a) => { const t = a.getAttribute("target"); return Boolean((t && t !== "_self") || e.ctrlKey || e.metaKey || e.shiftKey); };
   window.orchHost = {
+    remote: true,                                    // this frame only shows a workspace through the relay: the dashboard batches its key posts
     path: () => part(/^[^?#]*/),
     search: () => part(/\?[^#]*/),
     url: () => current.split("#")[0],

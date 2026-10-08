@@ -18,6 +18,7 @@ import { hexToBytes } from "./crypto.js";
 import { createMailbox } from "./remote-mailbox.js";
 import { bridgeTransport } from "./remote-transport.js";
 import { askAssertion } from "./unlock.js";
+import { leaseGlue } from "./remote-lease.js";
 import { isNeverPage } from "./frame-render.js";
 import { SCOPES, canOpen, hostMessage } from "./remote-model.js";
 
@@ -40,6 +41,13 @@ function notice(text) {
   const n = $("remote-notice");
   n.textContent = text || "";
   n.hidden = !text;
+}
+
+// "Typing unlocked until 14:32": the lease is 15 minutes from the confirmation (remote-lease.js); gone when it ends.
+function leaseNote(until) {
+  const n = $("lease-note");
+  n.textContent = until ? `Typing unlocked until ${new Date(until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "";
+  n.hidden = !until;
 }
 
 const pill = (role, ic, text) => el("span", { class: `pill r-${role}` }, icon(ic), el("span", {}, text));
@@ -70,6 +78,8 @@ function render(state) {
 }
 
 function closeCurrent(state) {
+  state.glue?.stop();
+  leaseNote(null);
   state.host?.destroy();
   state.mailbox?.close();
   state.host = state.mailbox = null;
@@ -86,11 +96,13 @@ async function select(state, id) {
   const session = await openSession(id).catch(() => null);
   if (!session || !canOpen(s, true)) { render(state); notice(session ? hostMessage(s?.state) : "This browser is not paired with this workspace."); return; }
   const mailbox = createMailbox(id);
-  const transport = bridgeTransport({ session, mailbox, unlock: askAssertion, onRefusal: (code, text) => {
+  const glue = leaseGlue({ ask: askAssertion, say: notice, onLease: leaseNote });
+  const transport = glue.wrap(bridgeTransport({ session, mailbox, unlock: glue.unlock, onRefusal: (code, text) => {
     state.refusal = text; notice(text);
     if (code === "not_paired") forgetWorkspace(id).then(() => { state.paired.set(id, false); render(state); }).catch(() => {});   // the host does not know us
-  } });
+  } }));
   state.mailbox = mailbox;
+  state.glue = glue;
   state.host = createFrameHost({ mount: $("remote-frame"), transport, scopes: SCOPES, start: "/", title: `Dashboard of ${state.labels.get(id) || "a workspace"}`,
     viewer: (v) => { if (isNeverPage(v?.path || "")) { state.refusal = NOT_REMOTE; notice(NOT_REMOTE); } else toast("Opening files from the dashboard comes later.", "info"); },
     download: () => toast("Downloads from the dashboard come later.", "info"),

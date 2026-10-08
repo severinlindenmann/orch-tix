@@ -19,8 +19,8 @@ FRAME_CSS = ["frame.css"]          # loaded by frame-host.js itself, so app.css 
 FRAME_JS_BUDGET = 72_000           # bytes, uncompressed (the scripts)
 # The Remote pages' glue (R10 wiring: the ceremony, the workspace list, the transport over the mailbox) is likewise its
 # own allowance; the tiny sign-out wipe (bridge-wipe.js) is counted here too.
-REMOTE_JS = ["bridge-wipe.js", "remote.js", "remote-mailbox.js", "remote-model.js", "remote-pair.js", "remote-pair-ui.js", "remote-transport.js"]
-REMOTE_JS_BUDGET = 34_500          # bytes, uncompressed; +2.5 kB for the R11 wiring (credential step at pairing, retry once after the sheet)
+REMOTE_JS = ["bridge-wipe.js", "remote.js", "remote-lease.js", "remote-mailbox.js", "remote-model.js", "remote-pair.js", "remote-pair-ui.js", "remote-transport.js"]
+REMOTE_JS_BUDGET = 38_500          # bytes, uncompressed; +4 kB for typing from the phone (R6 phone side: remote-lease.js, the lease note); +2.5 kB for the R11 wiring (credential step at pairing, retry once after the sheet)
 # The unlock sheet and the platform credential (R11, docs/bridge-protocol.md section 9): its own allowance, outside the shell's.
 UNLOCK_JS = ["unlock.js"]
 UNLOCK_JS_BUDGET = 9_500           # bytes, uncompressed

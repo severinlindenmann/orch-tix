@@ -7,6 +7,7 @@ import { MESSAGES } from "./bridge-crypto.js";
 export const SCOPES = { rules: [
   { methods: ["GET"], pattern: "/" }, { methods: ["GET", "POST"], pattern: "/*" },
   { methods: ["GET"], pattern: "/events", stream: true }, { methods: ["GET"], pattern: "/api/events", stream: true },
+  { methods: ["GET"], pattern: "/terminals/stream", stream: true }, { methods: ["GET"], pattern: "/terminals/:name/stream", stream: true },
 ] };
 
 // A refusal is shown as the device's own fixed text for its code; nothing the host or the request said is echoed (§6.2).

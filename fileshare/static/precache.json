@@ -81,6 +81,7 @@
     "/static/js/pushsettings.js",
     "/static/js/recorder.js",
     "/static/js/recovery.js",
+    "/static/js/remote-lease.js",
     "/static/js/remote-mailbox.js",
     "/static/js/remote-model.js",
     "/static/js/remote-pair-ui.js",

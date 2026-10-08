@@ -45,8 +45,9 @@ const NEEDS_UNLOCK = new Set(["assertion_required", "lease_required"]);
 // the sheet is shown, and only a confirmed assertion is sent, once, as the `assert` request whose answer is the
 // refused request's own result (9.4). The same request is not asked a second time.
 export function bridgeTransport({ session, mailbox, onRefusal = () => {}, unlock = null, firstChunkMs = FIRST_CHUNK_MS, chunkMs = CHUNK_MS }) {
-  async function* exchange({ method, path, headers, body, stream, signal }) {
+  async function* exchange({ method, path, headers, body, stream, streamRid, signal }) {
     const args = { meta: { op: "http", method, path, headers }, data: body || EMPTY, flags: stream ? F_STREAM : 0 };
+    if (streamRid) args.stream = hexToBytes(streamRid);    // a typing-lease request names the stream this device opened (§9.4, remote-lease.js)
     let asked = false;
     for (let round = 0; round < 3; round++) {            // a second and third round only for a resend the host asked for
       const q = queue();
@@ -83,7 +84,7 @@ export function bridgeTransport({ session, mailbox, onRefusal = () => {}, unlock
               asked = true;
               const u = await unlock(session, { code, meta: r.meta, rid: sent.id });
               if (signal?.aborted) return;
-              if (u.ok) { args.meta = u.meta; resend = true; break; }
+              if (u.ok) { args.meta = u.meta; delete args.stream; resend = true; break; }   // the assert request names no stream
               onRefusal(code, unlockText(u.reason));
               throw Object.assign(new RefusalError(code), { message: unlockText(u.reason) });
             }
@@ -96,7 +97,7 @@ export function bridgeTransport({ session, mailbox, onRefusal = () => {}, unlock
             if (!Number.isInteger(m.status) || m.status < 100 || m.status > 599) throw new Error("The computer sent an answer this app cannot read.");
             const h = {};
             for (const [k, v] of Object.entries(m.headers && typeof m.headers === "object" ? m.headers : {})) if (typeof v === "string") h[k.toLowerCase()] = v;
-            yield { type: "head", status: m.status, headers: h, page: m.page === true };
+            yield { type: "head", status: m.status, headers: h, page: m.page === true, rid: sent.id };
           }
           if (r.data?.length) yield { type: "chunk", data: r.data };
           if (r.last) { finished = true; yield { type: "end" }; return; }
@@ -121,7 +122,7 @@ export function bridgeTransport({ session, mailbox, onRefusal = () => {}, unlock
     async *request(req) {
       let { method, path, body } = req;
       for (let hops = 0; ; hops++) {
-        const it = exchange({ method, path, headers: req.headers, body, stream: req.stream, signal: req.signal });
+        const it = exchange({ method, path, headers: req.headers, body, stream: req.stream, streamRid: hops ? null : req.streamRid, signal: req.signal });
         let redirect = null;
         for await (const ev of it) {
           if (ev.type === "head" && !req.stream && [301, 302, 303, 307, 308].includes(ev.status)) {
