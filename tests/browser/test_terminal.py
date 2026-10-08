@@ -301,6 +301,7 @@ def test_the_stream_closing_while_the_sheet_is_open_is_a_readable_refusal_and_ty
     host.end_streams()                                        # the live view goes away while the person decides
     confirm(page)
     expect(page.locator("#remote-notice")).to_contain_text("not allowed to do that", timeout=30000)
+    expect(page.locator("#remote-notice")).not_to_contain_text("may have changed")        # a lease refusal is not the start sentence
     assert host.typed == [] and host.posts == []              # the post number was never taken
     assert host.audit[-1]["why"] == "forbidden_scope"
     expect(note(page)).to_be_hidden()
@@ -322,3 +323,21 @@ def test_switching_workspace_clears_the_typing_unlocked_note(signed_in, base, ma
     expect(note(signed_in)).to_contain_text("Typing unlocked until", timeout=30000)
     signed_in.get_by_role("button", name="Open Second").click()
     expect(note(signed_in)).to_be_hidden(timeout=30000)
+
+
+def test_a_slow_answer_that_arrives_after_switching_workspace_sets_no_note(signed_in, base, make_host, authenticator):
+    a = make_host("Acme Energy")
+    b = make_host("Second")
+    a.delay = 3.0                                              # the computer takes its time to run the confirmed post
+    pair(signed_in, base, a, scope="type")
+    pair(signed_in, base, b, scope="type")
+    open_dash(signed_in, base, a)
+    frame_of(signed_in).locator("#go").click()
+    wait_h1(signed_in, "Terminal work")
+    until(lambda: a.open)
+    typed_in_frame(signed_in, "x")
+    expect(sheet(signed_in)).to_be_visible(timeout=30000)
+    confirm(signed_in)
+    signed_in.get_by_role("button", name="Open Second").click()
+    signed_in.wait_for_timeout(4500)
+    expect(note(signed_in)).to_be_hidden()

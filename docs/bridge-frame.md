@@ -313,7 +313,7 @@ and the transport.
   that posts again, with any spelling, gets the same answer with no request and no new sheet. A sheet that was already open
   (`busy`) is not remembered.
 - **A confirmed start the computer then refuses** with `assertion_failed` shows "The confirmation was refused.
-  The request may have changed while you were confirming; nothing was started." The computer adds no reason on the wire (its
+  The request may have changed while you were confirming; nothing was done." The computer adds no reason on the wire (its
   `why` is for its own log), so the phone infers it from the order: our own confirmation of a fresh action, then the plain
   refusal. A lease refusal keeps the plain text.
 - **Revoked, stopped, scope changed, not paired**: after one of these the lease routes are blocked here (`dead`), with the
@@ -340,3 +340,20 @@ and the transport.
   user-activation API is tested in Chromium only (needs a DevTools session); other tests replace the host's activation
   test, because the driver's own scripts switch real activation on.
 - A 3xx never reaches the frame: the transport follows redirects.
+
+## The AI Factory (R13, #27)
+
+The Factory pages (permission cards, the epic's Pause, Stop and Start, the Ready and Stopped reports, the verdict) are
+the dashboard's own pages, drawn in this frame; their buttons post urlencoded forms through the same transport. When the
+host answers `assertion_required` it parks the request; the unlock sheet shows the host's exact subject text, and after
+the confirmation the host runs the request it PARKED (bridge-protocol.md section 9.4), so the form's bytes are the
+original ones; the data on the `assert` request is ignored. Deny, Revoke and Pause (also Stop: the dashboard has one
+route) need no sheet (Decide). The app adds only status. The status is the TIX server's report, not the host's:
+presence is plaintext the server could forge, so every status word is a hint to check in the dashboard. The workspace
+card (status page and `/remote`) names the Factory code from the heartbeat (running, paused, waiting on a permission,
+ready, stopped, done) with children done and budget used; a waiting Factory gets a link that opens the workspace
+(`/remote?space=...`, which opens the dashboard home where the cards are). A lost host shows "host lost, nothing heard
+for 5 min. Nothing can be approved from here until it is back; what runs on the computer is unknown." The earlier
+wording of the issue ("nothing new starts and no parked child wakes") was wrong: lost only means no heartbeat reached
+the server, the Factory runner never looks at the relay and goes on locally. Tested against the fake host
+(`tests/browser/test_factory.py`); a real phone and the real dashboard's pages are not covered.

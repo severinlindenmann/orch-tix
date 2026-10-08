@@ -76,6 +76,7 @@ class FakeHost:
                       "pending_pairs": {}, "phones": {}, "streams": {}, "unverified": [], "host_pub": self.host_pub.hex()}
         self.pages = pages or {}
         self.seen: list[dict] = []           # the meta of every request that ran
+        self.bodies: list[tuple] = []        # (method, path, body bytes) of every request that ran
         self.lie_fingerprint = False         # True: the pending answer names a different device key's fingerprint
         self.silent = False                  # True: read requests and answer nothing
         self.sse: dict[str, list[bytes]] = {}   # path -> the frames a stream for it opens with
@@ -280,6 +281,7 @@ class FakeHost:
         """Run a request that may run (also a parked one after its assertion): `req` is the header answered."""
         rid = req.rid.hex()
         self.seen.append(meta)
+        self.bodies.append((meta.get("method"), meta.get("path"), data))
         path = meta.get("path", "").split("?")[0]
         if meta.get("op") == "cancel":
             self.cancelled.append(req.stream.hex())
@@ -328,6 +330,10 @@ class FakeHost:
                 return self._assert(req, meta)
             data = bytes.fromhex(res["data"])
             rule = self.rule_for(req, meta, data)
+            if callable(rule):                  # a rule that reads the request: (meta, body bytes) -> rule | None
+                rule = rule(meta, data)
+            if rule and rule.get("refuse"):      # the host builds no subject (a stale hash, an unknown request): a plain refusal
+                return self._send(req, {"refusal": rule["refuse"]}, flags=ref.F_LAST | ref.F_REFUSAL)
             if rule and not (rule.get("purpose") == "lease" and self.leases.get(req.device.hex(), 0) > self._now()):
                 return self._ask_assertion(req, meta, data, rule)
             self._serve(req, meta, data)

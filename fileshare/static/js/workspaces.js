@@ -9,7 +9,7 @@ import { keysOrLogin, loadMirrors, signInAgain } from "./mirrors-data.js";
 import { openSpaceLabel } from "./mirror-crypto.js";
 import { mapLimit } from "./format.js";
 import { UNKNOWN_SPACE, cardTitle } from "./mirror-model.js";
-import { SPACE_ID, actionFor, activity, groupByMachine, needsYou, openHref, seenText, stateOf } from "./workspaces-model.js";
+import { SPACE_ID, actionFor, activity, factoryHref, factoryWaiting, FACTORY_WAITING_HINT, groupByMachine, needsYou, openHref, seenText, stateOf } from "./workspaces-model.js";
 
 const REFRESH_MS = 10_000;
 const $ = (id) => document.getElementById(id);
@@ -36,6 +36,7 @@ function rowEl(s, ctx) {
     el("p", { class: "wrow-what" }, what.length ? what.join(" · ")
       : s.state === "online" || s.state === "not_answering" ? "Nothing reported running" : "No live data"),
     el("div", { class: "wrow-needs" }, needsEl(needsYou(s, ctx.rows))),
+    factoryWaiting(s) ? el("a", { class: "wrow-factory hint", href: factoryHref(s.id) }, FACTORY_WAITING_HINT, " Open the Factory") : null,
     el("span", { class: "wrow-devs hint" }, devicesText(ctx.devices)),
     el("a", { class: s.state === "online" ? "btn btn-accent wrow-act" : "btn wrow-act", href: openHref(s.id, s.state === "online"),
       "aria-label": `${actionFor(s)} ${s.label}` }, actionFor(s)));

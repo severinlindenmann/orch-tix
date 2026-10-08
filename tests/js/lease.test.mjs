@@ -370,7 +370,7 @@ test("a confirmed start the computer then refuses says the request may have chan
   const t = T.bridgeTransport({ session: s.session, mailbox: s.mailbox, unlock: s.glue.unlock, onRefusal: (c, text) => said.push(text) });
   await assert.rejects(collect(t.request({ ...KEYS(), path: "/t/TIX-4/agent/start", body: null })), (e) => e.message === CHANGED_TEXT && e.code === "assertion_failed");
   assert.deepEqual(said, [CHANGED_TEXT]);
-  assert.match(CHANGED_TEXT, /nothing was started/);
+  assert.match(CHANGED_TEXT, /nothing was done/);
   const w = await s.watch();
   await assert.rejects(collect(s.transport.request(KEYS())), (e) => e.message !== CHANGED_TEXT && e.code === "assertion_failed");
   await w.close();
@@ -382,11 +382,12 @@ test("a plain refusal for a start that was never confirmed keeps the plain sente
   await assert.rejects(collect(s.transport.request({ ...KEYS(), path: "/terminals/new", body: null })), (e) => e.message !== CHANGED_TEXT);
 });
 
-test("normPath: one spelling for the query, dots, doubled and trailing slashes and escapes of plain characters", () => {
+test("normPath: one key for the query, fragment, doubled and trailing slashes; it only makes a key", () => {
   assert.equal(T.normPath("/terminals/work/keys"), "/terminals/work/keys");
-  for (const v of ["/terminals/work/keys?x=1", "/terminals/work/keys/", "/terminals//work/keys", "/terminals/./work/keys", "/terminals/x/../work/keys", "/terminals/%77ork/keys", "/terminals/work/keys#f"])
+  for (const v of ["/terminals/work/keys?x=1", "/terminals/work/keys/", "/terminals//work/keys", "/terminals/work/keys#f"])
     assert.equal(T.normPath(v), "/terminals/work/keys", v);
   assert.equal(T.normPath("/a%2Fb"), "/a%2Fb");
+  assert.equal(T.normPath("/"), "/");
   assert.notEqual(T.normPath("/terminals/Work/keys"), T.normPath("/terminals/work/keys"));
 });
 
@@ -404,7 +405,7 @@ test("a declined lease sheet is remembered for the path in any spelling: no requ
   const d = declining([lease(), open]);
   await assert.rejects(collect(d.t.request(KEYS("work"))), (e) => e.declined === true);
   const n = d.sent.length;
-  for (const path of ["/terminals/work/keys", "/terminals/work/keys?a=1", "/terminals/work/keys/", "/terminals/%77ork/keys", "/terminals/./work/keys"])
+  for (const path of ["/terminals/work/keys", "/terminals/work/keys?a=1", "/terminals/work/keys/", "/terminals//work/keys"])
     await assert.rejects(collect(d.t.request({ ...KEYS("work"), path })), (e) => e.declined === true, path);
   assert.equal(d.sent.length, n);
   assert.deepEqual(d.asks, ["lease_required"]);
@@ -441,7 +442,7 @@ test("a declined stream sheet is remembered for the path in any spelling too", a
   const st = (path) => ({ method: "GET", path, headers: {}, body: null, stream: true, signal: new AbortController().signal });
   await assert.rejects(collect(d.t.request(st("/terminals/work/stream"))), (e) => e.declined === true);
   const n = d.sent.length;
-  for (const p of ["/terminals/work/stream?x=1", "/terminals/%77ork/stream", "/terminals/work/stream/"])
+  for (const p of ["/terminals/work/stream?x=1", "/terminals//work/stream", "/terminals/work/stream/"])
     await assert.rejects(collect(d.t.request(st(p))), (e) => e.declined === true, p);
   assert.equal(d.sent.length, n);
   assert.deepEqual(d.asks, ["lease_required"]);
@@ -449,7 +450,24 @@ test("a declined stream sheet is remembered for the path in any spelling too", a
 
 test("another spelling of a lease path is still a lease request (no stream: refused here, nothing sent)", async () => {
   const s = setup([]);
-  for (const path of ["/terminals/work/keys/", "/terminals/%77ork/keys?x=1", "/terminals/./work/keys"])
+  for (const path of ["/terminals/work/keys/", "/terminals//work/keys?x=1"])
     await assert.rejects(collect(s.transport.request({ ...KEYS(), path })), (e) => e.message === L.LEASE_TEXT.no_stream, path);
   assert.equal(s.sent.length, 0);
+});
+
+test("a stream opened with a query string still serves its terminal's keys, and the keys are sent on exactly that stream", async () => {
+  const s = setup([open, lease(), done()]);
+  const w = await s.watch("/terminals/work/stream?since=5");
+  await collect(s.transport.request(KEYS()));
+  assert.equal(s.sent[1].stream, w.rid);
+  assert.equal(s.sent[1].meta.path, "/terminals/work/keys");        // the sent path is the page's, never rewritten
+  await w.close();
+});
+
+test("a path with a trailing slash is sent as the page wrote it", async () => {
+  const s = setup([open, lease(), done()]);
+  const w = await s.watch();
+  await collect(s.transport.request({ ...KEYS(), path: "/terminals/work/keys/" }));
+  assert.equal(s.sent[1].meta.path, "/terminals/work/keys/");
+  await w.close();
 });

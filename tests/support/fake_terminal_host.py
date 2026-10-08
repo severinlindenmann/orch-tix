@@ -16,6 +16,7 @@ section 9.4). TEST SUPPORT ONLY.
 `typed` is every text item that reached the terminal, in order; `posts` is every lease-route or start POST that ran."""
 import json
 import re
+import time
 
 from tests.support import bridge_protocol_ref as ref
 from tests.support.fake_bridge_host import FakeHost
@@ -38,6 +39,7 @@ class TerminalHost(FakeHost):
         self.posts: list[dict] = []               # {"path", "body", "status"} of every such POST that ran
         self.taken: dict[tuple, int] = {}         # (device, page) -> the highest post number taken
         self.refused: list[tuple] = []            # (path, code) of every such POST refused before it ran
+        self.delay = 0.0                          # seconds a lease-route or start POST takes to run (a slow computer)
         self.headers_seen: list[tuple] = []       # (path, stream header hex or "") of every such POST that reached the host
 
     # ---- the rules
@@ -93,6 +95,8 @@ class TerminalHost(FakeHost):
         path = meta.get("path", "").split("?")[0]
         if _is(LEASE_ROUTES, meta) or _is(START_ROUTES, meta):
             self.seen.append(meta)
+            if self.delay:
+                time.sleep(self.delay)
             status, text = self._run_post(req.device.hex(), path, data)
             return self._send(req, {"status": status, "headers": {"content-type": "text/plain"}}, text.encode())
         super()._serve(req, meta, data)

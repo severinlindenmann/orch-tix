@@ -26,17 +26,10 @@ export const MAX_QUEUED = 256;            // chunks waiting for a consumer that 
 const ENDS_STREAMS = new Set(["revoked", "not_paired", "stopped", "scope_changed"]);   // after these no stream is opened again
 const MAX_REDIRECTS = 5;
 const EMPTY = new Uint8Array(0);
-// One spelling of a path for what is remembered about it: no query or fragment, no empty or "." segment, ".." resolved,
-// and a percent-escape of an unreserved character written as the character (the computer treats them alike).
-export function normPath(p) {
-  const out = [];
-  const plain = String(p).split(/[?#]/)[0].replace(/%([0-9a-f]{2})/gi, (m, h) => { const c = String.fromCharCode(parseInt(h, 16)); return /[A-Za-z0-9._~-]/.test(c) ? c : m.toUpperCase(); });
-  for (const seg of plain.split("/")) {
-    if (seg === "" || seg === ".") continue;
-    if (seg === "..") out.pop(); else out.push(seg);
-  }
-  return "/" + out.join("/");
-}
+// The key under which a path is remembered (declined sheets, stream gates, lease streams): no query or fragment, no empty
+// segment, so no trailing slash. Frame requests already pass validPath (no dot segments, no needless escapes). It is a lookup
+// key only: the path that is sent is never rewritten.
+export const normPath = (p) => "/" + String(p).split(/[?#]/)[0].split("/").filter(Boolean).join("/");
 const SLOW = "The dashboard could not keep up with the computer. Reconnecting.";
 
 export class RefusalError extends Error {
