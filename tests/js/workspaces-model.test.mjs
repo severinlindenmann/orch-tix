@@ -1,7 +1,7 @@
 // The status page's pure helpers (Remote R9): words, grouping, and "unknown is never zero".
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { FACTORY_LOST, STATE, actionFor, activity, factoryHref, factoryWaiting, groupByMachine, needsYou, openHref, seenText, stateOf } from "../../fileshare/static/js/workspaces-model.js";
+import { FACTORY_LOST, FACTORY_WAITING_HINT, STATE, actionFor, activity, factoryHref, factoryWaiting, groupByMachine, needsYou, openHref, seenText, stateOf } from "../../fileshare/static/js/workspaces-model.js";
 
 const online = { id: "a".repeat(32), state: "online", sessions: 2, in_progress: 1, needs_you: 3, factory: "running",
   children_done: 4, children_total: 9, budget_pct: 37, last_seen: 1000 };
@@ -71,13 +71,28 @@ test("each Factory code has its own words and only waiting is a permission", () 
 test("a lost host says what stops and never anything about sessions", () => {
   for (const factory of ["running", "paused", "waiting", "ready"]) {
     const a = activity({ ...online, state: "lost", factory });
-    assert.deepEqual(a, ["Factory: host lost: nothing new starts and no parked child wakes until it is back"]);
+    assert.deepEqual(a, ["Factory: host lost, nothing heard for 5 min. Nothing can be approved from here until it is back; what runs on the computer is unknown."]);
     assert.equal(a[0], FACTORY_LOST);
-    assert.doesNotMatch(a.join(" "), /session|working|progress|budget/i);
+    assert.doesNotMatch(a.join(" "), /session|working|progress|budget|will keep|stopped|nothing new starts|no parked child/i);
   }
   for (const factory of ["none", "done", "stopped", undefined]) assert.deepEqual(activity({ ...online, state: "lost", factory }), []);
 });
 
 test("the Factory link opens the workspace in the frame at its home", () => {
-  assert.equal(factoryHref("a".repeat(32)), `/remote?space=${"a".repeat(32)}&path=%2F`);
+  assert.equal(factoryHref("a".repeat(32)), `/remote?space=${"a".repeat(32)}`);
+});
+
+test("a hostile Factory code prints nothing, never native code", () => {
+  for (const factory of ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf"]) {
+    assert.deepEqual(activity({ state: "online", factory }), []);
+    assert.equal(factoryWaiting({ state: "online", factory }), false);
+    assert.deepEqual(activity({ state: "lost", factory }), []);
+  }
+});
+
+test("an unanswering host that last said waiting is still reported as waiting, in TIX's words", () => {
+  const s = { state: "not_answering", factory: "waiting", children_done: 1, children_total: 4 };
+  assert.deepEqual(activity(s), ["Factory waiting on a permission · 1 of 4 done"]);
+  assert.equal(factoryWaiting(s), true);
+  assert.match(FACTORY_WAITING_HINT, /^TIX reports the Factory is waiting on a permission from you\./);
 });

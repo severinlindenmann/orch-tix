@@ -284,11 +284,15 @@ frame host's whole answer cap and the download cap. Nothing of the file runs; th
 
 The Factory pages (permission cards, the epic's Pause, Stop and Start, the Ready and Stopped reports, the verdict) are
 the dashboard's own pages, drawn in this frame; their buttons post urlencoded forms through the same transport. When the
-host answers `assertion_required` the unlock sheet shows the host's exact subject text and the very same form body is
-sent once more inside the `assert` request. Deny, Revoke and Pause need no sheet (Decide). The app adds only status: the
-workspace card (status page and `/remote`) names the Factory code from the heartbeat (running, paused, waiting on a
-permission, ready, stopped, done) with children done and budget used, a waiting Factory gets a link that opens the
-workspace in the frame (`/remote?space=...&path=%2F`; `path` is checked by `validPath`, anything else opens `/`), and a
-lost host shows "host lost: nothing new starts and no parked child wakes until it is back" with no claim about sessions
-already running. Tested against the fake host (`tests/browser/test_factory.py`); a real phone and the real dashboard's
-pages are not covered.
+host answers `assertion_required` it parks the request; the unlock sheet shows the host's exact subject text, and after
+the confirmation the host runs the request it PARKED (bridge-protocol.md section 9.4), so the form's bytes are the
+original ones; the data on the `assert` request is ignored. Deny, Revoke and Pause (also Stop: the dashboard has one
+route) need no sheet (Decide). The app adds only status. The status is the TIX server's report, not the host's:
+presence is plaintext the server could forge, so every status word is a hint to check in the dashboard. The workspace
+card (status page and `/remote`) names the Factory code from the heartbeat (running, paused, waiting on a permission,
+ready, stopped, done) with children done and budget used; a waiting Factory gets a link that opens the workspace
+(`/remote?space=...`, which opens the dashboard home where the cards are). A lost host shows "host lost, nothing heard
+for 5 min. Nothing can be approved from here until it is back; what runs on the computer is unknown." The earlier
+wording of the issue ("nothing new starts and no parked child wakes") was wrong: lost only means no heartbeat reached
+the server, the Factory runner never looks at the relay and goes on locally. Tested against the fake host
+(`tests/browser/test_factory.py`); a real phone and the real dashboard's pages are not covered.

@@ -28,6 +28,23 @@ def verdict(epic: str, title: str, children: list[str], note: str = "") -> str:
     return f"Accept epic {epic} {shown(title)}: mark done " + ", ".join(children) + (f". {shown(note)}" if note else "")
 
 
+def plain(epic: str, title: str, children: int) -> str:
+    return f"Approve the requirements, with no delegation, of epic {epic} {shown(title)} with {children} open children."
+
+
+def delegate(epic: str, title: str, children: int) -> str:
+    return f"Delegate to agents on epic {epic} {shown(title)} with {children} open children. Limits: max_children 10, max_size m"
+
+
+def ticket_verdict(ticket: str, title: str, verdict_word: str, criteria: list[str] = (), note: str = "") -> str:
+    acs = f" (criteria {', '.join(shown(a) for a in criteria)})" if verdict_word == "follow-up" and criteria else ""
+    return f"Verdict {shown(verdict_word)} on {ticket} {shown(title)}{acs}" + (f". {shown(note)}" if note else "")
+
+
+def action(method: str, target: str, body: str) -> str:
+    return f"{method} {shown(target)} under a running AI Factory epic: {shown(body)}"
+
+
 SHAPES = {
     "charter": re.compile(r"^(Start the AI Factory on|Delegate to agents on|Approve the requirements, with no delegation, of) "
                           r"epic \S+ [ -~]* with \d+ open children\.( Limits: \w+ \w+(, \w+ \w+)*)?$"),

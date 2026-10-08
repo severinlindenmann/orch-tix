@@ -91,7 +91,7 @@ def ran(host, path):
     ("epic", f"{PR}/PR-4/grant", FOR_EPIC, f"sha={SHA}&scope=epic"),
     ("verdict", f"/t/{EPIC}/verdict", VERDICT, f"seen={SEEN}&verdict=done"),
 ])
-def test_a_factory_approval_shows_the_hosts_exact_text_and_runs_the_same_form_once(setup, button, path, want, body):
+def test_a_factory_approval_shows_the_hosts_exact_text_and_the_host_runs_its_parked_request_once(setup, button, path, want, body):
     page, host = setup
     frame_of(page).locator(f"#{button}").click()
     expect(sheet(page)).to_be_visible(timeout=30000)
@@ -100,7 +100,7 @@ def test_a_factory_approval_shows_the_hosts_exact_text_and_runs_the_same_form_on
     assert ran(host, path) == []                                  # nothing ran before the person confirmed
     confirm(page)
     wait_h1(page, "Done")
-    assert ran(host, path) == [("POST", path, body.encode())]    # the very same urlencoded body, once
+    assert ran(host, path) == [("POST", path, body.encode())]    # the host ran the request it parked, once, with the original urlencoded bytes
     assert [a["ok"] for a in host.audit] == [True]
     expect(sheet(page)).to_have_count(0)
 
@@ -217,13 +217,13 @@ def test_a_waiting_factory_links_to_its_page_in_the_frame(signed_in, base, make_
     assert "/sandbox/dash" in frame_of(signed_in).url
 
 
-def test_remote_opens_the_frame_at_a_valid_path_and_ignores_an_invalid_one(signed_in, base, make_host, authenticator):
+def test_remote_ignores_a_path_in_the_address(signed_in, base, make_host, authenticator):
+    """An outside link must not choose which dashboard page the paired browser loads."""
     host = make_host(PAGES, requires())
     pair(signed_in, base, host)
     signed_in.goto(f"{base}/remote?space={host.space}&path=%2Fother")
-    wait_h1(signed_in, "Other")
-    signed_in.goto(f"{base}/remote?space={host.space}&path=%2F..%2Fx")
     wait_h1(signed_in, "Home")
+    assert all(b[1] != "/other" for b in host.bodies)
 
 
 @pytest.mark.parametrize("where", ["/workspaces", "/remote"])
@@ -241,8 +241,8 @@ def test_a_lost_host_says_what_stops_and_claims_nothing_about_running_sessions(s
     signed_in.route("**/api/presence", lose)
     signed_in.goto(f"{base}{where}")
     card = signed_in.locator(f'.wrow[data-space="{host.space}"]')
-    expect(card).to_contain_text("Factory: host lost: nothing new starts and no parked child wakes until it is back", timeout=30000)
+    expect(card).to_contain_text("Factory: host lost, nothing heard for 5 min. Nothing can be approved from here until it is back; what runs on the computer is unknown.", timeout=30000)
     text = card.inner_text().lower()
-    for word in ("session", "running", "working", "in progress", "budget", "done", "waiting"):
+    for word in ("session", "running", "working", "in progress", "budget", "done", "waiting", "nothing new starts", "no parked child"):
         assert word not in text, word
     assert card.locator(".wrow-factory").count() == 0

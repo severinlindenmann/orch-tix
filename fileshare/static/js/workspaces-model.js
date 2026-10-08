@@ -15,9 +15,9 @@ export const FACTORY = {
   none: "No Factory run", running: "Factory running", paused: "Factory paused", waiting: "Factory waiting on a permission",
   ready: "Factory ready", stopped: "Factory stopped", done: "Factory done",
 };
-// A lost host: only what stops, never a claim about sessions that may still be running on the computer.
-export const FACTORY_LOST = "Factory: host lost: nothing new starts and no parked child wakes until it is back";
-export const FACTORY_WAITING_HINT = "The Factory is waiting on a permission from you.";
+// Lost = no heartbeat reached the server for 5 min; the Factory itself never looks at the relay, so claim nothing about it.
+export const FACTORY_LOST = "Factory: host lost, nothing heard for 5 min. Nothing can be approved from here until it is back; what runs on the computer is unknown.";
+export const FACTORY_WAITING_HINT = "TIX reports the Factory is waiting on a permission from you.";
 const LIVE_FACTORY = new Set(["running", "paused", "waiting", "ready"]);
 export const UNKNOWN_MACHINE = "A machine";
 
@@ -46,7 +46,7 @@ export function activity(s) {
   const out = [];
   if (int(s.sessions) && s.sessions) out.push(plural(s.sessions, "session working", "sessions working"));
   if (int(s.in_progress) && s.in_progress) out.push(`${s.in_progress} in progress`);
-  if (FACTORY[s.factory] && s.factory !== "none") {
+  if (Object.hasOwn(FACTORY, s.factory) && s.factory !== "none") {
     let f = FACTORY[s.factory];
     if (int(s.children_done) && int(s.children_total)) f += ` · ${s.children_done} of ${s.children_total} done`;
     if (int(s.budget_pct)) f += ` · ${s.budget_pct}% of budget`;
@@ -55,7 +55,7 @@ export function activity(s) {
   return out;
 }
 
-// The Factory waits on a permission, from an answering host's heartbeat code (the text itself stays on the computer).
+// TIX's report (a heartbeat code) that the Factory waits on a permission.
 export const factoryWaiting = (s) => (s?.state === "online" || s?.state === "not_answering") && s.factory === "waiting";
 
 // The needs-you badge: the opened snapshot (works with every host off) when it loaded, else an answering
@@ -81,6 +81,6 @@ export function groupByMachine(spaces, labels = new Map()) {
 // The row's action: Open (the live dashboard, /remote) while the host answers, Snapshot otherwise.
 export const actionFor = (s) => (s?.state === "online" ? "Open" : "Snapshot");
 export const openHref = (id, online) => `/${online ? "remote?space" : "workspaces?open"}=${encodeURIComponent(id)}`;
-// The workspace's dashboard in the frame at a path (remote.js reads ?space and ?path). "/" is its home, where the cards are.
-export const factoryHref = (id) => `/remote?space=${encodeURIComponent(id)}&path=%2F`;
+// The dashboard home in the frame, where the Factory cards are.
+export const factoryHref = (id) => `/remote?space=${encodeURIComponent(id)}`;
 export const SPACE_ID = /^[0-9a-f]{32}$/;

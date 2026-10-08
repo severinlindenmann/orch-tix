@@ -10,7 +10,6 @@ import { openSpaceLabel } from "./mirror-crypto.js";
 import { mapLimit } from "./format.js";
 import { UNKNOWN_SPACE } from "./mirror-model.js";
 import { FACTORY_WAITING_HINT, SPACE_ID, activity, factoryWaiting, stateOf } from "./workspaces-model.js";
-import { validPath } from "./frame-scope.js";
 import { createFrameHost } from "./frame-host.js";
 import { DeviceSession } from "./bridge-session.js";
 import { deviceKey, forgetWorkspace, pinnedHostKey, workspaceRecord } from "./bridge-store.js";
@@ -82,7 +81,7 @@ function closeCurrent(state) {
   if (mailbox) setTimeout(() => mailbox.close(), CANCEL_GRACE_MS);   // the cancels still need the mailbox to be answered
 }
 
-async function select(state, id, path = "/") {
+async function select(state, id) {
   closeCurrent(state);
   state.selected = id;
   state.refusal = state.hostNote = null;
@@ -104,7 +103,7 @@ async function select(state, id, path = "/") {
   } });
   state.mailbox = mailbox;
   const viewer = state.viewer = createViewer($("remote-viewer"));
-  state.host = createFrameHost({ blocked: sheetOpen, mount: $("remote-frame"), transport, scopes: SCOPES, start: path, title: `Dashboard of ${state.labels.get(id) || "a workspace"}`,
+  state.host = createFrameHost({ blocked: sheetOpen, mount: $("remote-frame"), transport, scopes: SCOPES, start: "/", title: `Dashboard of ${state.labels.get(id) || "a workspace"}`,
     viewer: (v) => { if (isNeverPage(v?.path || "")) { state.refusal = NOT_REMOTE; notice(NOT_REMOTE); } else viewer.open(v); },
     download: viewer.download, fileName,
     notice: (n) => { if (n.text) notice(n.text); } });
@@ -140,8 +139,7 @@ async function start() {
   const state = { keys, spaces: [], labels: new Map(), paired: new Map(), selected: null, host: null, mailbox: null, refusal: null };
   await refresh(state);
   const q = new URLSearchParams(location.search).get("space");
-  const p = new URLSearchParams(location.search).get("path");
-  if (q && SPACE_ID.test(q)) await select(state, q, p && validPath(p) ? p : "/");
+  if (q && SPACE_ID.test(q)) await select(state, q);
   setInterval(() => { if (!document.hidden) refresh(state); }, REFRESH_MS);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(state); });
 }
