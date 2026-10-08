@@ -2,8 +2,7 @@
 // grouped by machine, with its state, what is happening, the needs-you count, paired devices and an Open or
 // Snapshot action. The server sends clear status only; names are sealed and opened here with MK, and every
 // string is drawn as text (el()/shown(), never innerHTML). It renders with every host off: state comes from
-// the server's clock and the counts from the synced ticket snapshot. ?open=<space> is the placeholder the
-// Open action goes to: the ticket snapshot for that workspace (the live view is a later ticket).
+// the server's clock and the counts from the synced ticket snapshot. Open (online) goes to /remote; Snapshot to ?open=<space>.
 import { api } from "./api.js";
 import { el, icon, shown } from "./ui.js";
 import { keysOrLogin, loadMirrors, signInAgain } from "./mirrors-data.js";
@@ -38,7 +37,7 @@ function rowEl(s, ctx) {
       : s.state === "online" || s.state === "not_answering" ? "Nothing reported running" : "No live data"),
     el("div", { class: "wrow-needs" }, needsEl(needsYou(s, ctx.rows))),
     el("span", { class: "wrow-devs hint" }, devicesText(ctx.devices)),
-    el("a", { class: s.state === "online" ? "btn btn-accent wrow-act" : "btn wrow-act", href: openHref(s.id),
+    el("a", { class: s.state === "online" ? "btn btn-accent wrow-act" : "btn wrow-act", href: openHref(s.id, s.state === "online"),
       "aria-label": `${actionFor(s)} ${s.label}` }, actionFor(s)));
 }
 
@@ -104,7 +103,7 @@ function renderOpen(state) {
   const seen = seenText(s, state.now);
   root.replaceChildren(back,
     el("div", { class: "wrow-state" }, pill(role, ic, text), seen ? el("span", { class: "hint" }, seen) : null),
-    el("p", { class: "hint" }, "This is the last synced snapshot of the tickets. The live view arrives in a later update."),
+    el("p", { class: "hint" }, "This is the last synced snapshot of the tickets."),
     state.rows === null ? el("p", { class: "banner banner-error", role: "alert" }, "Couldn't load the tickets.")
       : rows.length ? el("div", { class: "wgroup-rows" }, rows.map((r) => el("a", { class: "card ncard-link", href: `/t/${r.n}` },
         el("span", { class: "ncard-row" }, el("b", { class: "ncard-key" }, r.doc.id || r.id),

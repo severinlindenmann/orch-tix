@@ -54,4 +54,5 @@ test("Open while the host answers, Snapshot otherwise; the link carries only the
   assert.equal(actionFor(online), "Open");
   assert.equal(actionFor({ state: "lost" }), "Snapshot");
   assert.equal(openHref("a b"), "/workspaces?open=a%20b");
+  assert.equal(openHref("a b", true), "/remote?space=a%20b", "an online workspace opens the live dashboard");
 });

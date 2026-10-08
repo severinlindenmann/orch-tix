@@ -4,7 +4,7 @@
 // (remote-transport.js). Switching workspaces destroys the frame and its mailbox and builds new ones. A host that is
 // not answering is said in words; a refusal (a revoked browser, say) is shown as the fixed text for its code.
 import { api } from "./api.js";
-import { el, icon, shown, toast } from "./ui.js";
+import { el, icon, shown } from "./ui.js";
 import { keysOrLogin, signInAgain } from "./mirrors-data.js";
 import { openSpaceLabel } from "./mirror-crypto.js";
 import { mapLimit } from "./format.js";
@@ -17,9 +17,11 @@ import { deviceId } from "./bridge-crypto.js";
 import { hexToBytes } from "./crypto.js";
 import { createMailbox } from "./remote-mailbox.js";
 import { bridgeTransport } from "./remote-transport.js";
-import { SCOPES, canOpen, hostMessage } from "./remote-model.js";
+import { SCOPES, canOpen, fileName, hostMessage, HOST_SILENT } from "./remote-model.js";
+import { createViewer } from "./remote-view.js";
 
 const REFRESH_MS = 10_000;
+const CANCEL_GRACE_MS = 10_000;
 const $ = (id) => document.getElementById(id);
 
 export async function openSession(workspace) {
@@ -65,15 +67,17 @@ function render(state) {
 }
 
 function closeCurrent(state) {
-  state.host?.destroy();
-  state.mailbox?.close();
+  const mailbox = state.mailbox;
+  state.host?.destroy();                       // closes every stream: each one sends `cancel` to its computer
+  state.viewer?.close();
   state.host = state.mailbox = null;
+  if (mailbox) setTimeout(() => mailbox.close(), CANCEL_GRACE_MS);   // the cancels still need the mailbox to be answered
 }
 
 async function select(state, id) {
   closeCurrent(state);
   state.selected = id;
-  state.refusal = null;
+  state.refusal = state.hostNote = null;
   notice("");
   history.replaceState(null, "", `/remote?space=${id}`);
   const s = state.spaces.find((x) => x.id === id);
@@ -82,13 +86,18 @@ async function select(state, id) {
   if (!session || !canOpen(s, true)) { render(state); notice(session ? hostMessage(s?.state) : "This browser is not paired with this workspace."); return; }
   const mailbox = createMailbox(id);
   const transport = bridgeTransport({ session, mailbox, onRefusal: (code, text) => {
+    if (state.selected !== id) return;                       // a workspace we have left says nothing here
     state.refusal = text; notice(text);
     if (code === "not_paired") forgetWorkspace(id).then(() => { state.paired.set(id, false); render(state); }).catch(() => {});   // the host does not know us
+  }, onHost: (what, ms) => {
+    if (state.selected !== id) return;
+    state.hostNote = what === "lost" ? HOST_SILENT : what === "waiting" ? `Reconnecting to the computer in ${Math.ceil(ms / 1000)} s.` : null;
+    if (state.hostNote) notice(state.hostNote); else if (!state.refusal) notice("");
   } });
   state.mailbox = mailbox;
+  const viewer = state.viewer = createViewer($("remote-viewer"));
   state.host = createFrameHost({ mount: $("remote-frame"), transport, scopes: SCOPES, start: "/", title: `Dashboard of ${state.labels.get(id) || "a workspace"}`,
-    viewer: () => toast("Opening files from the dashboard comes later.", "info"),
-    download: () => toast("Downloads from the dashboard come later.", "info"),
+    viewer: viewer.open, download: viewer.download, fileName,
     notice: (n) => { if (n.text) notice(n.text); } });
   render(state);
 }
@@ -107,7 +116,7 @@ async function refresh(state) {
     state.spaces = pres.spaces;
     const sel = state.spaces.find((s) => s.id === state.selected);
     if (sel && sel.state !== "online") notice(hostMessage(sel.state));
-    else if (sel && !state.refusal) notice("");
+    else if (sel && !state.refusal && !state.hostNote) notice("");
     render(state);
   } catch (e) {
     if (e?.status === 401) return signInAgain();

@@ -12,9 +12,9 @@ and opens a paired, online one in this frame; the transport is `js/remote-transp
 every answer to the `pair` request is opened tag, pin, signature, then §7, and the pin is stored only after a verified
 `pending` answer whose fingerprint is the one this browser computed itself. Sign-out deletes the `fileshare-bridge`
 database (`js/bridge-wipe.js`). The reply's `page` flag is read from the host's signed reply meta (`page: true`), the
-one field this document asked the host to add. Not built: the unlock sheet and the WebAuthn ceremonies (R11), streams
-end to end against a real host, the viewer and download callbacks (they say "later"), a link from the status page to
-`/remote`. Not tested against the real orch dashboard (it lives in another repository); the test pages in
+one field this document asked the host to add. Streams now run end to end through the transport (below), a file or a
+download from the dashboard opens in the app's own preview (`js/remote-view.js`), and the status page's Open for an online
+workspace goes to `/remote?space=`. Not built: the unlock sheet and the WebAuthn ceremonies (R11). Not tested against the real orch dashboard (it lives in another repository); the test pages in
 `tests/browser/test_dash_frame.py` have its shape (R0 findings, orch-core#90 and #127), and `tests/browser/test_remote.py`
 drives the whole path against `tests/support/fake_bridge_host.py`, a host built on the Python reference implementation.
 
@@ -224,6 +224,44 @@ error pages, titles) are drawn as text; `tests/js/frame-scope.test.mjs` checks t
 `{method, path, headers, body, stream, signal}`; the implementation stops when `signal` aborts. A transport failure is a
 thrown `Error` whose message is shown as text. `fakeTransport(answer)` is the test fake. The real implementation follows
 redirects itself, reports the final path in `head.url`, and sets `head.page` from the host's signed reply.
+
+## What the frame host guarantees about streams
+
+For the dashboard's own code (the terminal page posts its keys while its stream is open, so this is what a typing lease
+needs from the device side). `js/frame-host.js` and `js/remote-transport.js` together:
+
+- **A stream the page opens stays open** until the page closes it, the page changes (`write`), the workspace is switched, the
+  computer ends it (`LAST`), the computer is lost, or a refusal ends it. Showing the terminal page does not close it, and
+  nothing the host does on its own does (the heartbeat rebuilds a frame that stopped answering, which is a page change).
+- **Frames reach the page in order**, each chunk as its own `sdata`; the shim joins chunks and splits coalesced ones into
+  events. A keepalive is not a frame. `LAST` ends the stream (`send`: the page's `EventSource` sees an error and is closed).
+- **`cancel` goes to the computer** whenever the page side lets go: `sclose`, a page change, a workspace switch (the old
+  mailbox is kept for 10 s so the cancel is answered), silence, or a consumer that is too slow. It is best effort and a
+  request of its own.
+- **Silence is 40 s.** The computer sends a keepalive at least every 20 s; no chunk at all for 40 s (two missed) says "The
+  computer did not answer", cancels and ends the stream. The next answer of any kind clears the note.
+- **Reconnects back off.** Every reconnect is a bridged request and the host's quota is about 1.1 requests a second. A new
+  stream for a path waits until 10 s after the previous one for that path started; each stream that dies young (under 60 s)
+  doubles the wait: 10, 20, 40, 60 s. One that lived a minute starts it over. A stream the page closed itself changes
+  nothing. The path is taken without its query string (64 paths are remembered), and once any stream has failed no stream
+  for any path opens less than 2 s after the previous one. The wait is shown ("Reconnecting to the computer in N s") and costs no request. The page's own reconnect code is
+  held to this too, because the gate is in the transport. A stream whose answer is not a 200 `text/event-stream` is cancelled at the
+  computer.
+- **After a refusal that ends a stream for good** (`revoked`, `not_paired`, `stopped`, `scope_changed`) this transport opens
+  no stream again (zero requests); the fixed text is shown. Other refusals (`busy`) are not final.
+- **Backpressure.** More than 256 chunks waiting for a consumer that is not reading drops the stream, cancels it and leaves
+  the reconnect to the back-off above.
+- **Keys for a terminal** (`POST /terminals/{name}/keys`, `{n, page, ...}`) are ordinary page requests from the dashboard's
+  script; the lease needs the stream the same device opened to be open when they go out, and the above keeps it open.
+
+## The viewer and the download
+
+`viewer` and `download` are `js/remote-view.js`. A file answer (not a tagged dashboard page) needs a gesture first
+(`frame-host.js`); a download is then shown in a question (name and size) and saved on its button. The viewer uses the file
+view's renderers (`render.js`): text through `textContent`, JSON as text, an image or audio file from a blob URL, Markdown
+as text (the renderer library belongs to the files page). **HTML and SVG are never shown**, by name or by type
+(`previewKind`); the person can only save them. The panel is headed "From the dashboard: <name>" and the download question shows the same sanitised name that is saved; an audio type is used only as a plain token. Caps: 2 MiB for text, 8 MiB for an image or audio file, which is also the
+frame host's whole answer cap and the download cap. Nothing of the file runs; the panel holds no script and no frame.
 
 ## Limits you should know
 

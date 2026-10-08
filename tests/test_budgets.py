@@ -19,8 +19,8 @@ FRAME_CSS = ["frame.css"]          # loaded by frame-host.js itself, so app.css 
 FRAME_JS_BUDGET = 72_000           # bytes, uncompressed (the scripts)
 # The Remote pages' glue (R10 wiring: the ceremony, the workspace list, the transport over the mailbox) is likewise its
 # own allowance; the tiny sign-out wipe (bridge-wipe.js) is counted here too.
-REMOTE_JS = ["bridge-wipe.js", "remote.js", "remote-mailbox.js", "remote-model.js", "remote-pair.js", "remote-pair-ui.js", "remote-transport.js"]
-REMOTE_JS_BUDGET = 32_000          # bytes, uncompressed
+REMOTE_JS = ["bridge-wipe.js", "remote.js", "remote-mailbox.js", "remote-model.js", "remote-pair.js", "remote-pair-ui.js", "remote-transport.js", "remote-view.js"]
+REMOTE_JS_BUDGET = 40_000          # bytes, uncompressed; was 32_000, raised by 8 kB for streams end to end (back-off, silence, cancel) and the viewer (R10 streams, #25)
 
 
 def test_the_offline_shell_stays_within_its_budget():

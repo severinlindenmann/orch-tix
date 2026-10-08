@@ -86,6 +86,7 @@
     "/static/js/remote-pair-ui.js",
     "/static/js/remote-pair.js",
     "/static/js/remote-transport.js",
+    "/static/js/remote-view.js",
     "/static/js/remote.js",
     "/static/js/render.js",
     "/static/js/sandbox-frame.js",
