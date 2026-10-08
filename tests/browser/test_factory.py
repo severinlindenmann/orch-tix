@@ -170,7 +170,7 @@ def test_the_workspace_card_says_the_factory_state(signed_in, base, make_host, w
     expect(card.locator(".wrow-factory")).to_have_count(1 if code == "waiting" and where == "/workspaces" else 0)
 
 
-def test_a_waiting_factory_links_to_its_page_in_the_frame(signed_in, base, make_host):
+def test_a_waiting_factory_links_to_its_page_in_the_frame(signed_in, base, make_host, authenticator):
     host = make_host(PAGES, requires())
     host._beat = False
     pair(signed_in, base, host)
@@ -183,7 +183,7 @@ def test_a_waiting_factory_links_to_its_page_in_the_frame(signed_in, base, make_
     assert "/sandbox/dash" in frame_of(signed_in).url
 
 
-def test_remote_opens_the_frame_at_a_valid_path_and_ignores_an_invalid_one(signed_in, base, make_host):
+def test_remote_opens_the_frame_at_a_valid_path_and_ignores_an_invalid_one(signed_in, base, make_host, authenticator):
     host = make_host(PAGES, requires())
     pair(signed_in, base, host)
     signed_in.goto(f"{base}/remote?space={host.space}&path=%2Fother")
