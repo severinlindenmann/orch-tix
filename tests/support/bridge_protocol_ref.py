@@ -1416,7 +1416,25 @@ def build() -> dict:
           pending={ch.hex(): {"device": dev_b.hex(), "expires_ms": expires}})
     acase("other_subject", assertion(challenge=assertion_challenge(ws, dev_a, rid, "fresh", "type", expires, nonce,
                                                                    {**subject, "shown": "Start epic E-13"})))
+    # The canonical JSON of {kind, shown, digest} is what is hashed: the device (JavaScript) must produce the same bytes as
+    # this reference for every text it can be given: astral characters, combining marks (NFC and NFD stay different), the
+    # separators U+2028 / U+2029 (JSON text, raw), escapes, DEL, and a lone surrogate (an error on both sides).
+    texts = {"astral": "run \U0001F600 now", "combining_nfd": "cafe\u0301", "nfc": "caf\u00e9", "line_separators": "a\u2028b\u2029c",
+             "escapes": 'say "hi"\\ \u001f\u007f/', "ascii_spaces": "if x:\n    run()", "mixed_scripts": "\u0430dmin \u4e2d\u6587 \U0001D11E",
+             "empty": ""}
+    cases = []
+    for name, t in texts.items():
+        sj = {"kind": "action", "shown": t, "digest": ""}
+        cases.append({"name": name, "shown": t, "subject_json": canonical_json(sj).decode(), "subject_hash": subject_hash(sj).hex()})
+    lone = {"lone_surrogate_json_text": '"a\\ud800b"', "host_refuses": True}
+    try:
+        clean_shown("a\ud800b")
+        lone["host_refuses"] = False
+    except ValueError:
+        pass
     out["assertion"] = {
+        "subject_cases": cases,
+        "subject_invalid": lone,
         "challenge_inputs": {"workspace": ws_hex, "device": dev_a.hex(), "rid": rid.hex(), "purpose": "fresh",
                              "scope": "type", "expires_ms": expires, "nonce": nonce.hex(), "subject": subject,
                              "subject_json": canonical_json(subject).decode(),

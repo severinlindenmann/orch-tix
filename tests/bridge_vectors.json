@@ -6935,6 +6935,60 @@
   }
  ],
  "assertion": {
+  "subject_cases": [
+   {
+    "name": "astral",
+    "shown": "run 😀 now",
+    "subject_json": "{\"digest\":\"\",\"kind\":\"action\",\"shown\":\"run 😀 now\"}",
+    "subject_hash": "0fd26d4137045c76449160b12e5ecbfa0295512b2c971487f299a05540511ae8"
+   },
+   {
+    "name": "combining_nfd",
+    "shown": "café",
+    "subject_json": "{\"digest\":\"\",\"kind\":\"action\",\"shown\":\"café\"}",
+    "subject_hash": "6e08e7ce5cdbd8575afc37e1f875581b766fc1b653864773d190be05324d95c2"
+   },
+   {
+    "name": "nfc",
+    "shown": "café",
+    "subject_json": "{\"digest\":\"\",\"kind\":\"action\",\"shown\":\"café\"}",
+    "subject_hash": "a452826c30d3a272ddc6b18cf47dffed336fd9050ad3bcefdba5c4c7477a4c6f"
+   },
+   {
+    "name": "line_separators",
+    "shown": "a b c",
+    "subject_json": "{\"digest\":\"\",\"kind\":\"action\",\"shown\":\"a b c\"}",
+    "subject_hash": "c180772e3fa8c48617b2782fcb558fe3673f758333031777da1a79586c245c7f"
+   },
+   {
+    "name": "escapes",
+    "shown": "say \"hi\"\\ \u001f/",
+    "subject_json": "{\"digest\":\"\",\"kind\":\"action\",\"shown\":\"say \\\"hi\\\"\\\\ \\u001f/\"}",
+    "subject_hash": "0ab0424a280b3f530450c908336483eee362cae49835c7c686ed9df62eb91698"
+   },
+   {
+    "name": "ascii_spaces",
+    "shown": "if x:\n    run()",
+    "subject_json": "{\"digest\":\"\",\"kind\":\"action\",\"shown\":\"if x:\\n    run()\"}",
+    "subject_hash": "1f4a6cc8990b72c4431c8b0bc344a1e11f388ecbd285bef6d9fe3d630ae63aab"
+   },
+   {
+    "name": "mixed_scripts",
+    "shown": "аdmin 中文 𝄞",
+    "subject_json": "{\"digest\":\"\",\"kind\":\"action\",\"shown\":\"аdmin 中文 𝄞\"}",
+    "subject_hash": "f1e705364042583d51e6369b34e3d94a836f578f64574bb3dfa2ed583ff84c05"
+   },
+   {
+    "name": "empty",
+    "shown": "",
+    "subject_json": "{\"digest\":\"\",\"kind\":\"action\",\"shown\":\"\"}",
+    "subject_hash": "5bc07d2b0077411eb87a99b1101b96ad597c76eb717181fa6929ed716e625007"
+   }
+  ],
+  "subject_invalid": {
+   "lone_surrogate_json_text": "\"a\\ud800b\"",
+   "host_refuses": true
+  },
   "challenge_inputs": {
    "workspace": "3e7afa7ff8e262a2b4d26f4442d0b890",
    "device": "8f7a92c06ffaacf8077bf2c7e764fdbd",

@@ -34,14 +34,26 @@ async function start() {
   show(el("h1", { class: "auth-title" }, "Pair this browser"),
     el("p", { class: "muted" }, "The computer will show a fingerprint. Only approve it there if it matches the one shown here."),
     el("label", { class: "field" }, el("span", {}, "Name"), label), go, state, fp, fpHelp);
+  const note = el("p", { class: "hint", id: "pair-cred-note", role: "status" });
+  fpHelp.after(note);
+  // The platform credential (Face ID, Touch ID, Windows Hello, device PIN) is made on the person's own click.
+  const click = (run, again) => new Promise((resolve, reject) => {
+    const t = setTimeout(() => { b.remove(); reject(Object.assign(new Error("not clicked in time"), { name: "TimeoutError" })); }, 300_000);
+    const b = el("button", { class: "btn btn-accent", type: "button", id: "pair-cred", onclick: (e) => { if (!e.isTrusted) return; clearTimeout(t); b.remove(); try { resolve(run()); } catch (err) { reject(err); } } },
+      again ? "Try again: register this browser" : "Register this browser with Face ID or device unlock");
+    note.textContent = again ? "That took too long. Press the button again." : "This lets you confirm risky actions on this browser. It is not your passphrase and is not stored by TIX.";
+    note.after(b);
+  });
   go.addEventListener("click", async () => {
     go.disabled = label.disabled = true;
     try {
-      const r = await runPairing({ link, label: label.value.trim() || "This browser",
+      const r = await runPairing({ link, label: label.value.trim() || "This browser", click,
+        onCredential: (t) => { note.textContent = t; },
         onState: (t) => { state.textContent = t; },
         onFingerprint: (t) => { fp.textContent = t; fp.hidden = fpHelp.hidden = false; } });
       if (r.approved) {
         show(el("h1", { class: "auth-title" }, "Paired"), el("p", { class: "muted" }, "This browser can now open the workspace."),
+          el("p", { class: "hint", id: "pair-done-cred" }, r.credential ? "Risky actions are confirmed with Face ID or device unlock on this browser." : "No device unlock is registered here, so this browser cannot type on that computer."),
           el("a", { class: "btn btn-accent", href: "/remote" }, "Open workspaces"));
       } else {
         state.textContent = r.why;
